@@ -1,4 +1,4 @@
-use crate::data::DataTable;
+﻿use crate::data::DataTable;
 use crate::output::OutputTable;
 use crate::stats;
 use eframe::egui;
@@ -476,7 +476,7 @@ impl eframe::App for StateCraftApp {
                             ui.label("Unicode: ON");
                             ui.separator();
                             ui.label(
-                                egui::RichText::new("✔")
+                                egui::RichText::new("âœ”")
                                     .color(egui::Color32::from_rgb(0x1E, 0x9E, 0x3A)),
                             );
                             ui.label("StateCraft Statistics Processor is ready");
@@ -809,27 +809,38 @@ fn spss_grid(
                         if row_sel { rownum_sel_text } else { rownum_text },
                     );
                     if let Some(t) = table.as_deref() {
-                        for (j, &ci) in vis_cols.iter().enumerate() {
+                        for j in 0..total_cols {
                             let r = cell_rect(j, 1.0);
-                            let selected = sel_cell.as_ref() == Some(&(ci, di));
-                            p.rect_filled(
-                                r,
-                                0.0,
-                                if selected { sel_fill } else { cell_fill },
-                            );
-                            if selected {
-                                p.rect_stroke(r, 0.0, sel_stroke);
+                            // real cell (with its data) or empty placeholder block under a `var` header
+                            if j < n_real {
+                                let ci = vis_cols[j];
+                                let selected = sel_cell.as_ref() == Some(&(ci, di));
+                                p.rect_filled(
+                                    r,
+                                    0.0,
+                                    if selected { sel_fill } else { cell_fill },
+                                );
+                                if selected {
+                                    p.rect_stroke(r, 0.0, sel_stroke);
+                                }
+                                let c = &t.columns[ci];
+                                let (anchor, px) = match c.meta.align {
+                                    crate::data::VarAlign::Right => (egui::Align2::RIGHT_CENTER, r.right() - 6.0),
+                                    crate::data::VarAlign::Center => (egui::Align2::CENTER_CENTER, r.center().x),
+                                    crate::data::VarAlign::Left => (egui::Align2::LEFT_CENTER, r.left() + 6.0),
+                                };
+                                let txt = t.cell_text(ci, di);
+                                if !txt.is_empty() {
+                                    p.text(egui::pos2(px, mid_y), anchor, txt, font.clone(), value_text);
+                                }
+                            } else {
+                                p.rect_filled(r, 0.0, cell_fill);
                             }
-                            let c = &t.columns[ci];
-                            let (anchor, px) = match c.meta.align {
-                                crate::data::VarAlign::Right => (egui::Align2::RIGHT_CENTER, r.right() - 6.0),
-                                crate::data::VarAlign::Center => (egui::Align2::CENTER_CENTER, r.center().x),
-                                crate::data::VarAlign::Left => (egui::Align2::LEFT_CENTER, r.left() + 6.0),
-                            };
-                            let txt = t.cell_text(ci, di);
-                            if !txt.is_empty() {
-                                p.text(egui::pos2(px, mid_y), anchor, txt, font.clone(), value_text);
-                            }
+                        }
+                    } else {
+                        // no data yet: SPSS still shows the empty gray cell grid
+                        for j in 0..total_cols {
+                            p.rect_filled(cell_rect(j, 1.0), 0.0, cell_fill);
                         }
                     }
                 }
@@ -1195,6 +1206,7 @@ pub fn run(initial_path: Option<String>) -> eframe::Result<()> {
             let mut app = StateCraftApp::default();
             if let Some(p) = initial_path {
                 app.path_input = p;
+                app.load();
             }
             Ok(Box::new(app))
         }),
