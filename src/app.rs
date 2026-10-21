@@ -34,6 +34,8 @@ pub struct StatsCraftApp {
     pub show_syntax_window: bool,
     /// Phase 5: the open procedure dialog, if any.
     pub dialog: Option<crate::dialog::DialogState>,
+    /// Phase 10: the open Missing Values dialog, if any.
+    pub missing_dialog: Option<crate::dialog::MissingValues>,
     /// Whether the dark theme is active.
     pub dark: bool,
     /// The egui context, so the theme can be re-applied when it
@@ -61,6 +63,7 @@ impl Default for StatsCraftApp {
             show_output_window: false,
             show_syntax_window: false,
             dialog: None,
+            missing_dialog: None,
             dark: false,
             // A placeholder context, replaced when the app is created.
             // The theme is applied to the real one there.
@@ -253,6 +256,103 @@ impl StatsCraftApp {
         t.headers = headers;
         t.rows = rows;
         self.status = "Table pivoted: the row and column dimensions were exchanged.".to_string();
+    }
+
+    /// Add a case at the end of the data, as SPSS's "Add Cases" does.
+    pub fn add_case(&mut self) {
+        let Some(t) = self.table.as_mut() else {
+            self.status = "No data loaded.".to_string();
+            return;
+        };
+        let row = t.add_case();
+        self.sel_cell = Some((0, row));
+        self.status = format!("Added case {}.", row + 1);
+    }
+
+    /// Delete the selected case.
+    pub fn delete_case(&mut self) {
+        let Some((_, row)) = self.sel_cell else {
+            self.status = "Select a case first.".to_string();
+            return;
+        };
+        let Some(t) = self.table.as_mut() else {
+            self.status = "No data loaded.".to_string();
+            return;
+        };
+        if t.delete_case(row) {
+            self.status = format!("Deleted case {}.", row + 1);
+            // The selection moves to the case that took its place.
+            let last = t.n_rows.saturating_sub(1);
+            self.sel_cell = Some((0, row.min(last)));
+        }
+    }
+
+    /// Copy the selected cell to the clipboard.
+    pub fn copy_cell(&mut self, _ctx: &egui::Context) {
+        let Some((col, row)) = self.sel_cell else {
+            self.status = "Select a cell first.".to_string();
+            return;
+        };
+        let Some(t) = self.table.as_ref() else {
+            self.status = "No data loaded.".to_string();
+            return;
+        };
+        let text = t.cell_text(col, row);
+        match arboard::Clipboard::new().and_then(|mut c| c.set_text(text.clone())) {
+            Ok(()) => self.status = format!("Copied '{}'.", text),
+            Err(e) => self.status = format!("Could not copy: {}", e),
+        }
+    }
+
+    /// Paste the clipboard into the grid, at the selected cell.
+    ///
+    /// One line pastes one cell; a block of lines pastes a column of
+    /// values down the selected column, which is what a spreadsheet
+    /// copy gives.
+    pub fn paste_cell(&mut self, ctx: &egui::Context) {
+        let Some((col, row)) = self.sel_cell else {
+            self.status = "Select a cell first.".to_string();
+            return;
+        };
+        let text = match arboard::Clipboard::new().and_then(|mut c| c.get_text()) {
+            Ok(t) => t,
+            Err(e) => {
+                self.status = format!("Could not read the clipboard: {}", e);
+                return;
+            }
+        };
+        if text.trim().is_empty() {
+            self.status = "The clipboard is empty.".to_string();
+            return;
+        }
+        let Some(t) = self.table.as_mut() else {
+            self.status = "No data loaded.".to_string();
+            return;
+        };
+        let pasted = t.paste_text(col, row, &text);
+        self.status = format!("Pasted {} row(s).", pasted);
+    }
+
+    /// Define the missing values of a numeric variable.
+    ///
+    /// The values can be a list of discrete values or a range, and the
+    /// procedures then leave them out.
+    pub fn define_missing_values(&mut self, col: usize, discrete: &[f64], range: Option<(f64, f64)>) {
+        let Some(t) = self.table.as_mut() else {
+            self.status = "No data loaded.".to_string();
+            return;
+        };
+        if t.define_user_missing(col, discrete, range) {
+            let name = t.columns[col].name.clone();
+            self.status = match range {
+                Some((lo, hi)) => {
+                    format!("{}: {} to {} is now missing.", name, lo, hi)
+                }
+                None => format!("{}: {} value(s) are now missing.", name, discrete.len()),
+            };
+        } else {
+            self.status = "Missing values can only be defined for a numeric variable.".to_string();
+        }
     }
 
     /// Save the data as an SPSS .sav file.
@@ -692,6 +792,24 @@ impl eframe::App for StatsCraftApp {
         // ---- Phase 5: the open procedure dialog ----
         // SPSS opens a modal dialog for every procedure. We draw it in the
         // main window so the Data Editor stays visible behind it.
+        // ---- Phase 10: the Missing Values dialog ----
+        if self.missing_dialog.is_some() {
+            let mut mv = self.missing_dialog.take().expect("the dialog is present");
+            crate::dialog::show_missing(ctx, self, &mut mv);
+            if let Some((variable, discrete, range)) = mv.confirmed.clone() {
+                if let Some(col) = self
+                    .table
+                    .as_ref()
+                    .and_then(|t| t.column_index(&variable))
+                {
+                    self.define_missing_values(col, &discrete, range);
+                }
+            } else {
+                // The dialog was closed without a decision, so it goes
+                // back as it was.
+                self.missing_dialog = Some(mv);
+            }
+        }
         if self.dialog.is_some() {
             // Take the dialog out of the app while it draws, so the dialog
             // can hold a mutable borrow of the app without aliasing.
@@ -870,11 +988,13 @@ impl eframe::App for StatsCraftApp {
                         }
                         if crate::icon::menu_item(ui, crate::theme::Icon::Copy, "Copy").clicked() {
                             ui.close_menu();
-                            self.status = "Copy: not implemented yet.".to_string();
+                            let ctx = ui.ctx().clone();
+                            self.copy_cell(&ctx);
                         }
                         if crate::icon::menu_item(ui, crate::theme::Icon::Paste, "Paste").clicked() {
                             ui.close_menu();
-                            self.status = "Paste: not implemented yet.".to_string();
+                            let ctx = ui.ctx().clone();
+                            self.paste_cell(&ctx);
                         }
                     });
                     // ---------------- View ----------------
@@ -912,6 +1032,21 @@ impl eframe::App for StatsCraftApp {
                         if crate::icon::menu_item(ui, crate::theme::Icon::Settings, "Define Variable Properties…").clicked() {
                             ui.close_menu();
                             self.view = View::Variables;
+                        }
+                        ui.separator();
+                        // The case-level editing, as SPSS's Data menu
+                        // has it.
+                        if crate::icon::menu_item(ui, crate::theme::Icon::InsertCase, "Add Cases").clicked() {
+                            ui.close_menu();
+                            self.add_case();
+                        }
+                        if crate::icon::menu_item(ui, crate::theme::Icon::DeleteCase, "Delete Cases…").clicked() {
+                            ui.close_menu();
+                            self.delete_case();
+                        }
+                        if crate::icon::menu_item(ui, crate::theme::Icon::ValueLabels, "Define Missing Values…").clicked() {
+                            ui.close_menu();
+                            self.missing_dialog = Some(crate::dialog::MissingValues::default());
                         }
                         ui.separator();
                         ui.menu_button("Sort Cases", |ui| {
@@ -1801,6 +1936,37 @@ mod tests {
         assert!(s.contains("<td class=\"num\">1.5</td>"), "numeric right-aligned");
         assert!(s.contains("<p class=\"note\">n</p>"), "note rendered");
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_case_can_be_added_and_deleted_from_the_app() {
+        let mut app = StatsCraftApp::default();
+        app.table = Some(crate::data::DataTable {
+            n_rows: 2,
+            columns: vec![crate::data::Column {
+                name: "x".into(),
+                kind: crate::data::ColumnKind::Numeric,
+                values: vec![
+                    crate::data::Value::Number(1.0),
+                    crate::data::Value::Number(2.0),
+                ],
+                meta: crate::data::VariableMeta::default_for(
+                    crate::data::ColumnKind::Numeric,
+                ),
+            }],
+        });
+        // The new case is at the end, and the selection moves to it.
+        app.add_case();
+        assert_eq!(app.table.as_ref().unwrap().n_rows, 3);
+        assert_eq!(app.sel_cell, Some((0, 2)));
+        // Deleting it takes the case away again.
+        app.delete_case();
+        assert_eq!(app.table.as_ref().unwrap().n_rows, 2);
+        // Deleting with nothing selected is refused.
+        app.sel_cell = None;
+        app.delete_case();
+        assert_eq!(app.table.as_ref().unwrap().n_rows, 2);
+        assert!(app.status.contains("Select a case"));
     }
 
     #[test]

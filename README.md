@@ -26,6 +26,10 @@ The UI is a modern take on the SPSS workbench, not a pixel copy of it:
 - **App icon** — a rounded square in the Dracula background with three
   ascending bars and a rising plot line, embedded in the executable, in
   the installer and in the Start Menu shortcut.
+- **The Data Editor edits** — cases can be added and deleted, cells and
+  blocks of cells copied and pasted, and a variable's **missing values**
+  declared as discrete values or as a range, which every procedure then
+  leaves out.
 - **Chrome** — rounded cards, soft shadows, zebra-striped grid, pill-shaped
   document tabs, hairline borders, and a proper primary button for *Run Syntax*.
 
@@ -161,6 +165,11 @@ the analysis pipeline.
 
 The `.sav` writer is covered by a round-trip test: write the table, read it
 back, and check the variables, the rows and the values match.
+
+The Data Editor's editing is covered too: adding and deleting cases, the
+shift of the cases after a deletion, pasting a block of values across the
+columns, and the missing values of a variable — both the discrete values and
+the range.
 
 ## Reference behavior
 UI structure, menus, and analysis flow are cloned from IBM SPSS Statistics

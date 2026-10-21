@@ -76,6 +76,12 @@ pub struct VariableMeta {
     pub text_value_labels: Vec<(String, String)>,
     /// User-defined discrete missing values (numeric).
     pub user_missing: Vec<f64>,
+    /// A user-defined range of missing values, if there is one.
+    ///
+    /// The discrete values and the range are kept apart, because two
+    /// discrete values and a range of two are different things, and
+    /// SPSS's dialog asks which one is meant.
+    pub user_missing_range: Option<(f64, f64)>,
     pub measure: Measure,
     pub align: VarAlign,
     /// "Columns" (display width) in Variable View.
@@ -93,6 +99,7 @@ impl VariableMeta {
             value_labels: Vec::new(),
             text_value_labels: Vec::new(),
             user_missing: Vec::new(),
+            user_missing_range: None,
             measure: Measure::default_for(kind),
             align: VarAlign::default_for(kind),
             columns_width: 8,
@@ -112,10 +119,23 @@ pub struct Column {
 
 impl Column {
     /// System- or user-missing?
+    ///
+    /// A single declared value is one discrete missing value; a pair
+    /// of them is the ends of a range, which is how SPSS stores it.
     pub fn is_missing(&self, row: usize) -> bool {
         match self.values.get(row) {
             Some(Value::Missing) => true,
-            Some(Value::Number(n)) => self.meta.user_missing.contains(n),
+            Some(Value::Number(n)) => {
+                if self.meta.user_missing.iter().any(|&v| v == *n) {
+                    return true;
+                }
+                // A range of missing values.
+                if let Some((lo, hi)) = self.meta.user_missing_range {
+                    let (lo, hi) = (lo.min(hi), lo.max(hi));
+                    return *n >= lo && *n <= hi;
+                }
+                false
+            }
             _ => false,
         }
     }
@@ -396,6 +416,178 @@ impl DataTable {
         true
     }
 
+    /// Add a case at the end of the table.
+    ///
+    /// SPSS's "Add Cases" adds empty cases at the end; the new case
+    /// holds the system-missing value in every column.
+    pub fn add_case(&mut self) -> usize {
+        for c in self.columns.iter_mut() {
+            c.values.push(Value::Missing);
+        }
+        self.n_rows += 1;
+        self.n_rows - 1
+    }
+
+    /// Add a number of cases at the end of the table.
+    pub fn add_cases(&mut self, count: usize) -> usize {
+        for _ in 0..count {
+            self.add_case();
+        }
+        self.n_rows.saturating_sub(1)
+    }
+
+    /// Delete a case.
+    ///
+    /// The values of every column are shifted up, and the last one is
+    /// dropped, so the columns stay the same length.
+    pub fn delete_case(&mut self, row: usize) -> bool {
+        if row >= self.n_rows {
+            return false;
+        }
+        for c in self.columns.iter_mut() {
+            if row < c.values.len() {
+                c.values.remove(row);
+            }
+        }
+        self.n_rows = self.n_rows.saturating_sub(1);
+        true
+    }
+
+    /// Set a cell's value, parsing it the way the column's kind
+    /// requires.
+    ///
+    /// A numeric column takes a number; an empty entry is the
+    /// system-missing value. A string column takes the text as it is.
+    pub fn set_cell(&mut self, col: usize, row: usize, text: &str) -> bool {
+        let Some(c) = self.columns.get_mut(col) else {
+            return false;
+        };
+        if row >= c.values.len() {
+            return false;
+        }
+        let t = text.trim();
+        let v = match c.kind {
+            ColumnKind::Numeric => {
+                if t.is_empty() {
+                    Value::Missing
+                } else {
+                    match t.parse::<f64>() {
+                        Ok(n) => Value::Number(n),
+                        // A value that is not a number is not a
+                        // missing value; it is rejected, as SPSS
+                        // rejects it.
+                        Err(_) => return false,
+                    }
+                }
+            }
+            _ => {
+                if t.is_empty() {
+                    Value::Missing
+                } else {
+                    Value::Text(text.to_string())
+                }
+            }
+        };
+        c.values[row] = v;
+        true
+    }
+
+    /// The value of a cell, for the clipboard.
+    pub fn cell_value(&self, col: usize, row: usize) -> Option<&Value> {
+        self.columns.get(col).and_then(|c| c.values.get(row))
+    }
+
+    /// Copy a rectangle of cells as tab-separated text, the way a
+    /// spreadsheet does.
+    pub fn copy_rectangle(&self, col0: usize, row0: usize, cols: usize, rows: usize) -> String {
+        let mut out = String::new();
+        for r in row0..(row0 + rows).min(self.n_rows) {
+            for c in col0..(col0 + cols).min(self.columns.len()) {
+                if c > col0 {
+                    out.push('\t');
+                }
+                out.push_str(&self.cell_text(c, r));
+            }
+            if r + 1 < (row0 + rows).min(self.n_rows) {
+                out.push('\n');
+            }
+        }
+        out
+    }
+
+    /// Paste tab-separated text into the grid, starting at the given
+    /// cell.
+    ///
+    /// The number of cases is grown if the pasted block is taller than
+    /// the table, which is what SPSS does.
+    pub fn paste_text(&mut self, col0: usize, row0: usize, text: &str) -> usize {
+        let mut pasted = 0;
+        for (i, line) in text.lines().enumerate() {
+            let row = row0 + i;
+            if row >= self.n_rows {
+                self.add_case();
+            }
+            for (j, cell) in line.split('\t').enumerate() {
+                let col = col0 + j;
+                if col >= self.columns.len() {
+                    break;
+                }
+                // A cell that will not take the value is left alone,
+                // and the paste carries on.
+                self.set_cell(col, row, cell);
+            }
+            pasted += 1;
+        }
+        pasted
+    }
+
+    /// Define the user-missing values of a numeric variable.
+    ///
+    /// SPSS's "Missing" dialog takes either a list of discrete values
+    /// or a range, and the values that fall in them are treated as
+    /// missing by every procedure.
+    pub fn define_user_missing(
+        &mut self,
+        col: usize,
+        discrete: &[f64],
+        range: Option<(f64, f64)>,
+    ) -> bool {
+        let Some(c) = self.columns.get_mut(col) else {
+            return false;
+        };
+        if c.kind != ColumnKind::Numeric {
+            return false;
+        }
+        c.meta.user_missing = discrete.to_vec();
+        c.meta.user_missing_range = range.map(|(lo, hi)| {
+            if lo <= hi {
+                (lo, hi)
+            } else {
+                (hi, lo)
+            }
+        });
+        true
+    }
+
+    /// The values of a numeric variable that the user has declared
+    /// missing.
+    ///
+    /// A list of more than two values is a set of discrete values; a
+    /// pair is the ends of a range.
+    pub fn is_user_missing(&self, col: usize, value: f64) -> bool {
+        let Some(c) = self.columns.get(col) else {
+            return false;
+        };
+        if c.meta.user_missing.iter().any(|&v| v == value) {
+            return true;
+        }
+        if let Some((lo, hi)) = c.meta.user_missing_range {
+            let (lo, hi) = (lo.min(hi), lo.max(hi));
+            return value >= lo && value <= hi;
+        }
+        false
+    }
+
     pub fn cell_text(&self, col: usize, row: usize) -> String {
         match self.columns.get(col) {
             Some(c) => match c.values.get(row) {
@@ -671,6 +863,121 @@ mod tests {
         }
         let _ = std::fs::remove_file(&sav);
     }
+    /// A small table to edit: two numeric columns and a string one.
+    fn editable() -> DataTable {
+        DataTable {
+            n_rows: 3,
+            columns: vec![
+                Column {
+                    name: "x".into(),
+                    kind: ColumnKind::Numeric,
+                    values: vec![Value::Number(1.0), Value::Number(2.0), Value::Number(3.0)],
+                    meta: VariableMeta::default_for(ColumnKind::Numeric),
+                },
+                Column {
+                    name: "g".into(),
+                    kind: ColumnKind::String,
+                    values: vec![Value::Text("A".into()), Value::Text("B".into()), Value::Text("A".into())],
+                    meta: VariableMeta::default_for(ColumnKind::String),
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn a_case_can_be_added_and_deleted() {
+        let mut t = editable();
+        let row = t.add_case();
+        assert_eq!(row, 3);
+        assert_eq!(t.n_rows, 4);
+        // The new case is missing in every column.
+        assert!(matches!(t.columns[0].values[3], Value::Missing));
+        assert!(matches!(t.columns[1].values[3], Value::Missing));
+        // Deleting it takes the table back to three cases.
+        assert!(t.delete_case(3));
+        assert_eq!(t.n_rows, 3);
+        assert!(!t.delete_case(99));
+    }
+
+    #[test]
+    fn deleting_a_case_shifts_the_others_up() {
+        let mut t = editable();
+        t.delete_case(0);
+        assert_eq!(t.n_rows, 2);
+        // The first case is now the old second one.
+        assert_eq!(t.cell_text(0, 0), "2");
+        assert_eq!(t.columns[0].values.len(), 2);
+    }
+
+    #[test]
+    fn a_cell_takes_the_value_of_its_column_kind() {
+        let mut t = editable();
+        assert!(t.set_cell(0, 0, "42"));
+        assert_eq!(t.cell_text(0, 0), "42");
+        // An empty entry is the system-missing value.
+        assert!(t.set_cell(0, 0, ""));
+        assert!(matches!(t.columns[0].values[0], Value::Missing));
+        // A string column takes the text as it is.
+        assert!(t.set_cell(1, 0, "hello"));
+        assert_eq!(t.cell_text(1, 0), "hello");
+        // A value that is not a number is rejected in a numeric column.
+        assert!(!t.set_cell(0, 0, "abc"));
+    }
+
+    #[test]
+    fn text_is_pasted_into_the_grid() {
+        let mut t = editable();
+        // A block of values, as a spreadsheet would give.
+        let pasted = t.paste_text(0, 0, "10\n20\n30");
+        assert_eq!(pasted, 3);
+        assert_eq!(t.cell_text(0, 0), "10");
+        assert_eq!(t.cell_text(0, 2), "30");
+        // A paste that is taller than the table grows it.
+        let pasted = t.paste_text(0, 2, "40\n50\n60\n70");
+        assert_eq!(pasted, 4);
+        assert_eq!(t.n_rows, 6);
+        assert_eq!(t.cell_text(0, 5), "70");
+    }
+
+    #[test]
+    fn a_tab_separated_block_pastes_across_the_columns() {
+        let mut t = editable();
+        t.paste_text(0, 0, "7\tQ");
+        assert_eq!(t.cell_text(0, 0), "7");
+        assert_eq!(t.cell_text(1, 0), "Q");
+    }
+
+    #[test]
+    fn the_missing_values_of_a_variable_are_declared() {
+        // The column holds 1.0, 2.0 and 3.0, in rows 0, 1 and 2.
+        let mut t = editable();
+        // A range: the two ends of it.
+        assert!(t.define_user_missing(0, &[], Some((2.0, 3.0))));
+        assert!(t.is_user_missing(0, 1.0) == false, "1 is below the range");
+        assert!(t.is_user_missing(0, 2.0), "2 is in the range");
+        assert!(t.is_user_missing(0, 3.0), "3 is in the range");
+        assert!(!t.is_user_missing(0, 4.0), "4 is above the range");
+        // The rows of the column are then missing, so the procedures
+        // leave them out.
+        assert!(!t.is_missing(0, 0), "the first case is not missing");
+        assert!(t.is_missing(0, 1), "the second case is in the range");
+        assert!(t.is_missing(0, 2), "the third case is in the range");
+        // Discrete values.
+        assert!(t.define_user_missing(0, &[1.0, 3.0], None));
+        assert!(t.is_user_missing(0, 1.0));
+        assert!(!t.is_user_missing(0, 2.0));
+        assert!(t.is_user_missing(0, 3.0));
+        // A string variable cannot have missing values declared.
+        assert!(!t.define_user_missing(1, &[1.0], None));
+    }
+
+    #[test]
+    fn a_rectangle_of_cells_is_copied_as_text() {
+        let mut t = editable();
+        let text = t.copy_rectangle(0, 0, 2, 2);
+        assert_eq!(text, "1\tA\n2\tB");
+    }
+
 }
 
 /// ---------------------------------------------------------------------------
@@ -784,4 +1091,8 @@ pub fn write_sav(table: &DataTable, path: &std::path::Path) -> Result<(), String
     writer
         .write_df(&df)
         .map_err(|e| format!("write {}: {}", path.display(), e))
+
+
+
+
 }

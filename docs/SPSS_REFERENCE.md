@@ -676,3 +676,43 @@ as 5.63. The difference is visible in a table of expected counts, so
 The HTML export writes a pivot table as itself — the spanning header,
 the measures, the corner cell — so the structure survives the export
 rather than being flattened away.
+
+## 12. Phase 10 — the Data Editor's editing
+
+### 12.1 The cases
+
+The Data Editor can now change the data the way SPSS's does:
+
+- **Add Cases** — a case is added at the end, missing in every column.
+- **Delete Cases** — the selected case is removed and the others shift
+  up, so the columns keep their length.
+- **Copy and Paste** — the selected cell is copied to the system
+  clipboard, and the clipboard is pasted into the grid at the selected
+  cell. A block of lines pastes a column of values down the column,
+  and a block of tab-separated lines pastes across the columns, which
+  is what a copy from a spreadsheet gives. A paste that is taller than
+  the table grows it.
+- **Sort Cases** — already there, through the syntax runner, so the
+  sort goes through the same path as everything else.
+
+egui can write the clipboard but not read it, so the read side uses
+the `arboard` crate.
+
+### 12.2 The missing values
+
+**Data ▸ Define Missing Values…** is a new dialog: the variable, the
+two ways of declaring the values, and the action row, in the same
+shape as SPSS's.
+
+The declaration is kept as two separate things — the **discrete
+values** and the **range** — because two discrete values and a range
+of two are different things, and SPSS's dialog asks which one is
+meant. The metadata carries both:
+
+```rust
+pub user_missing: Vec<f64>,
+pub user_missing_range: Option<(f64, f64)>,
+```
+
+A case whose value falls in either is missing, and every procedure
+leaves it out, exactly as it leaves out the system-missing value.

@@ -420,6 +420,7 @@ pub mod icons {
         glm => "glm",
         means => "means",
         explore => "explore",
+        delete_case => "delete_case",
     );
 }
 
@@ -466,6 +467,8 @@ pub enum Icon {
     Means,
     /// The explore procedure.
     Explore,
+    /// A row with a cross through it — deleting a case.
+    DeleteCase,
 }
 
 impl Icon {
@@ -506,6 +509,7 @@ impl Icon {
             Icon::Glm => icons::glm,
             Icon::Means => icons::means,
             Icon::Explore => icons::explore,
+            Icon::DeleteCase => icons::delete_case,
         }
     }
 
@@ -546,6 +550,7 @@ impl Icon {
             Icon::Glm => "General Linear Model",
             Icon::Means => "Means",
             Icon::Explore => "Explore",
+            Icon::DeleteCase => "Delete Cases",
         }
     }
 }
@@ -655,6 +660,7 @@ mod tests {
             (Icon::Refresh, icons::refresh),
             (Icon::Settings, icons::settings),
             (Icon::Check, icons::check),
+            (Icon::DeleteCase, icons::delete_case),
         ];
         for (icon, bytes) in all {
             let svg = String::from_utf8(bytes.to_vec()).expect("icon is utf-8");

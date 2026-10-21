@@ -20,6 +20,10 @@ polars = { version = "0.53", features = ["csv"] }
 polars-readstat-rs = "0.21"
 egui_extras = { version = "0.29", features = ["image", "svg"] }
 
+# The system clipboard, for copying and pasting cells in the Data
+# Editor. egui can write the clipboard but not read it.
+arboard = "3.7"
+
 # Parsing / scripting
 # pest = "2.7"
 # pest_derive = "2.7"

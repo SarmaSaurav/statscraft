@@ -1331,3 +1331,161 @@ mod tests {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// The Missing Values dialog
+//
+// This is not a procedure dialog - it changes a variable's properties
+// rather than running an analysis - so it has its own state and its
+// own window.
+// ---------------------------------------------------------------------------
+
+/// The state of the "Missing Values" dialog.
+#[derive(Debug, Clone, Default)]
+pub struct MissingValues {
+    /// The variable the values are for.
+    pub variable: Option<String>,
+    /// The discrete values, as typed.
+    pub discrete: String,
+    /// The ends of the range, as typed.
+    pub range_lo: String,
+    pub range_hi: String,
+    /// Whether the range is used rather than the discrete values.
+    pub use_range: bool,
+    /// Set when the user pressed OK.
+    pub confirmed: Option<(String, Vec<f64>, Option<(f64, f64)>)>,
+}
+
+impl MissingValues {
+    /// The discrete values, parsed.
+    pub fn discrete_values(&self) -> Vec<f64> {
+        self.discrete
+            .split(|c: char| c == ',' || c.is_whitespace() || c == ';')
+            .filter(|s| !s.is_empty())
+            .filter_map(|s| s.trim().parse::<f64>().ok())
+            .collect()
+    }
+
+    /// The range, parsed.
+    pub fn range(&self) -> Option<(f64, f64)> {
+        let lo = self.range_lo.trim().parse::<f64>().ok()?;
+        let hi = self.range_hi.trim().parse::<f64>().ok()?;
+        Some((lo, hi))
+    }
+}
+
+/// Draw the "Missing Values" dialog.
+///
+/// The window is the same shape as SPSS's: the variable, the two ways
+/// of declaring the values, and the action row.
+pub fn show_missing(ctx: &egui::Context, app: &mut StatsCraftApp, mv: &mut MissingValues) {
+    let mut open = true;
+    let title = "Missing Values - StatsCraft".to_string();
+    egui::Window::new(title)
+        .open(&mut open)
+        .resizable(false)
+        .default_width(440.0)
+        .default_height(330.0)
+        // The window opens clear of the menu bar, the way SPSS's
+        // dialogs do.
+        .default_pos(egui::pos2(420.0, 190.0))
+        .show(ctx, |ui| {
+            render_missing(ui, app, mv);
+        });
+    if !open && mv.confirmed.is_none() {
+        // The X or Cancel: no decision.
+    }
+}
+
+/// The body of the "Missing Values" dialog, split out so a test can
+/// drive it without a window.
+pub fn render_missing(ui: &mut egui::Ui, app: &mut StatsCraftApp, mv: &mut MissingValues) {
+    use crate::theme;
+
+    // The numeric variables: only a numeric variable can have missing
+    // values declared.
+    let numeric: Vec<String> = app
+        .table
+        .as_ref()
+        .map(|t| {
+            t.columns
+                .iter()
+                .filter(|c| c.kind == ColumnKind::Numeric)
+                .map(|c| c.name.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if numeric.is_empty() {
+        ui.label(
+            egui::RichText::new("No numeric variables in the data.")
+                .color(theme::text_muted()),
+        );
+        ui.add_space(8.0);
+        if ui.button("Cancel").clicked() {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        return;
+    }
+
+    // The variable.
+    ui.label(egui::RichText::new("Variable:").strong());
+    if mv.variable.is_none() || !numeric.contains(mv.variable.as_ref().unwrap()) {
+        mv.variable = Some(numeric[0].clone());
+    }
+    egui::ComboBox::from_id_salt("missing_var")
+        .selected_text(mv.variable.clone().unwrap_or_default())
+        .show_ui(ui, |ui| {
+            for name in &numeric {
+                let selected = mv.variable.as_deref() == Some(name.as_str());
+                if ui.selectable_label(selected, name).clicked() {
+                    mv.variable = Some(name.clone());
+                }
+            }
+        });
+    ui.add_space(8.0);
+
+    // The two ways of declaring the values.
+    ui.horizontal(|ui| {
+        ui.selectable_value(&mut mv.use_range, false, "Discrete missing values");
+        ui.selectable_value(&mut mv.use_range, true, "Range of missing values");
+    });
+    ui.add_space(6.0);
+
+    if mv.use_range {
+        ui.horizontal(|ui| {
+            ui.label("Range:");
+            ui.add(egui::TextEdit::singleline(&mut mv.range_lo).desired_width(80.0));
+            ui.label("to");
+            ui.add(egui::TextEdit::singleline(&mut mv.range_hi).desired_width(80.0));
+        });
+    } else {
+        ui.label("Values (separated by commas):");
+        ui.add(egui::TextEdit::singleline(&mut mv.discrete).desired_width(380.0));
+    }
+    ui.add_space(10.0);
+
+    // The action row.
+    ui.horizontal(|ui| {
+        if ui.button("OK").clicked() {
+            let variable = mv.variable.clone().unwrap_or_default();
+            let discrete = if mv.use_range { Vec::new() } else { mv.discrete_values() };
+            let range = if mv.use_range { mv.range() } else { None };
+            mv.confirmed = Some((variable, discrete, range));
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        if ui.button("Cancel").clicked() {
+            mv.confirmed = None;
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        if ui.button("Reset").clicked() {
+            mv.discrete.clear();
+            mv.range_lo.clear();
+            mv.range_hi.clear();
+            mv.use_range = false;
+        }
+        if ui.button("Help").clicked() {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+    });
+}
