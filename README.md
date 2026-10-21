@@ -76,6 +76,15 @@ sudo dpkg -i statscraft_*.deb       # integrates with application menus
 A CI workflow (`.github/workflows/build.yml`) builds the Windows installer
 and the Linux `.deb` on every push.
 
+To run the same Linux build locally, without a Linux machine:
+
+```sh
+docker run --rm -v "$PWD:/repo" -w /repo rust:1.93-bookworm bash tools/ci_linux.sh
+```
+
+That builds the app, builds the `.deb`, prints the package's metadata and
+runs the test suite — the same steps the CI runs.
+
 ## Run from source
 ```sh
 cargo run

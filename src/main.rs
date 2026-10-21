@@ -1,6 +1,7 @@
 mod app;
 mod data;
 mod dialog;
+mod glm;
 mod icon;
 mod output;
 mod stats;
