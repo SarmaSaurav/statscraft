@@ -196,6 +196,41 @@ statscraft/
 - **M5**: .sav read (FFI or native) + variable metadata.
 - **M6**: Export + packaging (cargo bundle / wix).
 
+### 4.1 Where the work actually stands
+
+Phases 1 to 4 are done and pushed. The list below is what the app does
+now, against the design above.
+
+| Phase | What it delivered |
+|---|---|
+| 1 | The modern shell: the Inter and JetBrains Mono type scale, the 28-glyph SVG icon set, the blue/teal palette, the rounded surfaces, the zebra-striped grid and the document tabs. |
+| 2 | The SPSS-style procedure dialogs — source list, target list, move arrow, sub-dialog buttons, OK / Paste / Reset / Cancel — wired to the syntax runner, so a dialog builds syntax and the same runner executes it. |
+| 3 | The options reached the engine: `/CELLS`, `/STATISTICS`, `/POSTHOC`, the effect sizes, the significance stars and the missing-value mode all change the output. Explore, Means and the four nonparametric procedures were added, and the Output Viewer learned to draw charts. |
+| 4 | Reliability, Factor Analysis, ROC curves, Welch's and Brown-Forsythe's variance tests, `COMPUTE`, and a `.sav` writer that round-trips. |
+
+Nineteen procedures, 67 tests, one runner behind both the menus and the
+Syntax Editor. `docs/SPSS_REFERENCE.md` records what was observed in the
+installed IBM SPSS Statistics 27 and where the app deliberately differs
+from it.
+
+The remaining work, in the order it should be taken:
+
+- **More procedures** — the GLM family (univariate, repeated measures,
+  mixed), the nonparametric outliers and 1-sample procedures, the
+  resampling menus, the missing-data analysis procedures, and the
+  survival procedures.
+- **A real pivot-table model** — the output tables are currently a grid
+  of strings with a note. SPSS's output is a pivot table you can pivot
+  and drill into, and the export should carry that structure.
+- **The Data Editor's editing features** — a case can be added, deleted
+  and pasted, the cells can be sorted in place, and the missing values
+  can be defined per variable.
+- **The chart builder** — the charts are painted directly. A real chart
+  builder would let the user choose the type, the axes, the labels and
+  the reference lines, the way SPSS's does.
+- **The installer and the Linux package** — the Windows installer works;
+  the `.deb` has never been built on a Linux machine.
+
 ---
 
 ## 5. Evidence index (quick reference)
