@@ -279,6 +279,82 @@ impl StateCraftApp {
         }
     }
 
+    /// Crosstabs: pick two low-cardinality variables, prefer categorical ones.
+    pub fn analyze_crosstabs(&mut self) {
+        if let Some(t) = &self.table {
+            let uniq = |ci: usize| -> usize {
+                let mut set = std::collections::BTreeSet::new();
+                for r in 0..t.n_rows {
+                    if !t.is_missing(ci, r) {
+                        set.insert(t.cell_text(ci, r));
+                    }
+                }
+                set.len()
+            };
+            let cat: Vec<usize> = (0..t.columns.len())
+                .filter(|&ci| {
+                    t.columns[ci].kind != crate::data::ColumnKind::Numeric
+                        || uniq(ci) <= 12
+                })
+                .collect();
+            let pair = cat
+                .iter()
+                .enumerate()
+                .flat_map(|(a, &i)| cat.iter().skip(a + 1).map(move |&j| (i, j)))
+                .find(|(i, j)| *i != *j);
+            if let Some((i, j)) = pair {
+                let cmd = format!(
+                    "CROSSTABS {} BY {}",
+                    t.columns[i].name, t.columns[j].name
+                );
+                self.paste_and_run(cmd);
+            } else {
+                self.status = "Crosstabs: need two categorical (or low-cardinality) variables.".to_string();
+            }
+        } else {
+            self.status = "No data loaded.".to_string();
+        }
+    }
+
+    /// One-Way ANOVA: first numeric outcome, first valid grouping variable.
+    pub fn analyze_anova(&mut self) {
+        if let Some(t) = &self.table {
+            let outcome = t.columns.iter().position(|c| c.kind == crate::data::ColumnKind::Numeric);
+            let factor = (0..t.columns.len()).find(|&ci| {
+                let mut uniq = std::collections::BTreeSet::new();
+                for r in 0..t.n_rows {
+                    if !t.is_missing(ci, r) {
+                        uniq.insert(t.cell_text(ci, r));
+                    }
+                }
+                (2..=8).contains(&uniq.len())
+            });
+            match (outcome, factor) {
+                (Some(y), Some(g)) if y != g => {
+                    let cmd = format!("ONEWAY {} BY {}", t.columns[y].name, t.columns[g].name);
+                    self.paste_and_run(cmd);
+                }
+                _ => self.status = "ANOVA: need a numeric outcome and a 2..8-level factor.".to_string(),
+            }
+        } else {
+            self.status = "No data loaded.".to_string();
+        }
+    }
+
+    /// Paired-samples t-test: first two numeric variables.
+    pub fn analyze_paired_t(&mut self) {
+        let names = self.numeric_var_names();
+        if self.table.is_none() {
+            self.status = "No data loaded.".to_string();
+            return;
+        }
+        if names.len() < 2 {
+            self.status = "Paired t-test: need two numeric variables.".to_string();
+            return;
+        }
+        self.paste_and_run(format!("T-TEST PAIRED {} {}", names[0], names[1]));
+    }
+
     pub fn analyze_ttest(&mut self) {
         // pick the same defaults the procedure dialog would: first 2-level
         // string variable as group, first numeric as outcome -> paste & run
@@ -497,13 +573,13 @@ impl eframe::App for StateCraftApp {
                         if ui.button("Frequencies...").clicked() { ui.close_menu(); self.analyze_frequencies(); }
                         if ui.button("Descriptives...").clicked() { ui.close_menu(); self.analyze_descriptives(); }
                         if ui.button("Explore...").clicked() { ui.close_menu(); self.status = "Explore: not implemented yet.".to_string(); }
-                        if ui.button("Crosstabs...").clicked() { ui.close_menu(); self.status = "Crosstabs: not implemented yet.".to_string(); }
+                        if ui.button("Crosstabs...").clicked() { ui.close_menu(); self.analyze_crosstabs(); }
                     });
                     ui.menu_button("Compare Means", |ui| {
                         if ui.button("Means...").clicked() { ui.close_menu(); self.status = "Means: not implemented yet.".to_string(); }
                         if ui.button("Independent-Samples T Test...").clicked() { ui.close_menu(); self.analyze_ttest(); }
-                        if ui.button("Paired-Samples T Test...").clicked() { ui.close_menu(); self.status = "Paired-Samples T Test: not implemented yet.".to_string(); }
-                        if ui.button("One-Way ANOVA...").clicked() { ui.close_menu(); self.status = "One-Way ANOVA: not implemented yet.".to_string(); }
+                        if ui.button("Paired-Samples T Test...").clicked() { ui.close_menu(); self.analyze_paired_t(); }
+                        if ui.button("One-Way ANOVA...").clicked() { ui.close_menu(); self.analyze_anova(); }
                     });
                     ui.menu_button("Correlate", |ui| {
                         if ui.button("Bivariate...").clicked() { ui.close_menu(); self.analyze_correlations(); }
