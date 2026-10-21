@@ -25,6 +25,11 @@ pub struct StateCraftApp {
     pub grid_lines: bool,
     pub show_status: bool,
     pub dataset_no: usize,
+    /// Active (column, row) in Data View, like the SPSS active cell.
+    pub sel_cell: Option<(usize, usize)>,
+    /// Cell currently being edited.
+    pub editing_cell: Option<(usize, usize)>,
+    pub edit_buf: String,
 }
 
 impl Default for StateCraftApp {
@@ -41,6 +46,9 @@ impl Default for StateCraftApp {
             grid_lines: true,
             show_status: true,
             dataset_no: 0,
+            sel_cell: None,
+            editing_cell: None,
+            edit_buf: String::new(),
         }
     }
 }
@@ -349,9 +357,7 @@ impl eframe::App for StateCraftApp {
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             // ---- SPSS-style icon toolbar ----
             ui.horizontal(|ui| {
-                if ui
-                    .add(egui::Button::new(icon_btn("📂")).small())
-                    .on_hover_text("Open data file (CSV / SPSS .sav)")
+                if icon_button(ui, Icon::Open, "Open data file (CSV / SPSS .sav)")
                     .clicked()
                 {
                     if let Some(p) = rfd::FileDialog::new()
@@ -362,22 +368,14 @@ impl eframe::App for StateCraftApp {
                         self.load();
                     }
                 }
-                if ui
-                    .add(egui::Button::new(icon_btn("💾")).small())
-                    .on_hover_text("Save data as CSV")
-                    .clicked()
-                {
+                if icon_button(ui, Icon::Save, "Save data as CSV").clicked() {
                     if let Some(p) =
                         rfd::FileDialog::new().add_filter("CSV", &["csv"]).save_file()
                     {
                         self.export_data_csv_to(&p);
                     }
                 }
-                if ui
-                    .add(egui::Button::new(icon_btn("🖨")).small())
-                    .on_hover_text("Export output (Markdown)")
-                    .clicked()
-                {
+                if icon_button(ui, Icon::Print, "Export output (Markdown)").clicked() {
                     if let Some(p) =
                         rfd::FileDialog::new().add_filter("Markdown", &["md"]).save_file()
                     {
@@ -385,55 +383,27 @@ impl eframe::App for StateCraftApp {
                     }
                 }
                 ui.separator();
-                if ui
-                    .add(egui::Button::new(icon_btn("↶")).small())
-                    .on_hover_text("Undo")
-                    .clicked()
-                {
+                if icon_button(ui, Icon::Undo, "Undo").clicked() {
                     self.status = "Undo: not implemented yet.".to_string();
                 }
-                if ui
-                    .add(egui::Button::new(icon_btn("↷")).small())
-                    .on_hover_text("Redo")
-                    .clicked()
-                {
+                if icon_button(ui, Icon::Redo, "Redo").clicked() {
                     self.status = "Redo: not implemented yet.".to_string();
                 }
                 ui.separator();
-                if ui
-                    .add(egui::Button::new(icon_btn("⊞")).small())
-                    .on_hover_text("Insert Variable")
-                    .clicked()
-                {
+                if icon_button(ui, Icon::InsVar, "Insert Variable").clicked() {
                     self.status = "Insert Variable: not implemented yet.".to_string();
                 }
-                if ui
-                    .add(egui::Button::new(icon_btn("⬇")).small())
-                    .on_hover_text("Insert Cases")
-                    .clicked()
-                {
+                if icon_button(ui, Icon::InsCase, "Insert Cases").clicked() {
                     self.status = "Insert Cases: not implemented yet.".to_string();
                 }
-                if ui
-                    .add(egui::Button::new(icon_btn("🏷")).small())
-                    .on_hover_text("Value Labels")
-                    .clicked()
-                {
+                if icon_button(ui, Icon::Labels, "Value Labels").clicked() {
                     self.status = "Value Labels: not implemented yet.".to_string();
                 }
                 ui.separator();
-                if ui
-                    .add(egui::Button::new(icon_btn("🔍")).small())
-                    .on_hover_text("Go to Variable (Variable View)")
-                    .clicked()
-                {
+                if icon_button(ui, Icon::Find, "Go to Variable (Variable View)").clicked() {
                     self.view = View::Variables;
                 }
-                if ui
-                    .add(egui::Button::new(icon_btn("📊")).small())
-                    .on_hover_text("Chart Builder")
-                    .clicked()
-                {
+                if icon_button(ui, Icon::Chart, "Chart Builder").clicked() {
                     self.view = View::Charts;
                 }
             });
@@ -521,28 +491,28 @@ impl eframe::App for StateCraftApp {
                 let vis: Vec<usize> = match &self.table {
                     Some(table) => {
                         let f = self.var_filter.to_lowercase();
-                        let vis: Vec<usize> = table
+                        table
                             .columns
                             .iter()
                             .enumerate()
                             .filter(|(_, c)| f.is_empty() || c.name.to_lowercase().contains(&f))
                             .map(|(i, _)| i)
-                            .collect();
-                        spss_grid(ui, Some(table), &vis);
-                        vis
+                            .collect()
                     }
-                    None => {
-                        spss_grid(ui, None, &[]);
-                        Vec::new()
-                    }
+                    None => Vec::new(),
                 };
-                let _ = vis;
+                let StateCraftApp {
+                    table,
+                    sel_cell,
+                    editing_cell,
+                    edit_buf,
+                    ..
+                } = self;
+                spss_grid(ui, table.as_mut(), &vis, sel_cell, editing_cell, edit_buf);
             }
             View::Variables => {
-                if let Some(table) = &self.table {
+                if let Some(table) = &mut self.table {
                     render_variables(ui, table);
-                } else {
-                    ui.label("No data loaded.");
                 }
             }
             View::Output => {
@@ -600,8 +570,140 @@ impl eframe::App for StateCraftApp {
     }
 }
 
-fn icon_btn(glyph: &str) -> egui::RichText {
-    egui::RichText::new(glyph).size(15.0)
+/// Small vector-drawn SPSS-like toolbar icons (no emoji/glyph font dependency).
+
+/// SPSS-like vector-drawn toolbar icons (no emoji/glyph font dependency).
+#[derive(Clone, Copy, PartialEq)]
+enum Icon {
+    Open,
+    Save,
+    Print,
+    Undo,
+    Redo,
+    InsVar,
+    InsCase,
+    Labels,
+    Find,
+    Chart,
+}
+
+/// Flat SPSS-style toolbar button: invisible chrome, subtle tint on hover.
+fn icon_button(ui: &mut egui::Ui, icon: Icon, tip: &str) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(30.0, 26.0), egui::Sense::click());
+    let p = ui.painter();
+    if resp.hovered() || resp.is_pointer_button_down_on() {
+        p.rect_filled(rect.shrink(1.5), 2.0, egui::Color32::from_rgb(0xDC, 0xE6, 0xF2));
+    }
+    let col = if resp.hovered() {
+        egui::Color32::from_rgb(0x2E, 0x6D, 0xC8)
+    } else {
+        egui::Color32::from_rgb(0x40, 0x40, 0x40)
+    };
+    let st = egui::Stroke::new(1.4, col);
+    let fill = egui::Color32::from_rgb(0xC9, 0xD6, 0xEA);
+    let m = rect.center();
+    let r = |x0: f32, y0: f32, x1: f32, y1: f32| egui::Rect::from_min_max(
+        egui::pos2(m.x + x0, m.y + y0),
+        egui::pos2(m.x + x1, m.y + y1),
+    );
+    let seg = |a: egui::Pos2, b: egui::Pos2| p.line_segment([a, b], st);
+    match icon {
+        Icon::Open => {
+            // folder: back flap + body
+            p.rect_filled(r(-10.0, -4.0, 9.0, 6.0), 1.0, fill);
+            p.add(egui::Shape::convex_polygon(
+                vec![
+                    egui::pos2(m.x - 10.0, m.y - 4.0),
+                    egui::pos2(m.x - 7.0, m.y - 7.5),
+                    egui::pos2(m.x + 1.0, m.y - 7.5),
+                    egui::pos2(m.x + 4.0, m.y - 4.0),
+                ],
+                col,
+                egui::Stroke::NONE,
+            ));
+        }
+        Icon::Save => {
+            // floppy disk
+            p.rect_stroke(r(-8.5, -8.0, 8.5, 7.0), 1.0, st);
+            p.rect_filled(r(2.0, -8.0, 8.5, -2.0), 0.0, col);
+            p.rect_stroke(r(-4.5, 0.5, 4.5, 7.0), 0.0, st);
+        }
+        Icon::Print => {
+            p.rect_filled(r(-5.0, -8.0, 5.0, -3.0), 0.0, fill); // paper
+            p.rect_stroke(r(-9.0, -3.0, 9.0, 5.0), 0.0, st); // body
+            p.rect_stroke(r(-5.0, 2.0, 5.0, 7.5), 0.0, st); // output
+        }
+        Icon::Undo | Icon::Redo => {
+            let sign = if icon == Icon::Undo { 1.0 } else { -1.0 };
+            let cx = m.x + 1.0 * sign;
+            let cy = m.y;
+            // arc above the bar
+            let mut pts = Vec::new();
+            for k in 0..=8 {
+                let t = std::f32::consts::PI * (k as f32) / 8.0;
+                pts.push(egui::pos2(cx - 6.5 * t.cos() * sign, cy - 5.0 * t.sin() + 2.0));
+            }
+            p.add(egui::Shape::line(pts, st));
+            // arrowhead at the left end
+            let tip = egui::pos2(cx - 6.5 * sign, cy + 2.0);
+            seg(
+                tip,
+                egui::pos2(tip.x + 4.0 * sign, tip.y - 1.0),
+            );
+            seg(
+                tip,
+                egui::pos2(tip.x + 3.5 * sign, tip.y + 3.5),
+            );
+        }
+        Icon::InsVar => {
+            // two existing columns + highlighted inserted column
+            p.rect_stroke(r(-10.0, -6.0, -4.5, 6.0), 0.0, st);
+            p.rect_stroke(r(4.5, -6.0, 10.0, 6.0), 0.0, st);
+            p.rect_filled(r(-2.5, -6.0, 2.5, 6.0), 0.0, fill);
+        }
+        Icon::InsCase => {
+            p.rect_stroke(r(-7.0, -8.0, 7.0, -3.0), 0.0, st);
+            p.rect_stroke(r(-7.0, 3.0, 7.0, 8.0), 0.0, st);
+            p.rect_filled(r(-7.0, -1.0, 7.0, 1.0), 0.0, fill);
+        }
+        Icon::Labels => {
+            // value-label tag
+            p.add(egui::Shape::convex_polygon(
+                vec![
+                    egui::pos2(m.x - 8.0, m.y - 4.0),
+                    egui::pos2(m.x + 1.0, m.y - 4.0),
+                    egui::pos2(m.x + 8.0, m.y),
+                    egui::pos2(m.x + 1.0, m.y + 4.0),
+                    egui::pos2(m.x - 8.0, m.y + 4.0),
+                ],
+                fill,
+                st,
+            ));
+            p.circle_filled(egui::pos2(m.x - 4.0, m.y), 1.6, col);
+        }
+        Icon::Find => {
+            p.circle_stroke(egui::pos2(m.x - 1.5, m.y - 1.5), 5.0, st);
+            seg(
+                egui::pos2(m.x + 2.0, m.y + 2.0),
+                egui::pos2(m.x + 7.5, m.y + 7.5),
+            );
+        }
+        Icon::Chart => {
+            // axes
+            seg(
+                egui::pos2(m.x - 9.0, m.y - 8.0),
+                egui::pos2(m.x - 9.0, m.y + 8.0),
+            );
+            seg(
+                egui::pos2(m.x - 9.0, m.y + 8.0),
+                egui::pos2(m.x + 10.0, m.y + 8.0),
+            );
+            p.rect_filled(r(-6.0, 0.0, -2.0, 8.0), 0.0, fill);
+            p.rect_filled(r(-0.5, -4.0, 3.5, 8.0), 0.0, fill);
+            p.rect_filled(r(5.0, -7.0, 9.0, 8.0), 0.0, fill);
+        }
+    }
+    resp.on_hover_text(tip)
 }
 
 const SPSS_ROW_H: f32 = 19.0;
@@ -613,19 +715,32 @@ const SPSS_MIN_COLS: usize = 20;
 /// SPSS Data Editor look: light-gray cell blocks separated by white gaps,
 /// a white row-number gutter, and `var` placeholder headers beyond real columns.
 /// Row 0 of the virtual list is the header band.
-fn spss_grid(ui: &mut egui::Ui, table: Option<&DataTable>, vis_cols: &[usize]) {
-    let n_data_rows = table.map(|t| t.n_rows.min(999_999)).unwrap_or(0);
+/// Interactive: click selects a cell (like the SPSS active cell),
+/// double-click edits it in place, Delete clears the selected cell.
+fn spss_grid(
+    ui: &mut egui::Ui,
+    mut table: Option<&mut DataTable>,
+    vis_cols: &[usize],
+    sel_cell: &mut Option<(usize, usize)>,
+    editing_cell: &mut Option<(usize, usize)>,
+    edit_buf: &mut String,
+) {
+    let n_data_rows = table.as_deref().map(|t| t.n_rows.min(999_999)).unwrap_or(0);
     let n_real = vis_cols.len();
     let total_cols = n_real.max(SPSS_MIN_COLS);
     let total_rows = 1 + n_data_rows.max(40);
     let content_w = SPSS_ROWNUM_W + SPSS_GAP + (total_cols as f32) * (SPSS_COL_W + SPSS_GAP);
 
     let header_fill = egui::Color32::from_rgb(0xF3, 0xF3, 0xF3);
+    let header_sel_fill = egui::Color32::from_rgb(0xDC, 0xE8, 0xF7);
     let cell_fill = egui::Color32::from_rgb(0xF6, 0xF6, 0xF6);
+    let sel_fill = egui::Color32::from_rgb(0xE4, 0xED, 0xFC);
+    let sel_stroke = egui::Stroke::new(1.4, egui::Color32::from_rgb(0x2E, 0x6D, 0xC8));
     let header_text = egui::Color32::from_rgb(0x33, 0x33, 0x33);
     let placeholder_text = egui::Color32::from_rgb(0x9B, 0x9B, 0x9B);
     let value_text = egui::Color32::from_rgb(0x1E, 0x1E, 0x1E);
     let rownum_text = egui::Color32::from_rgb(0x66, 0x66, 0x66);
+    let rownum_sel_text = egui::Color32::from_rgb(0x2E, 0x6D, 0xC8);
 
     let font = egui::FontId::proportional(12.5);
 
@@ -633,22 +748,41 @@ fn spss_grid(ui: &mut egui::Ui, table: Option<&DataTable>, vis_cols: &[usize]) {
         .auto_shrink([false, false])
         .show_rows(ui, SPSS_ROW_H + SPSS_GAP, total_rows, |ui, rows| {
             for row in rows {
-                let (rect, _) =
-                    ui.allocate_exact_size(egui::vec2(content_w, SPSS_ROW_H), egui::Sense::hover());
+                let (rect, resp) =
+                    ui.allocate_exact_size(egui::vec2(content_w, SPSS_ROW_H), egui::Sense::click());
                 let p = ui.painter();
                 let mid_y = rect.center().y;
                 let cell_x = |j: usize| rect.left() + SPSS_ROWNUM_W + SPSS_GAP + (j as f32) * (SPSS_COL_W + SPSS_GAP);
+                let cell_rect = |j: usize, inset: f32| {
+                    egui::Rect::from_min_max(
+                        egui::pos2(cell_x(j), rect.top() + inset),
+                        egui::pos2(cell_x(j) + SPSS_COL_W, rect.bottom() - inset),
+                    )
+                };
+                // which data column is under the mouse (if any)?
+                let hit_col = |pos: egui::Pos2| -> Option<usize> {
+                    if pos.x < rect.left() + SPSS_ROWNUM_W + SPSS_GAP {
+                        return None;
+                    }
+                    let fx = pos.x - rect.left() - SPSS_ROWNUM_W - SPSS_GAP;
+                    let j = (fx / (SPSS_COL_W + SPSS_GAP)).floor() as isize;
+                    if j >= 0 && (j as usize) < n_real {
+                        Some(j as usize)
+                    } else {
+                        None
+                    }
+                };
 
                 if row == 0 {
                     // header band
+                    let sel_j = sel_cell
+                        .as_ref()
+                        .and_then(|(ci, _)| vis_cols.iter().position(|&c| c == *ci));
                     for j in 0..total_cols {
-                        let x0 = cell_x(j);
-                        let r = egui::Rect::from_min_max(
-                            egui::pos2(x0, rect.top()),
-                            egui::pos2(x0 + SPSS_COL_W, rect.bottom()),
-                        );
-                        p.rect_filled(r, 0.0, header_fill);
-                        let (txt, color) = match table.and_then(|t| vis_cols.get(j).map(|&ci| &t.columns[ci].name)) {
+                        let r = cell_rect(j, 0.0);
+                        let sel_here = sel_j == Some(j);
+                        p.rect_filled(r, 0.0, if sel_here { header_sel_fill } else { header_fill });
+                        let (txt, color) = match table.as_deref().and_then(|t| vis_cols.get(j).map(|&ci| &t.columns[ci].name)) {
                             Some(name) => (name.as_str(), header_text),
                             None => ("var", placeholder_text),
                         };
@@ -663,29 +797,35 @@ fn spss_grid(ui: &mut egui::Ui, table: Option<&DataTable>, vis_cols: &[usize]) {
                 } else {
                     // data row
                     let di = row - 1;
+                    let row_sel = sel_cell
+                        .as_ref()
+                        .map(|(_, r)| *r == di)
+                        .unwrap_or(false);
                     p.text(
                         egui::pos2(rect.left() + 7.0, mid_y),
                         egui::Align2::LEFT_CENTER,
                         format!("{}", di + 1),
                         font.clone(),
-                        rownum_text,
+                        if row_sel { rownum_sel_text } else { rownum_text },
                     );
-                    if let Some(t) = table {
+                    if let Some(t) = table.as_deref() {
                         for (j, &ci) in vis_cols.iter().enumerate() {
-                            let x0 = cell_x(j);
-                            let r = egui::Rect::from_min_max(
-                                egui::pos2(x0, rect.top() + 1.0),
-                                egui::pos2(x0 + SPSS_COL_W, rect.bottom() - 1.0),
+                            let r = cell_rect(j, 1.0);
+                            let selected = sel_cell.as_ref() == Some(&(ci, di));
+                            p.rect_filled(
+                                r,
+                                0.0,
+                                if selected { sel_fill } else { cell_fill },
                             );
-                            p.rect_filled(r, 0.0, cell_fill);
-                            let is_num =
-                                t.columns[ci].kind == crate::data::ColumnKind::Numeric;
-                            let anchor = if is_num {
-                                egui::Align2::RIGHT_CENTER
-                            } else {
-                                egui::Align2::LEFT_CENTER
+                            if selected {
+                                p.rect_stroke(r, 0.0, sel_stroke);
+                            }
+                            let c = &t.columns[ci];
+                            let (anchor, px) = match c.meta.align {
+                                crate::data::VarAlign::Right => (egui::Align2::RIGHT_CENTER, r.right() - 6.0),
+                                crate::data::VarAlign::Center => (egui::Align2::CENTER_CENTER, r.center().x),
+                                crate::data::VarAlign::Left => (egui::Align2::LEFT_CENTER, r.left() + 6.0),
                             };
-                            let px = if is_num { r.right() - 6.0 } else { r.left() + 6.0 };
                             let txt = t.cell_text(ci, di);
                             if !txt.is_empty() {
                                 p.text(egui::pos2(px, mid_y), anchor, txt, font.clone(), value_text);
@@ -693,8 +833,107 @@ fn spss_grid(ui: &mut egui::Ui, table: Option<&DataTable>, vis_cols: &[usize]) {
                         }
                     }
                 }
+
+                // ---- interactions ----
+                let clicked_col = resp.clicked().then(|| resp.hover_pos()).flatten().and_then(&hit_col);
+                if let Some(j) = clicked_col {
+                    if row > 0 {
+                        if n_real > 0 {
+                            *sel_cell = Some((vis_cols[j], di_of_row(row)));
+                            if *editing_cell != Some((vis_cols[j], di_of_row(row))) {
+                                *editing_cell = None;
+                            }
+                        }
+                    } else {
+                        *sel_cell = None;
+                    }
+                }
+                if resp.double_clicked() {
+                    if let Some(j) = resp.hover_pos().and_then(&hit_col) {
+                        if row > 0 {
+                            if let Some(t) = table.as_deref() {
+                                if n_real > 0 {
+                                    let dummy = di_of_row(row);
+                                    let (ci, di) = (vis_cols[j], dummy);
+                                    *editing_cell = Some((ci, di));
+                                    *edit_buf = t.cell_text(ci, di);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // in-cell edit box overlay
+                if let Some((eci, edi)) = *editing_cell {
+                    if row > 0 && edi == di_of_row(row) {
+                        if let Some(j) = vis_cols.iter().position(|&c| c == eci) {
+                            let r = cell_rect(j, 1.0);
+                            p.rect_filled(r, 0.0, egui::Color32::WHITE);
+                            p.rect_stroke(r, 0.0, sel_stroke);
+                            let mut child = ui.child_ui(
+                                r.shrink(1.0),
+                                egui::Layout::top_down(egui::Align::LEFT),
+                                None,
+                            );
+                            let tresp = child.add(
+                                egui::TextEdit::singleline(edit_buf)
+                                    .desired_width(SPSS_COL_W - 8.0)
+                                    .frame(false),
+                            );
+                            child.memory_mut(|m| m.request_focus(tresp.id));
+                            let enter = child
+                                .input(|i| i.key_pressed(egui::Key::Enter));
+                            let esc = child
+                                .input(|i| i.key_pressed(egui::Key::Escape));
+                            if esc {
+                                *editing_cell = None;
+                            } else if enter || tresp.lost_focus() {
+                                if let Some(t) = table.as_deref_mut() {
+                                    commit_edit(t, eci, edi, edit_buf);
+                                }
+                                *editing_cell = None;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Delete clears the selected cell
+            if let Some((ci, di)) = *sel_cell {
+                if editing_cell.is_none() && ui.input(|i| i.key_pressed(egui::Key::Delete)) {
+                    if let Some(t) = table.as_deref_mut() {
+                        if di < t.n_rows && ci < t.columns.len() {
+                            t.columns[ci].values[di] = crate::data::Value::Missing;
+                        }
+                    }
+                }
             }
         });
+}
+
+#[inline]
+fn di_of_row(row: usize) -> usize {
+    row - 1
+}
+
+/// SPSS semantics: empty -> missing; unparseable numeric -> missing.
+fn commit_edit(table: &mut DataTable, ci: usize, di: usize, buf: &str) {
+    if ci >= table.columns.len() || di >= table.n_rows {
+        return;
+    }
+    let raw = buf.trim().to_string();
+    let v = if raw.is_empty() {
+        crate::data::Value::Missing
+    } else {
+        match table.columns[ci].kind {
+            crate::data::ColumnKind::Numeric => raw
+                .parse::<f64>()
+                .map(crate::data::Value::Number)
+                .unwrap_or(crate::data::Value::Missing),
+            crate::data::ColumnKind::String => crate::data::Value::Text(raw),
+        }
+    };
+    table.columns[ci].values[di] = v;
 }
 
 fn render_output_table(ui: &mut egui::Ui, t: &OutputTable) {
@@ -776,47 +1015,171 @@ fn render_charts(ui: &mut egui::Ui, table: &DataTable) {
     }
 }
 
-fn render_variables(ui: &mut egui::Ui, table: &DataTable) {
-    let header_color = egui::Color32::from_rgb(0x6E, 0x6E, 0x6E);
-    egui::ScrollArea::both()
+fn render_variables(ui: &mut egui::Ui, table: &mut DataTable) {
+    use crate::data::{Measure, VarAlign, ColumnKind};
+    let header_fill = egui::Color32::from_rgb(0xE9, 0xE9, 0xE9);
+    let cell_fill = egui::Color32::from_rgb(0xF7, 0xF7, 0xF7);
+    let header_text = egui::Color32::from_rgb(0x5E, 0x5E, 0x5E);
+
+    let mut block = |ui: &mut egui::Ui,
+                     w: f32,
+                     fill: egui::Color32,
+                     add: &mut dyn FnMut(&mut egui::Ui)| {
+        egui::Frame::none()
+            .fill(fill)
+            .inner_margin(egui::Margin {
+                left: 6.0,
+                right: 6.0,
+                top: 2.0,
+                bottom: 2.0,
+            })
+            .show(ui, |inner| {
+                inner.set_min_width(w);
+                inner.set_min_height(18.0);
+                add(inner);
+            });
+    };
+
+    egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
             egui::Grid::new("var_grid")
-                .spacing([12.0, 2.0])
+                .spacing([2.0, 2.0])
                 .striped(false)
                 .show(ui, |ui| {
-                    // SPSS Variable View column set:
-                    // Name Type Width Decimals Label Values Missing Columns Align Measure Role
+                    // ---- header row (SPSS Variable View columns) ----
                     for h in ["Name", "Type", "Width", "Decimals", "Label", "Values",
                               "Missing", "Columns", "Align", "Measure", "Role"] {
-                        ui.label(
-                            egui::RichText::new(h)
-                                .strong()
-                                .color(header_color),
-                        );
+                        block(ui, 92.0, header_fill, &mut |inner: &mut egui::Ui| {
+                            inner.label(
+                                egui::RichText::new(h).size(12.0).color(header_text),
+                            );
+                        });
                     }
                     ui.end_row();
-                    for c in &table.columns {
-                        let missing = c
-                            .values
-                            .iter()
-                            .filter(|v| matches!(v, crate::data::Value::Missing))
-                            .count();
-                        let (typ, width, decimals, align, measure) = match c.kind {
-                            crate::data::ColumnKind::Numeric => ("Numeric", "8", "2", "Right", "Scale"),
-                            crate::data::ColumnKind::String => ("String", "8", "0", "Left", "Nominal"),
-                        };
-                        ui.label(&c.name);
-                        ui.label(typ);
-                        ui.label(width);
-                        ui.label(decimals);
-                        ui.label(&c.name); // Label defaults to the variable name
-                        ui.label("None");
-                        ui.label(if missing > 0 { missing.to_string() } else { "None".to_string() });
-                        ui.label("8");
-                        ui.label(align);
-                        ui.label(measure);
-                        ui.label("Input");
+
+                    for (ci, c) in table.columns.iter_mut().enumerate() {
+                        // Name
+                        block(ui, 110.0, cell_fill, &mut |inner: &mut egui::Ui| {
+                            inner.add(
+                                egui::TextEdit::singleline(&mut c.name)
+                                    .desired_width(96.0)
+                                    .frame(false),
+                            );
+                        });
+                        // Type (converting values like SPSS)
+                        block(ui, 82.0, cell_fill, &mut |inner: &mut egui::Ui| {
+                            let label = match c.kind {
+                                ColumnKind::Numeric => "Numeric",
+                                ColumnKind::String => "String",
+                            };
+                            egui::menu::menu_button(inner, label, |menu| {
+                                if menu.button("Numeric").clicked() {
+                                    menu.close_menu();
+                                    c.set_kind(ColumnKind::Numeric);
+                                }
+                                if menu.button("String").clicked() {
+                                    menu.close_menu();
+                                    c.set_kind(ColumnKind::String);
+                                }
+                            });
+                        });
+                        // Width
+                        block(ui, 60.0, cell_fill, &mut |inner: &mut egui::Ui| {
+                            inner.add(
+                                egui::DragValue::new(&mut c.meta.columns_width)
+                                    .range(1..=64),
+                            );
+                        });
+                        // Decimals (numeric only)
+                        block(ui, 66.0, cell_fill, &mut |inner: &mut egui::Ui| {
+                            if c.kind == ColumnKind::Numeric {
+                                inner.add(
+                                    egui::DragValue::new(&mut c.meta.decimals).range(0..=16),
+                                );
+                            } else {
+                                inner.label("");
+                            }
+                        });
+                        // Label
+                        block(ui, 120.0, cell_fill, &mut |inner: &mut egui::Ui| {
+                            inner.add(
+                                egui::TextEdit::singleline(&mut c.meta.label)
+                                    .desired_width(104.0)
+                                    .frame(false)
+                                    .hint_text(""),
+                            );
+                        });
+                        // Values (value labels)
+                        block(ui, 88.0, cell_fill, &mut |inner: &mut egui::Ui| {
+                            let n = c.meta.value_labels.len() + c.meta.text_value_labels.len();
+                            let txt = if n == 0 { "None".to_string() } else { format!("Defined ({})", n) };
+                            inner.label(
+                                egui::RichText::new(txt).size(12.0),
+                            );
+                        });
+                        // Missing
+                        block(ui, 88.0, cell_fill, &mut |inner: &mut egui::Ui| {
+                            let n = c.meta.user_missing.len();
+                            let txt = if n == 0 { "None".to_string() } else { format!("Defined ({})", n) };
+                            inner.label(egui::RichText::new(txt).size(12.0));
+                        });
+                        // Columns
+                        block(ui, 66.0, cell_fill, &mut |inner: &mut egui::Ui| {
+                            inner.add(
+                                egui::DragValue::new(&mut c.meta.columns_width).range(1..=64),
+                            );
+                        });
+                        // Align
+                        block(ui, 76.0, cell_fill, &mut |inner: &mut egui::Ui| {
+                            egui::ComboBox::from_id_source(("align", ci))
+                                .selected_text(c.meta.align.as_str())
+                                .width(56.0)
+                                .show_ui(inner, |menu| {
+                                    menu.selectable_value(
+                                        &mut c.meta.align,
+                                        VarAlign::Left,
+                                        VarAlign::Left.as_str(),
+                                    );
+                                    menu.selectable_value(
+                                        &mut c.meta.align,
+                                        VarAlign::Right,
+                                        VarAlign::Right.as_str(),
+                                    );
+                                    menu.selectable_value(
+                                        &mut c.meta.align,
+                                        VarAlign::Center,
+                                        VarAlign::Center.as_str(),
+                                    );
+                                });
+                        });
+                        // Measure
+                        block(ui, 92.0, cell_fill, &mut |inner: &mut egui::Ui| {
+                            egui::ComboBox::from_id_source(("measure", ci))
+                                .selected_text(c.meta.measure.as_str())
+                                .width(68.0)
+                                .show_ui(inner, |menu| {
+                                    menu.selectable_value(
+                                        &mut c.meta.measure,
+                                        Measure::Nominal,
+                                        Measure::Nominal.as_str(),
+                                    );
+                                    menu.selectable_value(
+                                        &mut c.meta.measure,
+                                        Measure::Ordinal,
+                                        Measure::Ordinal.as_str(),
+                                    );
+                                    menu.selectable_value(
+                                        &mut c.meta.measure,
+                                        Measure::Scale,
+                                        Measure::Scale.as_str(),
+                                    );
+                                });
+                        });
+                        // Role
+                        block(ui, 70.0, cell_fill, &mut |inner: &mut egui::Ui| {
+                            inner.label(egui::RichText::new("Input").size(12.0));
+                        });
                         ui.end_row();
                     }
                 });

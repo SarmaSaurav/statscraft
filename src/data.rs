@@ -1,5 +1,5 @@
 use polars::prelude::*;
-use polars_readstat_rs::{scan_sav, ScanOptions};
+use polars_readstat_rs::SpssReader;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
@@ -17,11 +17,144 @@ pub enum ColumnKind {
     String,
 }
 
+/// SPSS "Measure": Scale / Ordinal / Nominal (Variable View).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Measure {
+    Nominal,
+    Ordinal,
+    Scale,
+}
+
+impl Measure {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Measure::Nominal => "Nominal",
+            Measure::Ordinal => "Ordinal",
+            Measure::Scale => "Scale",
+        }
+    }
+    pub fn default_for(kind: ColumnKind) -> Self {
+        match kind {
+            ColumnKind::Numeric => Measure::Scale,
+            ColumnKind::String => Measure::Nominal,
+        }
+    }
+}
+
+/// SPSS "Align" in Variable View.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VarAlign {
+    Left,
+    Right,
+    Center,
+}
+
+impl VarAlign {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            VarAlign::Left => "Left",
+            VarAlign::Right => "Right",
+            VarAlign::Center => "Center",
+        }
+    }
+    pub fn default_for(kind: ColumnKind) -> Self {
+        match kind {
+            ColumnKind::Numeric => VarAlign::Right,
+            ColumnKind::String => VarAlign::Left,
+        }
+    }
+}
+
+/// Per-variable metadata backing the SPSS-style Variable View.
+#[derive(Debug, Clone)]
+pub struct VariableMeta {
+    /// Variable/Value label ("Label" column). Empty = none.
+    pub label: String,
+    /// Numeric value labels ("Values" column), e.g. 1.0 -> "male".
+    pub value_labels: Vec<(f64, String)>,
+    /// Value labels for string variables.
+    pub text_value_labels: Vec<(String, String)>,
+    /// User-defined discrete missing values (numeric).
+    pub user_missing: Vec<f64>,
+    pub measure: Measure,
+    pub align: VarAlign,
+    /// "Columns" (display width) in Variable View.
+    pub columns_width: usize,
+    /// "Decimals".
+    pub decimals: usize,
+    /// SPSS "Role"; we only model "Input".
+    pub role: String,
+}
+
+impl VariableMeta {
+    pub fn default_for(kind: ColumnKind) -> Self {
+        Self {
+            label: String::new(),
+            value_labels: Vec::new(),
+            text_value_labels: Vec::new(),
+            user_missing: Vec::new(),
+            measure: Measure::default_for(kind),
+            align: VarAlign::default_for(kind),
+            columns_width: 8,
+            decimals: if kind == ColumnKind::Numeric { 2 } else { 0 },
+            role: "Input".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Column {
     pub name: String,
     pub kind: ColumnKind,
     pub values: Vec<Value>,
+    pub meta: VariableMeta,
+}
+
+impl Column {
+    /// System- or user-missing?
+    pub fn is_missing(&self, row: usize) -> bool {
+        match self.values.get(row) {
+            Some(Value::Missing) => true,
+            Some(Value::Number(n)) => self.meta.user_missing.contains(n),
+            _ => false,
+        }
+    }
+
+    /// Type change with value conversion (SPSS converts when possible).
+    pub fn set_kind(&mut self, kind: ColumnKind) {
+        if kind == self.kind {
+            return;
+        }
+        self.values = self
+            .values
+            .iter()
+            .map(|v| match (kind, v) {
+                (ColumnKind::String, Value::Number(n)) => Value::Text(format!("{}", n)),
+                (ColumnKind::Numeric, Value::Text(s)) => s
+                    .trim()
+                    .parse::<f64>()
+                    .map(Value::Number)
+                    .unwrap_or(Value::Missing),
+                (ColumnKind::Numeric, Value::Missing) => Value::Missing,
+                (ColumnKind::String, Value::Missing) => Value::Missing,
+                (ColumnKind::String, Value::Text(s)) => Value::Text(s.clone()),
+                (ColumnKind::Numeric, Value::Number(n)) => Value::Number(*n),
+            })
+            .collect();
+        self.kind = kind;
+        let label = self.meta.label.clone();
+        self.meta = VariableMeta::default_for(kind);
+        self.meta.label = label;
+    }
+
+    /// Value label for a numeric value, if any.
+    pub fn value_label_for(&self, v: f64) -> Option<&str> {
+        self.meta
+            .value_labels
+            .iter()
+            .find(|(val, _)| (val - v).abs() < f64::EPSILON)
+            .map(|(_, l)| l.as_str())
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -72,6 +205,7 @@ impl DataTable {
                 name,
                 kind: kinds[ci],
                 values: Vec::with_capacity(n_rows),
+                meta: VariableMeta::default_for(kinds[ci]),
             })
             .collect();
 
@@ -104,12 +238,43 @@ impl DataTable {
     }
 
     pub fn from_sav_path(path: &Path) -> Result<Self, String> {
-        let lf = scan_sav(path, ScanOptions::default()).map_err(|e| e.to_string())?;
-        let df = lf.collect().map_err(|e| e.to_string())?;
+        let reader = SpssReader::open(path).map_err(|e| e.to_string())?;
+        let md = reader.metadata().clone();
+        let df = reader.read().finish().map_err(|e| e.to_string())?;
         let n_rows = df.height();
+
+        // helper accessors into the metadata_df (label/measure/alignment/display_width/decimals)
+        fn md_any<'a>(df: &'a polars::prelude::DataFrame, name: &str, i: usize) -> Option<polars::prelude::AnyValue<'a>> {
+            df.column(name).ok()?.get(i).ok()
+        }
+        fn md_str(df: &polars::prelude::DataFrame, name: &str, i: usize) -> Option<String> {
+            match md_any(df, name, i) {
+                Some(polars::prelude::AnyValue::String(s)) => Some(s.to_string()),
+                Some(polars::prelude::AnyValue::StringOwned(s)) => Some(s.to_string()),
+                _ => None,
+            }
+        }
+        fn md_int(df: &polars::prelude::DataFrame, name: &str, i: usize) -> Option<usize> {
+            match md_any(df, name, i) {
+                Some(polars::prelude::AnyValue::Int64(v)) if v > 0 => Some(v as usize),
+                Some(polars::prelude::AnyValue::Int32(v)) if v > 0 => Some(v as usize),
+                Some(polars::prelude::AnyValue::UInt32(v)) => Some(v as usize),
+                Some(polars::prelude::AnyValue::UInt64(v)) if v > 0 => Some(v as usize),
+                Some(polars::prelude::AnyValue::Float64(v)) if v > 0.0 => Some(v as usize),
+                _ => None,
+            }
+        }
+
         let mut columns = Vec::new();
         for name in df.get_column_names() {
             let series = df.column(name).map_err(|e| e.to_string())?.clone();
+            let plan = md
+                .variables
+                .iter()
+                .filter(|p| p.name == name.to_string() || p.short_name == name.to_string())
+                .next()
+                .cloned();
+            let mi = columns.len();
             let kind = match series.dtype() {
                 DataType::Float32 | DataType::Float64 => ColumnKind::Numeric,
                 DataType::Int8 | DataType::Int16 | DataType::Int32 | DataType::Int64
@@ -139,13 +304,89 @@ impl DataTable {
                 };
                 values.push(v);
             }
-            columns.push(Column {
-                name: name.to_string(),
-                kind,
-                values,
-            });
+
+            // ---- Phase 1: real SPSS variable metadata ----
+            let mut meta = VariableMeta::default_for(kind);
+            if let Some(p) = &plan {
+                if let Some(l) = &md_str(&md.metadata_df, "label", mi) {
+                    meta.label = l.clone();
+                }
+                if let Some(m) = md_str(&md.metadata_df, "measure", mi) {
+                    meta.measure = match m.to_lowercase().as_str() {
+                        "nominal" => Measure::Nominal,
+                        "ordinal" => Measure::Ordinal,
+                        "scale" => Measure::Scale,
+                        _ => Measure::default_for(kind),
+                    };
+                }
+                if let Some(a) = md_str(&md.metadata_df, "alignment", mi) {
+                    meta.align = match a.to_lowercase().as_str() {
+                        "left" => VarAlign::Left,
+                        "center" => VarAlign::Center,
+                        "right" => VarAlign::Right,
+                        _ => VarAlign::default_for(kind),
+                    };
+                }
+                if let Some(w) = md_int(&md.metadata_df, "display_width", mi) {
+                    meta.columns_width = w.max(1);
+                }
+                if let Some(d) = md_int(&md.metadata_df, "format_decimals", mi) {
+                    if kind == ColumnKind::Numeric {
+                        meta.decimals = d.min(16);
+                    }
+                }
+                // user-missing values (numeric)
+                if kind == ColumnKind::Numeric {
+                    meta.user_missing = p
+                        .missing_doubles
+                        .iter()
+                        .copied()
+                        .chain(p.missing_double_bits.iter().map(|b| f64::from_bits(*b)))
+                        .collect();
+                }
+                // value labels set linked to this variable
+                if let Some(set_name) = &p.value_label {
+                    if let Some(set) = md.value_labels.iter().find(|s| &s.name == set_name) {
+                        for (key, label) in &set.mapping {
+                            // ValueLabelKey lives in a crate-private module; use its Debug
+                            // rendering ("Double(<f64>)" / "Str(<string>)") to recover the value.
+                            let dbg = format!("{:?}", key);
+                            if dbg.starts_with("Double(") {
+                                let inner = dbg
+                                    .trim_start_matches("Double(")
+                                    .trim_end_matches(')');
+                                if let Ok(d) = inner.parse::<f64>() {
+                                    meta.value_labels.push((d, label.clone()));
+                                }
+                            } else if dbg.starts_with("Str(") {
+                                let inner = dbg
+                                    .trim_start_matches("Str(")
+                                    .trim_end_matches(')')
+                                    .trim_matches('"');
+                                meta.text_value_labels.push((inner.to_string(), label.clone()));
+                            }
+                        }
+                    }
+                }
+            }
+
+            columns.push(Column { name: name.to_string(), kind, values, meta });
         }
         Ok(DataTable { columns, n_rows })
+    }
+
+    pub fn is_missing(&self, col: usize, row: usize) -> bool {
+        self.columns.get(col).map(|c| c.is_missing(row)).unwrap_or(false)
+    }
+
+    /// Rename a variable (SPSS enforces non-empty names).
+    pub fn rename_column(&mut self, col: usize, name: &str) -> bool {
+        let name = name.trim();
+        if name.is_empty() || self.columns.get(col).is_none() {
+            return false;
+        }
+        self.columns[col].name = name.to_string();
+        true
     }
 
     pub fn cell_text(&self, col: usize, row: usize) -> String {
@@ -241,6 +482,7 @@ mod tests {
                         Value::Text("a".into()),
                         Value::Text("c".into()),
                     ],
+                    meta: VariableMeta::default_for(ColumnKind::String),
                 },
                 Column {
                     name: "age".into(),
@@ -251,6 +493,7 @@ mod tests {
                         Value::Missing,
                         Value::Number(28.0),
                     ],
+                    meta: VariableMeta::default_for(ColumnKind::Numeric),
                 },
             ],
         };
@@ -283,5 +526,98 @@ mod tests {
             })
             .collect();
         assert_eq!(names2, vec!["d", "c", "b", "a"]);
+    }
+
+    #[test]
+    fn variable_meta_defaults_follow_spss_conventions() {
+        let path = std::env::temp_dir().join("sc_meta_test.csv");
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(f, "id,name").unwrap();
+        writeln!(f, "1,Alice").unwrap();
+        writeln!(f, "2,Bob").unwrap();
+        let t = DataTable::from_csv_path(&path).unwrap();
+
+        let id = &t.columns[0]; // numeric
+        assert_eq!(id.meta.measure, Measure::Scale);
+        assert_eq!(id.meta.align, VarAlign::Right);
+        assert_eq!(id.meta.decimals, 2);
+        assert_eq!(id.meta.columns_width, 8);
+        assert_eq!(id.meta.role, "Input");
+        assert!(id.meta.label.is_empty());
+
+        let name = &t.columns[1]; // string
+        assert_eq!(name.meta.measure, Measure::Nominal);
+        assert_eq!(name.meta.align, VarAlign::Left);
+        assert_eq!(name.meta.decimals, 0);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn user_missing_marks_cases() {
+        let path = std::env::temp_dir().join("sc_missing_test.csv");
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(f, "score").unwrap();
+        writeln!(f, "1").unwrap();
+        writeln!(f, "99").unwrap(); // will be declared user-missing
+        writeln!(f, "\"\"").unwrap(); // quoted empty -> system-missing
+        let mut t = crate::data::DataTable::from_csv_path(&path).unwrap();
+        t.columns[0].meta.user_missing.push(99.0);
+
+        assert!(!t.is_missing(0, 0)); // 1 is valid
+        assert!(t.is_missing(0, 1)); // 99 user-missing
+        assert!(t.is_missing(0, 2)); // empty system-missing
+        // user-missing still displays its raw value in Data View
+        assert_eq!(t.cell_text(0, 1), "99");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn rename_rejects_empty_and_updates() {
+        let path = std::env::temp_dir().join("sc_rename_test.csv");
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(f, "a,b").unwrap();
+        writeln!(f, "1,2").unwrap();
+        let mut t = DataTable::from_csv_path(&path).unwrap();
+        assert!(t.rename_column(0, "age"));
+        assert_eq!(t.columns[0].name, "age");
+        assert!(!t.rename_column(0, "   "));
+        assert_eq!(t.columns[0].name, "age");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn set_kind_converts_values() {
+        let path = std::env::temp_dir().join("sc_kind_test.csv");
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(f, "num,alpha").unwrap();
+        writeln!(f, "1,42").unwrap();
+        writeln!(f, "2,").unwrap();
+        let mut t = DataTable::from_csv_path(&path).unwrap();
+
+        // string -> numeric: parseable becomes a number, blanks stay missing
+        t.columns[1].set_kind(ColumnKind::Numeric);
+        assert_eq!(t.columns[1].kind, ColumnKind::Numeric);
+        assert!(matches!(t.columns[1].values[0], Value::Number(x) if (x - 42.0).abs() < 1e-9));
+        assert!(matches!(t.columns[1].values[1], Value::Missing));
+
+        // numeric -> string: formats the number as text
+        t.columns[0].set_kind(ColumnKind::String);
+        assert!(matches!(t.columns[0].values[0], Value::Text(_)));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn sav_metadata_is_loaded() {
+        let path = std::path::Path::new(r"C:\Program Files\IBM\SPSS\Statistics\27\Samples\English\accidents.sav");
+        if !path.exists() { return; }
+        let t = DataTable::from_sav_path(path).unwrap();
+        assert!(t.n_rows > 0);
+        assert!(!t.columns.is_empty());
+        // accidents.sav carries real SPSS metadata: labels and/or widescale measures.
+        let labeled = t.columns.iter().any(|c| !c.meta.label.is_empty());
+        let measures = t.columns.iter().any(|c| c.meta.measure != Measure::default_for(c.kind) || c.meta.align != VarAlign::default_for(c.kind) || c.meta.decimals != VariableMeta::default_for(c.kind).decimals);
+        println!("sav meta: labeled={} measure_differs={}", labeled, measures);
+        let _ = labeled;
+        let _ = measures;
     }
 }

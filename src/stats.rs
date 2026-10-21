@@ -18,7 +18,10 @@ pub fn descriptives(table: &DataTable) -> Vec<Descriptive> {
             continue;
         }
         let mut vals: Vec<f64> = Vec::new();
-        for v in &col.values {
+        for (row, v) in col.values.iter().enumerate() {
+            if col.is_missing(row) {
+                continue; // system- or user-missing excluded
+            }
             if let Value::Number(x) = v {
                 vals.push(*x);
             }
@@ -57,11 +60,15 @@ pub fn frequencies(table: &DataTable, col_idx: usize) -> Vec<FreqRow> {
         None => return Vec::new(),
     };
     let mut counts: Vec<(String, usize)> = Vec::new();
-    for v in &col.values {
-        let key = match v {
-            Value::Missing => String::from("(missing)"),
-            Value::Number(n) => format!("{}", n),
-            Value::Text(s) => s.clone(),
+    for (row, v) in col.values.iter().enumerate() {
+        let key = if col.is_missing(row) {
+            String::from("(missing)")
+        } else {
+            match v {
+                Value::Number(n) => format!("{}", n),
+                Value::Text(s) => s.clone(),
+                Value::Missing => String::from("(missing)"),
+            }
         };
         if let Some(e) = counts.iter_mut().find(|(k, _)| k == &key) {
             e.1 += 1;
@@ -104,10 +111,13 @@ pub fn correlations(table: &DataTable) -> Vec<Correlation> {
             let ib = nums[b];
             let ca = &table.columns[ia];
             let cb = &table.columns[ib];
-            // paired complete cases
+            // paired complete cases (system- or user-missing excluded)
             let mut xs = Vec::new();
             let mut ys = Vec::new();
-            for (va, vb) in ca.values.iter().zip(cb.values.iter()) {
+            for (row, (va, vb)) in ca.values.iter().zip(cb.values.iter()).enumerate() {
+                if ca.is_missing(row) || cb.is_missing(row) {
+                    continue;
+                }
                 if let (Value::Number(x), Value::Number(y)) = (va, vb) {
                     xs.push(*x);
                     ys.push(*y);
@@ -167,7 +177,10 @@ pub fn linear_regression(table: &DataTable) -> Option<RegressionResult> {
     let cy = &table.columns[yi];
     let mut xs = Vec::new();
     let mut ys = Vec::new();
-    for (a, b) in cx.values.iter().zip(cy.values.iter()) {
+    for (row, (a, b)) in cx.values.iter().zip(cy.values.iter()).enumerate() {
+        if cx.is_missing(row) || cy.is_missing(row) {
+            continue;
+        }
         if let (Value::Number(x), Value::Number(y)) = (a, b) {
             xs.push(*x);
             ys.push(*y);
@@ -259,7 +272,10 @@ pub fn independent_ttest(table: &DataTable) -> Option<TTestResult> {
 
     let mut g1 = Vec::new();
     let mut g2 = Vec::new();
-    for (gv, ov) in gcol.values.iter().zip(ocol.values.iter()) {
+    for (row, (gv, ov)) in gcol.values.iter().zip(ocol.values.iter()).enumerate() {
+        if gcol.is_missing(row) || ocol.is_missing(row) {
+            continue;
+        }
         if let (Value::Text(gs), Value::Number(ov)) = (gv, ov) {
             if gs == &g1name {
                 g1.push(*ov);
