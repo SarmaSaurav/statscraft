@@ -1006,75 +1006,31 @@ impl eframe::App for StatsCraftApp {
                                 .desired_width(filter_w)
                                 .frame(true),
                         );
-                        ui.add_space(14.0);
-
-                        // A segmented control for the two data views, the
-                        // modern equivalent of SPSS's two grid icons.
-                        let data_sel = self.view != View::Variables;
-                        let seg = |ui: &mut egui::Ui, label: &str, active: bool| -> egui::Response {
-                            let galley = ui
-                                .painter()
-                                .layout_no_wrap(
-                                    label.to_string(),
-                                    crate::theme::medium(12.0),
-                                    if active {
-                                        crate::theme::ACCENT
-                                    } else {
-                                        crate::theme::TEXT_MUTED
-                                    },
-                                );
-                            let size = egui::vec2(galley.size().x + 20.0, 26.0);
-                            let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
-                            let p = ui.painter();
-                            if active {
-                                p.rect_filled(rect, crate::theme::RADIUS_SM, crate::theme::ACCENT_SOFT);
-                            } else if resp.hovered() {
-                                p.rect_filled(rect, crate::theme::RADIUS_SM, crate::theme::SURFACE_ALT);
-                            }
-                            p.galley(
-                                egui::pos2(
-                                    rect.left() + 10.0,
-                                    rect.center().y - galley.size().y / 2.0,
-                                ),
-                                galley,
-                                if active {
-                                    crate::theme::ACCENT
-                                } else {
-                                    crate::theme::TEXT_MUTED
-                                },
-                            );
-                            resp
-                        };
-                        if seg(ui, "Variable View", !data_sel).clicked() {
-                            self.view = View::Variables;
-                        }
-                        if seg(ui, "Data View", data_sel).clicked() {
-                            self.view = View::Data;
-                        }
                     });
                 });
             });
 
-        // ---- Document tabs (Data View / Variable View) ----
+        // ---- The bottom row: the view tabs on the left, the status on
+        //      the right, in one panel as SPSS has it. ----
         egui::TopBottomPanel::bottom("tabs")
             .frame(
                 egui::Frame::none()
                     .fill(crate::theme::SURFACE_ALT)
                     .inner_margin(egui::Margin {
                         left: 8.0,
-                        right: 8.0,
-                        top: 5.0,
-                        bottom: 0.0,
+                        right: 12.0,
+                        top: 4.0,
+                        bottom: 4.0,
                     }),
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     for (label, v, icon) in [
-                        ("Data View", View::Data, crate::theme::Icon::Variables),
+                        ("Data View", View::Data, crate::theme::Icon::DataView),
                         (
                             "Variable View",
                             View::Variables,
-                            crate::theme::Icon::Settings,
+                            crate::theme::Icon::Variables,
                         ),
                     ] {
                         let sel = self.view == v
@@ -1083,30 +1039,31 @@ impl eframe::App for StatsCraftApp {
                                 && self.view != View::Output
                                 && self.view != View::Charts
                                 && self.view != View::Syntax);
+                        // The active tab is a solid blue pill; the other is
+                        // a quiet grey one that fills with blue on hover.
                         let color = if sel {
-                            crate::theme::ACCENT
+                            crate::theme::TEXT_ON_ACCENT
                         } else {
                             crate::theme::TEXT_MUTED
                         };
 
                         let galley = ui
                             .painter()
-                            .layout_no_wrap(label.to_string(), crate::theme::medium(12.5), color);
-                        let icon_w = 16.0;
-                        let size = egui::vec2(galley.size().x + icon_w + 22.0, 28.0);
+                            .layout_no_wrap(label.to_string(), crate::theme::semibold(12.0), color);
+                        let icon_w = 15.0;
+                        let size = egui::vec2(galley.size().x + icon_w + 24.0, 27.0);
                         let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
 
-                        // Selected tab: a filled pill; unselected: transparent.
                         let p = ui.painter();
                         if sel {
-                            p.rect_filled(rect, crate::theme::RADIUS_SM, crate::theme::ACCENT_SOFT);
-                            p.rect_stroke(
-                                rect,
-                                crate::theme::RADIUS_SM,
-                                egui::Stroke::new(1.0, crate::theme::ACCENT.gamma_multiply(0.35)),
-                            );
+                            // A fully rounded blue pill.
+                            p.rect_filled(rect, rect.height() / 2.0, crate::theme::ACCENT);
                         } else if resp.hovered() {
-                            p.rect_filled(rect, crate::theme::RADIUS_SM, crate::theme::SURFACE);
+                            p.rect_filled(
+                                rect,
+                                rect.height() / 2.0,
+                                crate::theme::ACCENT.gamma_multiply(0.14),
+                            );
                         }
 
                         let ctx = ui.ctx().clone();
@@ -1133,24 +1090,11 @@ impl eframe::App for StatsCraftApp {
                             self.view = v;
                         }
                     }
-                });
-            });
 
-        // ---- Status bar ----
-        if self.show_status {
-            egui::TopBottomPanel::bottom("statusbar")
-                .frame(
-                    egui::Frame::none()
-                        .fill(crate::theme::SURFACE_ALT)
-                        .inner_margin(egui::Margin {
-                            left: 12.0,
-                            right: 12.0,
-                            top: 5.0,
-                            bottom: 5.0,
-                        }),
-                )
-                .show(ctx, |ui| {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // The status sits on the right of the same row, as it
+                    // does in SPSS.
+                    if self.show_status {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
                             egui::RichText::new("Unicode: ON")
                                 .color(crate::theme::TEXT_FAINT)
@@ -1191,9 +1135,10 @@ impl eframe::App for StatsCraftApp {
                                 .color(crate::theme::TEXT_MUTED)
                                 .size(11.5),
                         );
-                    });
+                        });
+                    }
                 });
-        }
+            });
 
         egui::CentralPanel::default().show(ctx, |ui| match self.view {
             View::Data => {
@@ -1984,8 +1929,10 @@ pub fn run_with(
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_icon(app_icon())
-            .with_inner_size([1360.0, 860.0])
-            .with_min_inner_size([820.0, 520.0]),
+            // Fit the window inside the work area so the tab strip and the
+            // status bar are never pushed off the bottom of the screen.
+            .with_inner_size(egui::vec2(1360.0, 780.0))
+            .with_min_inner_size(egui::vec2(820.0, 480.0)),
         ..Default::default()
     };
     eframe::run_native(

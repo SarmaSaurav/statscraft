@@ -369,6 +369,7 @@ pub mod icons {
         check => "check",
         measure_scale => "measure_scale",
         measure_nominal => "measure_nominal",
+        data_view => "data_view",
     );
 }
 
@@ -407,6 +408,8 @@ pub enum Icon {
     MeasureScale,
     /// A pencil — SPSS's measure-level icon for a string/nominal variable.
     MeasureNominal,
+    /// A data grid — the Data View tab.
+    DataView,
 }
 
 impl Icon {
@@ -443,6 +446,7 @@ impl Icon {
             Icon::Check => icons::check,
             Icon::MeasureScale => icons::measure_scale,
             Icon::MeasureNominal => icons::measure_nominal,
+            Icon::DataView => icons::data_view,
         }
     }
 
@@ -479,6 +483,7 @@ impl Icon {
             Icon::Check => "Check",
             Icon::MeasureScale => "Measure scale",
             Icon::MeasureNominal => "Measure nominal",
+            Icon::DataView => "Data View",
         }
     }
 }
