@@ -716,3 +716,45 @@ pub user_missing_range: Option<(f64, f64)>,
 
 A case whose value falls in either is missing, and every procedure
 leaves it out, exactly as it leaves out the system-missing value.
+
+## 13. Phase 11 — the Chart Builder
+
+SPSS does not draw a chart straight from a procedure. The **Chart
+Builder** is where the reader chooses the type of the chart, the
+variables it uses, how the data is summarised, the labels, and any
+reference line — and the chart is then drawn from those choices.
+
+`src/chartbuilder.rs` is the same thing. The builder holds the
+choices, and `build` turns them into a chart:
+
+| Choice | What it does |
+|---|---|
+| **Chart type** | Bar, Histogram, Scatter, Box Plot. |
+| **Variables** | The category or the variable, the second variable of a scatter, the grouping variable. |
+| **Summarise by** | For a bar chart: Count, Mean, Median or Sum, of a numeric variable by a group. |
+| **Bins** | The number of bins of a histogram. |
+| **Labels** | The title and the two axis labels. |
+| **Reference line** | A horizontal line at a chosen value, with its own label. |
+
+The chart is drawn underneath the choices, so the reader sees what
+they make, and **OK** puts it in the Output Viewer.
+
+### 13.1 The reference line
+
+The reference line is a part of the chart model:
+
+```rust
+pub reference_line: Option<f64>,
+pub reference_label: String,
+```
+
+It is drawn dashed, in the amber of the theme, so it reads as an
+annotation rather than as part of the data.
+
+### 13.2 The defaults
+
+The default category is a variable that makes a *readable* chart: one
+with a handful of distinct values. The first string column is often an
+identifier, with one value per case, and a chart of that says nothing
+— so the default is the string column with the fewest distinct values
+between two and twenty.

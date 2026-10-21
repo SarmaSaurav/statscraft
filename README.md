@@ -30,6 +30,9 @@ The UI is a modern take on the SPSS workbench, not a pixel copy of it:
   blocks of cells copied and pasted, and a variable's **missing values**
   declared as discrete values or as a range, which every procedure then
   leaves out.
+- **The Chart Builder** — the type of the chart, the variables, how the
+  data is summarised, the title and the axis labels, and a reference
+  line, with a live preview of the result.
 - **Chrome** — rounded cards, soft shadows, zebra-striped grid, pill-shaped
   document tabs, hairline borders, and a proper primary button for *Run Syntax*.
 

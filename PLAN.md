@@ -213,8 +213,9 @@ now, against the design above.
 | 8 | A dark theme after the Dracula palette, switched from the View menu. |
 | 9 | A real pivot-table model: cells addressed by a row key and a column key, the totals as levels of the dimensions, the measures of a cell, the pivoting operation and an export that carries the structure. |
 | 10 | The Data Editor's editing: add and delete cases, copy and paste cells and blocks of cells, and the Define Missing Values dialog, with the discrete values and the range kept apart. |
+| 11 | The Chart Builder: the type of the chart, the variables, how the data is summarised, the labels, a reference line, and a preview of the result. |
 
-Nineteen procedures, 95 tests, one runner behind both the menus and the
+Nineteen procedures, 103 tests, one runner behind both the menus and the
 Syntax Editor. `docs/SPSS_REFERENCE.md` records what was observed in the
 installed IBM SPSS Statistics 27 and where the app deliberately differs
 from it.
@@ -225,9 +226,6 @@ The remaining work, in the order it should be taken:
   mixed), the nonparametric outliers and 1-sample procedures, the
   resampling menus, the missing-data analysis procedures, and the
   survival procedures.
-- **The chart builder** — the charts are painted directly. A real chart
-  builder would let the user choose the type, the axes, the labels and
-  the reference lines, the way SPSS's does.
 - **The installer and the Linux package** — the Windows installer works;
   the `.deb` has never been built on a Linux machine.
 

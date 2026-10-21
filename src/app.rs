@@ -36,6 +36,8 @@ pub struct StatsCraftApp {
     pub dialog: Option<crate::dialog::DialogState>,
     /// Phase 10: the open Missing Values dialog, if any.
     pub missing_dialog: Option<crate::dialog::MissingValues>,
+    /// Phase 11: the open Chart Builder, if any.
+    pub chart_builder: Option<crate::chartbuilder::ChartBuilder>,
     /// Whether the dark theme is active.
     pub dark: bool,
     /// The egui context, so the theme can be re-applied when it
@@ -64,6 +66,7 @@ impl Default for StatsCraftApp {
             show_syntax_window: false,
             dialog: None,
             missing_dialog: None,
+            chart_builder: None,
             dark: false,
             // A placeholder context, replaced when the app is created.
             // The theme is applied to the real one there.
@@ -792,6 +795,34 @@ impl eframe::App for StatsCraftApp {
         // ---- Phase 5: the open procedure dialog ----
         // SPSS opens a modal dialog for every procedure. We draw it in the
         // main window so the Data Editor stays visible behind it.
+        // ---- Phase 11: the Chart Builder ----
+        if self.chart_builder.is_some() {
+            let mut cb = self.chart_builder.take().expect("the builder is present");
+            crate::chartbuilder::show(ctx, self, &mut cb);
+            if cb.confirmed {
+                if let Some(t) = self.table.as_ref() {
+                    if let Some(chart) = cb.build(t) {
+                        let title = chart.title.clone();
+                        self.outputs.push(crate::output::OutputTable {
+                            title: title.clone(),
+                            headers: vec!["Chart".into()],
+                            rows: vec![vec![title.clone()]],
+                            note: String::new(),
+                            chart: Some(chart),
+                            pivot: None,
+                        });
+                        self.status = format!("Chart '{}' added to the output.", title);
+                        self.show_output_window = true;
+                    } else {
+                        self.status = "These choices do not make a chart.".to_string();
+                    }
+                }
+            } else {
+                // The dialog was closed without a decision, so it goes
+                // back as it was.
+                self.chart_builder = Some(cb);
+            }
+        }
         // ---- Phase 10: the Missing Values dialog ----
         if self.missing_dialog.is_some() {
             let mut mv = self.missing_dialog.take().expect("the dialog is present");
@@ -1123,7 +1154,25 @@ impl eframe::App for StatsCraftApp {
                     });
                     // ---------------- Graphs ----------------
                     ui.menu_button("Graphs", |ui| {
-                        if crate::icon::menu_item(ui, crate::theme::Icon::Chart, "Chart Builder…").clicked() { ui.close_menu(); self.view = View::Charts; }
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Chart, "Chart Builder…").clicked() {
+                            ui.close_menu();
+                            // The builder opens with the defaults for
+                            // the data that is loaded.
+                            let mut b = match self.chart_builder.take() {
+                                Some(b) => b,
+                                None => self
+                                    .table
+                                    .as_ref()
+                                    .map(crate::chartbuilder::ChartBuilder::for_table)
+                                    .unwrap_or_default(),
+                            };
+                            b.confirmed = false;
+                            self.chart_builder = Some(b);
+                        }
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Histogram, "Legacy Chart View").clicked() {
+                            ui.close_menu();
+                            self.view = View::Charts;
+                        }
                     });
                     // ---------------- Utilities ----------------
                     ui.menu_button("Utilities", |ui| {
@@ -2028,6 +2077,12 @@ mod tests {
 /// The chart is painted directly rather than through a plotting library,
 /// so it always fits the space it is given and the axis labels can be
 /// the category names.
+/// Draw a chart. Public so the Chart Builder can show a preview of
+/// the chart the choices make.
+pub fn render_chart_preview(ui: &mut egui::Ui, chart: &crate::output::Chart) {
+    render_output_chart(ui, chart);
+}
+
 fn render_output_chart(ui: &mut egui::Ui, chart: &crate::output::Chart) {
     use crate::theme;
     use crate::output::ChartKind;
@@ -2214,6 +2269,35 @@ fn render_output_chart(ui: &mut egui::Ui, chart: &crate::output::Chart) {
                         egui::Stroke::new(2.0, color),
                     );
                 }
+            }
+        }
+    }
+
+    // ---- The reference line ----
+    // A horizontal line at a chosen value, with its label at the
+    // right-hand end.
+    if let Some(value) = chart.reference_line {
+        if value >= min_y && value <= y_max {
+            let y = plot_rect.bottom() - (((value - min_y) / (y_max - min_y)) * plot_rect.height() as f64) as f32;
+            // The line is dashed, so it reads as an annotation rather
+            // than as part of the data.
+            let mut x = plot_rect.left();
+            while x < plot_rect.right() {
+                let x2 = (x + 7.0).min(plot_rect.right());
+                painter.line_segment(
+                    [egui::pos2(x, y), egui::pos2(x2, y)],
+                    egui::Stroke::new(1.4, theme::amber()),
+                );
+                x += 12.0;
+            }
+            if !chart.reference_label.is_empty() {
+                painter.text(
+                    egui::pos2(plot_rect.right() - 4.0, y - 9.0),
+                    egui::Align2::RIGHT_BOTTOM,
+                    &chart.reference_label,
+                    theme::semibold(10.5),
+                    theme::amber(),
+                );
             }
         }
     }

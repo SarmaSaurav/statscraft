@@ -1,4 +1,5 @@
 mod app;
+mod chartbuilder;
 mod data;
 mod dialog;
 mod glm;

@@ -28,6 +28,14 @@ pub struct Chart {
     pub y_label: String,
     /// The series, one per named group.
     pub series: Vec<ChartSeries>,
+    /// A horizontal reference line at this value, if there is one.
+    ///
+    /// The Chart Builder lets the reader put a line on the chart — the
+    /// mean of the data, a threshold — and SPSS's charts carry the
+    /// same thing.
+    pub reference_line: Option<f64>,
+    /// The label of the reference line.
+    pub reference_label: String,
 }
 
 /// The kind of chart.
@@ -1761,6 +1769,8 @@ impl OutputTable {
                     x_labels: Vec::new(),
                 },
             ],
+            reference_line: None,
+            reference_label: String::new(),
         });
 
         Self {
@@ -1914,8 +1924,10 @@ pub fn bar_chart_from_frequencies(
             quartiles: None,
             x_labels: data.iter().map(|r| r.value.clone()).collect(),
         }],
+            reference_line: None,
+            reference_label: String::new(),
+        }
     }
-}
 
 /// Build a histogram chart from a histogram's bins.
 pub fn histogram_chart(h: &crate::stats::Histogram) -> crate::output::Chart {
@@ -1931,8 +1943,10 @@ pub fn histogram_chart(h: &crate::stats::Histogram) -> crate::output::Chart {
             quartiles: None,
             x_labels: Vec::new(),
         }],
+            reference_line: None,
+            reference_label: String::new(),
+        }
     }
-}
 
 /// Build a scatter chart from a set of points.
 pub fn scatter_chart(s: &crate::stats::Scatter) -> crate::output::Chart {
@@ -1948,8 +1962,10 @@ pub fn scatter_chart(s: &crate::stats::Scatter) -> crate::output::Chart {
             quartiles: None,
             x_labels: Vec::new(),
         }],
+            reference_line: None,
+            reference_label: String::new(),
+        }
     }
-}
 
 #[cfg(test)]
 mod pivot_tests {
