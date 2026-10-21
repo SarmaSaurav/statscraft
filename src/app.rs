@@ -393,8 +393,9 @@ impl eframe::App for StateCraftApp {
             ctx.show_viewport_immediate(
                 egui::ViewportId::from_hash_of("statecraft_output"),
                 egui::ViewportBuilder::default()
-                    .with_title(format!("Output1 - StateCraft Output Viewer"))
-                    .with_inner_size([780.0, 560.0]),
+                    .with_title(format!("Output1 - StateCraft Statistics Viewer"))
+                    .with_inner_size([1080.0, 720.0])
+                    .with_min_inner_size([520.0, 360.0]),
                 |vctx, _class| {
                     egui::CentralPanel::default()
                         .frame(
@@ -414,19 +415,123 @@ impl eframe::App for StateCraftApp {
                                     ui.separator();
                                 });
                             if self.outputs.is_empty() {
-                                ui.label("No output yet. Run an analysis from the Data Editor menus.");
+                                ui.vertical_centered(|ui| {
+                                    ui.add_space(40.0);
+                                    crate::icon::paint_icon(
+                                        ui.painter(),
+                                        ui.ctx(),
+                                        crate::theme::Icon::Output,
+                                        egui::Rect::from_center_size(
+                                            ui.painter().text(
+                                                egui::Pos2::ZERO,
+                                                egui::Align2::LEFT_CENTER,
+                                                "",
+                                                crate::theme::body(12.0),
+                                                crate::theme::TEXT,
+                                            )
+                                            .min,
+                                            egui::vec2(48.0, 48.0),
+                                        ),
+                                        crate::theme::TEXT_FAINT,
+                                    );
+                                    ui.add_space(10.0);
+                                    ui.label(
+                                        egui::RichText::new("No output yet")
+                                            .font(crate::theme::semibold(15.0))
+                                            .color(crate::theme::TEXT_MUTED),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new(
+                                            "Run an analysis from the Analyze menu, or type SPSS syntax in Syntax1.",
+                                        )
+                                        .color(crate::theme::TEXT_FAINT)
+                                        .size(12.0),
+                                    );
+                                });
                                 return;
                             }
-                            egui::ScrollArea::vertical()
-                                .auto_shrink([false, false])
-                                .show(ui, |ui| {
-                                    for t in &self.outputs {
-                                        ui.add_space(6.0);
-                                        ui.add(egui::Label::new(egui::RichText::new(&t.title).font(crate::theme::semibold(16.0))));
-                                        ui.add_space(4.0);
-                                        render_output_table(ui, t);
-                                    }
+
+                            // SPSS splits the Viewer into an outline tree on
+                            // the left and the result on the right.
+                            ui.columns(2, |cols| {
+                                cols[0].set_min_width(210.0);
+                                cols[0].group(|ui| {
+                                    ui.add(
+                                        egui::Label::new(
+                                            egui::RichText::new("Outline")
+                                                .font(crate::theme::semibold(11.0))
+                                                .color(crate::theme::TEXT_FAINT),
+                                        ),
+                                    );
+                                    ui.add_space(4.0);
+                                    egui::ScrollArea::vertical()
+                                        .auto_shrink([false, false])
+                                        .show(ui, |ui| {
+                                            for (i, t) in self.outputs.iter().enumerate() {
+                                                let sel = self.selected_output == i;
+                                                let color = if sel {
+                                                    crate::theme::ACCENT
+                                                } else {
+                                                    crate::theme::TEXT_MUTED
+                                                };
+                                                let galley = ui.painter().layout_no_wrap(
+                                                    t.title.clone(),
+                                                    crate::theme::medium(12.0),
+                                                    color,
+                                                );
+                                                let (rect, resp) = ui.allocate_exact_size(
+                                                    egui::vec2(ui.available_width(), 22.0),
+                                                    egui::Sense::click(),
+                                                );
+                                                let p = ui.painter();
+                                                if sel {
+                                                    p.rect_filled(
+                                                        rect,
+                                                        crate::theme::RADIUS_SM,
+                                                        crate::theme::ACCENT_SOFT,
+                                                    );
+                                                } else if resp.hovered() {
+                                                    p.rect_filled(
+                                                        rect,
+                                                        crate::theme::RADIUS_SM,
+                                                        crate::theme::SURFACE_ALT,
+                                                    );
+                                                }
+                                                // a small tree bullet
+                                                p.circle_filled(
+                                                    egui::pos2(rect.left() + 10.0, rect.center().y),
+                                                    2.5,
+                                                    color,
+                                                );
+                                                p.galley(
+                                                    egui::pos2(
+                                                        rect.left() + 18.0,
+                                                        rect.center().y - galley.size().y / 2.0,
+                                                    ),
+                                                    galley,
+                                                    color,
+                                                );
+                                                if resp.clicked() {
+                                                    self.selected_output = i;
+                                                }
+                                            }
+                                        });
                                 });
+                                cols[1].group(|ui| {
+                                    let t = &self.outputs[self.selected_output.min(self.outputs.len() - 1)];
+                                    egui::ScrollArea::vertical()
+                                        .auto_shrink([false, false])
+                                        .show(ui, |ui| {
+                                            ui.add_space(2.0);
+                                            ui.add(egui::Label::new(
+                                                egui::RichText::new(&t.title)
+                                                    .font(crate::theme::semibold(16.0)),
+                                            ));
+                                            ui.add_space(8.0);
+                                            render_output_table(ui, t);
+                                        });
+                                });
+                            });
                         });
                     // closing the window hides it until re-opened from Window menu
                     if vctx.input(|i| i.viewport().close_requested()) {
@@ -441,7 +546,8 @@ impl eframe::App for StateCraftApp {
                 egui::ViewportId::from_hash_of("statecraft_syntax"),
                 egui::ViewportBuilder::default()
                     .with_title(format!("Syntax1 - StateCraft Syntax Editor"))
-                    .with_inner_size([640.0, 440.0]),
+                    .with_inner_size([860.0, 560.0])
+                    .with_min_inner_size([520.0, 320.0]),
                 |vctx, _class| {
                     egui::CentralPanel::default()
                         .frame(
@@ -495,7 +601,8 @@ impl eframe::App for StateCraftApp {
         // The theme is installed once in `run`; re-assert it here so a
         // viewport that inherits the default egui look still gets StateCraft.
         crate::theme::apply_style(ctx, false);
-        let title = format!("{} — StateCraft", self.dataset_label());
+        // SPSS titles the window "<dataset> [DataSet<n>] - <product>".
+        let title = format!("{} — StateCraft Statistics", self.dataset_label());
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
         egui::TopBottomPanel::top("menu")
@@ -718,11 +825,12 @@ impl eframe::App for StateCraftApp {
                         left: 8.0,
                         right: 8.0,
                         top: 4.0,
-                        bottom: 6.0,
+                        bottom: 5.0,
                     }),
             )
             .show(ctx, |ui| {
-                // ---- Modern icon toolbar ----
+                // ---- Toolbar: action groups on the left, view switch and the
+                //      variable filter on the right, like SPSS but flatter. ----
                 ui.horizontal(|ui| {
                     if crate::icon::icon_button(
                         ui,
@@ -819,7 +927,7 @@ impl eframe::App for StateCraftApp {
                         self.show_syntax_window = true;
                     }
 
-                    // Push the variable filter to the right of the toolbar.
+                    // ---- right side: view switch + variable filter ----
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let f = self.var_filter.to_lowercase();
                         let total = self.table.as_ref().map(|t| t.columns.len()).unwrap_or(0);
@@ -834,21 +942,67 @@ impl eframe::App for StateCraftApp {
                             })
                             .unwrap_or(0);
                         ui.label(
-                            egui::RichText::new(format!("{} of {} variables", visible, total))
-                                .color(crate::theme::TEXT_MUTED),
+                            egui::RichText::new(format!("Visible: {} of {} Variables", visible, total))
+                                .color(crate::theme::TEXT_MUTED)
+                                .size(11.5),
                         );
-                        let filter_w = 220.0;
+                        ui.add_space(10.0);
+                        let filter_w = 200.0;
                         ui.add(
                             egui::TextEdit::singleline(&mut self.var_filter)
                                 .hint_text("Filter variables…")
                                 .desired_width(filter_w)
                                 .frame(true),
                         );
+                        ui.add_space(14.0);
+
+                        // A segmented control for the two data views, the
+                        // modern equivalent of SPSS's two grid icons.
+                        let data_sel = self.view != View::Variables;
+                        let seg = |ui: &mut egui::Ui, label: &str, active: bool| -> egui::Response {
+                            let galley = ui
+                                .painter()
+                                .layout_no_wrap(
+                                    label.to_string(),
+                                    crate::theme::medium(12.0),
+                                    if active {
+                                        crate::theme::ACCENT
+                                    } else {
+                                        crate::theme::TEXT_MUTED
+                                    },
+                                );
+                            let size = egui::vec2(galley.size().x + 20.0, 26.0);
+                            let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+                            let p = ui.painter();
+                            if active {
+                                p.rect_filled(rect, crate::theme::RADIUS_SM, crate::theme::ACCENT_SOFT);
+                            } else if resp.hovered() {
+                                p.rect_filled(rect, crate::theme::RADIUS_SM, crate::theme::SURFACE_ALT);
+                            }
+                            p.galley(
+                                egui::pos2(
+                                    rect.left() + 10.0,
+                                    rect.center().y - galley.size().y / 2.0,
+                                ),
+                                galley,
+                                if active {
+                                    crate::theme::ACCENT
+                                } else {
+                                    crate::theme::TEXT_MUTED
+                                },
+                            );
+                            resp
+                        };
+                        if seg(ui, "Variable View", !data_sel).clicked() {
+                            self.view = View::Variables;
+                        }
+                        if seg(ui, "Data View", data_sel).clicked() {
+                            self.view = View::Data;
+                        }
                     });
                 });
             });
 
-        // ---- SPSS bottom-left document tabs (Data View / Variable View) ----
         // ---- Document tabs (Data View / Variable View) ----
         egui::TopBottomPanel::bottom("tabs")
             .frame(
@@ -951,11 +1105,19 @@ impl eframe::App for StateCraftApp {
                                 .size(11.0),
                         );
                         ui.add_space(10.0);
+                        // SPSS shows "IBM SPSS Statistics Processor is ready".
+                        // We keep the same shape, with our own name.
                         let ready = !self.status.starts_with("Error");
                         let (label, col) = if ready {
-                            ("StateCraft Statistics Processor is ready", crate::theme::TEAL)
+                            (
+                                "StateCraft Statistics Processor is ready",
+                                crate::theme::TEAL,
+                            )
                         } else {
-                            ("StateCraft Statistics Processor has an error", crate::theme::AMBER)
+                            (
+                                "StateCraft Statistics Processor has an error",
+                                crate::theme::AMBER,
+                            )
                         };
                         ui.label(
                             egui::RichText::new(label)
@@ -963,6 +1125,15 @@ impl eframe::App for StateCraftApp {
                                 .size(11.5),
                         );
                         ui.add_space(14.0);
+                        // SPSS shows the cell count in the status bar.
+                        if let Some(t) = &self.table {
+                            ui.label(
+                                egui::RichText::new(format!("{} cells", t.n_rows * t.columns.len()))
+                                    .color(crate::theme::TEXT_FAINT)
+                                    .size(11.0),
+                            );
+                            ui.add_space(12.0);
+                        }
                         ui.label(
                             egui::RichText::new(&self.status)
                                 .color(crate::theme::TEXT_MUTED)
