@@ -1,6 +1,5 @@
 ﻿use crate::data::DataTable;
 use crate::output::OutputTable;
-use crate::stats;
 use eframe::egui;
 use egui_plot::{Plot, PlotPoints};
 
@@ -544,7 +543,7 @@ impl eframe::App for StateCraftApp {
                             ui.label("No data loaded.");
                         } else {
                             let names: Vec<String> = self.table.as_ref().unwrap().columns.iter().map(|c| c.name.clone()).collect();
-                            for (i, name) in names.iter().enumerate() {
+                            for name in names.iter() {
                                 ui.menu_button(name, |ui| {
                                     if ui.button("Ascending").clicked() { ui.close_menu(); let cmd = format!("SORT CASES BY {} (A)", name); self.paste_and_run(cmd); }
                                     if ui.button("Descending").clicked() { ui.close_menu(); let cmd = format!("SORT CASES BY {} (D)", name); self.paste_and_run(cmd); }
@@ -701,31 +700,65 @@ impl eframe::App for StateCraftApp {
         });
 
         // ---- SPSS bottom-left document tabs (Data View / Variable View) ----
-        egui::TopBottomPanel::bottom("tabs").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.add_space(4.0);
-                for (label, v) in
-                    [("Data View", View::Data), ("Variable View", View::Variables)]
-                {
-                    let sel = self.view == v || (v == View::Data && self.view != View::Variables && self.view != View::Output && self.view != View::Charts && self.view != View::Syntax);
-                    let fill = if sel {
-                        egui::Color32::WHITE
-                    } else {
-                        egui::Color32::from_rgb(0xD9, 0xD9, 0xD9)
-                    };
-                    let mut txt = egui::RichText::new(label).size(13.0);
-                    if sel {
-                        txt = txt.strong();
-                    }
-                    if ui
-                        .add(egui::Button::new(txt).fill(fill).small())
-                        .clicked()
+        egui::TopBottomPanel::bottom("tabs")
+            .frame(
+                egui::Frame::none()
+                    .fill(egui::Color32::from_rgb(0xF2, 0xF2, 0xF2))
+                    .inner_margin(egui::Margin {
+                        left: 6.0,
+                        right: 6.0,
+                        top: 4.0,
+                        bottom: 0.0,
+                    }),
+            )
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    for (label, v) in
+                        [("Data View", View::Data), ("Variable View", View::Variables)]
                     {
-                        self.view = v;
+                        let sel = self.view == v || (v == View::Data && self.view != View::Variables && self.view != View::Output && self.view != View::Charts && self.view != View::Syntax);
+                        let font = if sel {
+                            egui::FontId::proportional(13.0)
+                        } else {
+                            egui::FontId::proportional(13.0)
+                        };
+                        let color = if sel {
+                            egui::Color32::from_gray(25)
+                        } else {
+                            egui::Color32::from_gray(80)
+                        };
+                        let galley = ui.painter().layout_no_wrap(
+                            label.to_string(),
+                            font,
+                            color,
+                        );
+                        let size = egui::vec2(galley.size().x + 26.0, 24.0);
+                        let (rect, resp) =
+                            ui.allocate_exact_size(size, egui::Sense::click());
+                        // tab body: selected = document white, unselected = gray strip
+                        let fill = if sel {
+                            egui::Color32::WHITE
+                        } else {
+                            egui::Color32::from_rgb(0xDD, 0xDD, 0xDD)
+                        };
+                        ui.painter().rect_filled(rect, 0.0, fill);
+                        // borders: top/left/right always, bottom only when unselected
+                        let stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(0xB0, 0xB0, 0xB0));
+                        let p = ui.painter();
+                        p.line_segment([rect.left_top(), rect.right_top()], stroke);
+                        p.line_segment([rect.left_top(), rect.left_bottom()], stroke);
+                        p.line_segment([rect.right_top(), rect.right_bottom()], stroke);
+                        if !sel {
+                            p.line_segment([rect.left_bottom(), rect.right_bottom()], stroke);
+                        }
+                        let pos = rect.center() - galley.size() / 2.0;
+                        p.galley(pos, galley, color);
+                        if resp.clicked() {
+                            self.view = v;
+                        }
                     }
-                }
+                });
             });
-        });
 
         // ---- SPSS status bar: gray strip, ready + Unicode on the right ----
         if self.show_status {
@@ -743,7 +776,7 @@ impl eframe::App for StateCraftApp {
                             ui.label("Unicode: ON");
                             ui.separator();
                             ui.label(
-                                egui::RichText::new("âœ”")
+                                egui::RichText::new("✔")
                                     .color(egui::Color32::from_rgb(0x1E, 0x9E, 0x3A)),
                             );
                             ui.label("StateCraft Statistics Processor is ready");
@@ -1542,8 +1575,70 @@ fn render_variables(ui: &mut egui::Ui, table: &mut DataTable) {
         });
 }
 
+/// StateCraft application icon: ascending white bars on a navy rounded square.
+/// Generated at runtime so the build stays asset-free.
+fn app_icon() -> egui::IconData {
+    const S: usize = 64;
+    let mut rgba = vec![0u8; S * S * 4];
+    for y in 0..S {
+        for x in 0..S {
+            let fx = x as f32 + 0.5;
+            let fy = y as f32 + 0.5;
+            // rounded-rectangle signed distance
+            let half = S as f32 / 2.0;
+            let corner = 12.0;
+            let inset = 2.0;
+            let qx = (fx - half).abs() - (half - inset - corner);
+            let qy = (fy - half).abs() - (half - inset - corner);
+            let outside = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt();
+            let d = outside + qx.max(qy).min(0.0) - corner;
+            if d > 0.0 {
+                continue; // transparent outside the rounded square
+            }
+            // navy background with a subtle vertical gradient
+            let t = fy / S as f32;
+            let (mut r, mut g, mut b) = (
+                (26.0 + 18.0 * t) as u8,
+                (58.0 + 32.0 * t) as u8,
+                (104.0 + 44.0 * t) as u8,
+            );
+            // three ascending bars (14..22, 28..36, 42..50) with baseline at y=51
+            let in_bar = (14..22).contains(&x) || (28..36).contains(&x) || (42..50).contains(&x);
+            let tops = [(14..22, 40), (28..36, 31), (42..50, 19)];
+            for (range, top) in tops {
+                if range.contains(&x) && y >= top && y <= 51 {
+                    r = 245;
+                    g = 247;
+                    b = 250;
+                }
+            }
+            if in_bar && y > 51 && y <= 53 {
+                r = 160;
+                g = 190;
+                b = 225; // baseline rule
+            }
+            let i = (y * S + x) * 4;
+            rgba[i] = r;
+            rgba[i + 1] = g;
+            rgba[i + 2] = b;
+            rgba[i + 3] = 255;
+        }
+    }
+    egui::IconData {
+        rgba,
+        width: S as u32,
+        height: S as u32,
+    }
+}
+
 pub fn run(initial_path: Option<String>) -> eframe::Result<()> {
-    let options = eframe::NativeOptions::default();
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_icon(app_icon())
+            .with_inner_size([1240.0, 780.0])
+            .with_min_inner_size([760.0, 480.0]),
+        ..Default::default()
+    };
     eframe::run_native(
         "StateCraft",
         options,

@@ -40,13 +40,29 @@ cd installer && cargo build --release   # Windows installer (embeds the app exe)
   loading via polars-readstat-rs.
 
 ## Features
-- Load CSV and SPSS `.sav`
-- Descriptives, Frequencies, Correlations, Linear Regression, T-Test
-- Charts (scatter, histogram)
+- Load CSV and SPSS `.sav` (labels, value labels, measure, alignment,
+  decimals, user-missing)
+- Procedures: Descriptives, Frequencies, Correlations, Linear Regression,
+  Independent-Samples T Test, Paired-Samples T Test, One-Way ANOVA,
+  Crosstabs with Pearson Chi-Square
 - SPSS-like Data Editor (Data View / Variable View tabs, variable filter)
 - Variable View with the SPSS column set (Name…Role)
-- Sort Cases, Export output (Markdown) and data (CSV), file dialogs
-- Syntax runner: LOAD/DESCRIPTIVES/FREQUENCIES/CORRELATIONS/REGRESSION/TTEST/CLEAR
+- Multi-window documents: Data Editor (main window), Output Viewer and
+  Syntax Editor in separate OS windows, like SPSS
+- Output Viewer with pivot tables, outline pane, and Markdown/HTML export
+- Sort Cases, export data (CSV), file dialogs
+- Syntax runner:
+  `LOAD`/`GET`, `CLEAR`, `DESCRIPTIVES`, `FREQUENCIES`, `CORRELATIONS`,
+  `REGRESSION y WITH x`, `T-TEST y BY g`, `T-TEST PAIRED v1 v2`,
+  `ONEWAY y BY factor`, `CROSSTABS a BY b`, `SORT CASES BY v (A|D)`
+
+## Validation
+Every procedure is covered by reference tests (`cargo test`), checked against
+closed-form/textbook values rather than against itself: sample mean/SD (n−1),
+unit correlations and exact regression recovery, Pearson χ² on a hand-computed
+contingency table, One-Way ANOVA F with known SS/df, Welch's t with unequal
+variances, paired t on known differences, and user-missing exclusion through
+the analysis pipeline.
 
 ## Reference behavior
 UI structure, menus, and analysis flow are cloned from IBM SPSS Statistics

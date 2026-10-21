@@ -143,7 +143,6 @@ fn execute_line(app: &mut StateCraftApp, line: &str) {
         "CROSSTABS" | "CROSSTAB" => {
             // CROSSTABS <var1> BY <var2>
             let rest: Vec<String> = tokens[1..].to_vec();
-            let bi = rest.iter().position(|t| t.eq_ignore_ascii_case("BY"));
             let Some(bi) = rest.iter().position(|t| t.eq_ignore_ascii_case("BY")) else {
                 app.status = "CROSSTABS: expected 'CROSSTABS var1 BY var2'.".to_string();
                 return;
@@ -177,7 +176,6 @@ fn execute_line(app: &mut StateCraftApp, line: &str) {
         "ONEWAY" | "ANOVA" => {
             // ONEWAY <y> BY <factor>
             let rest: Vec<String> = tokens[1..].to_vec();
-            let bi = rest.iter().position(|t| t.eq_ignore_ascii_case("BY"));
             let Some(bi) = rest.iter().position(|t| t.eq_ignore_ascii_case("BY")) else {
                 app.status = "ONEWAY: expected 'ONEWAY y BY factor'.".to_string();
                 return;
@@ -275,7 +273,6 @@ fn execute_line(app: &mut StateCraftApp, line: &str) {
                 .filter(|t| !t.eq_ignore_ascii_case("CASES"))
                 .cloned()
                 .collect();
-            let bi = joined.iter().position(|t| t.eq_ignore_ascii_case("BY"));
             let Some(bi) = joined.iter().position(|t| t.eq_ignore_ascii_case("BY")) else {
                 app.status = "SORT: expected 'SORT CASES BY var (A)'.".to_string();
                 return;
@@ -307,7 +304,7 @@ fn execute_line(app: &mut StateCraftApp, line: &str) {
             }
         }
         "DATASET" | "DATASETNAME" => {
-            // DATASET NAME <name>  â€” acknowledged; datasets are single in this build
+            // DATASET NAME <name>  — acknowledged; datasets are single in this build
             app.status = "DATASET NAME acknowledged.".to_string();
         }
         _ => {
@@ -318,7 +315,7 @@ fn execute_line(app: &mut StateCraftApp, line: &str) {
 
 /// Resolve variable names to column indices.
 /// `numeric_only` filters to numeric columns.
-/// Empty args default to all numeric (or all) columns â€” like menu defaults.
+/// Empty args default to all numeric (or all) columns — like menu defaults.
 /// On failure sets app.status and returns None.
 fn resolve_vars(app: &mut StateCraftApp, args: &[String], numeric_only: bool) -> Option<Vec<usize>> {
     let t = app.table.as_ref()?;
