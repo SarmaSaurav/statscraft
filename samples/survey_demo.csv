@@ -1,0 +1,181 @@
+﻿id,region,group,age,satisfaction,score,response_time
+RESP001,South,Treatment,19,Low,54.2,127
+RESP002,South,Control,59,Medium,73.7,194
+RESP003,North,Treatment,33,Medium,67.9,34
+RESP004,North,Control,58,Low,61.6,180
+RESP005,East,Treatment,25,Medium,75.0,108
+RESP006,East,Control,62,Medium,68.1,96
+RESP007,East,Treatment,60,Medium,71.0,44
+RESP008,North,Control,22,Low,65.2,218
+RESP009,West,Treatment,19,Medium,75.5,180
+RESP010,South,Control,36,Medium,75.1,165
+RESP011,North,Treatment,24,High,81.6,55
+RESP012,East,Control,55,Medium,71.8,131
+RESP013,East,Treatment,32,Medium,71.3,197
+RESP014,North,Control,40,Very low,52.9,172
+RESP015,East,Treatment,58,Medium,66.4,183
+RESP016,North,Control,23,Medium,76.6,209
+RESP017,North,Treatment,35,Medium,68.7,110
+RESP018,East,Control,21,Medium,74.5,164
+RESP019,North,Treatment,23,Medium,67.9,185
+RESP020,East,Control,32,Medium,72.8,102
+RESP021,East,Treatment,19,Medium,71.6,171
+RESP022,South,Control,30,Medium,78.4,68
+RESP023,North,Treatment,49,Very low,43.7,160
+RESP024,South,Control,54,Low,59.2,109
+RESP025,West,Treatment,49,Very low,51.6,182
+RESP026,South,Control,63,Medium,68.7,145
+RESP027,West,Treatment,36,Medium,72.0,104
+RESP028,North,Control,47,Medium,67.4,192
+RESP029,East,Treatment,39,Low,65.0,73
+RESP030,East,Control,39,High,80.5,42
+RESP031,North,Treatment,35,Low,61.0,162
+RESP032,East,Control,54,Very low,48.4,229
+RESP033,East,Treatment,59,Medium,76.5,212
+RESP034,North,Control,36,Medium,72.8,41
+RESP035,South,Treatment,26,Low,61.5,56
+RESP036,East,Control,45,Very low,45.2,181
+RESP037,West,Treatment,39,Medium,78.8,177
+RESP038,South,Control,52,Low,54.7,96
+RESP039,South,Treatment,21,Low,65.7,95
+RESP040,West,Control,54,Low,65.4,126
+RESP041,North,Treatment,57,High,82.4,90
+RESP042,North,Control,58,Low,57.3,199
+RESP043,South,Treatment,19,Medium,72.4,233
+RESP044,North,Control,53,Low,63.7,73
+RESP045,North,Treatment,30,Medium,70.1,210
+RESP046,West,Control,36,Very low,52.1,139
+RESP047,North,Treatment,46,Medium,75.7,86
+RESP048,North,Control,49,Medium,75.2,89
+RESP049,East,Treatment,28,Medium,70.4,173
+RESP050,South,Control,39,Low,57.5,51
+RESP051,East,Treatment,41,Low,54.9,140
+RESP052,East,Control,28,Low,65.4,218
+RESP053,East,Treatment,33,Low,57.5,196
+RESP054,East,Control,58,Medium,66.6,58
+RESP055,North,Treatment,43,Medium,69.2,173
+RESP056,North,Control,54,Very low,47.5,240
+RESP057,West,Treatment,52,Medium,78.1,87
+RESP058,East,Control,52,Medium,67.9,158
+RESP059,West,Treatment,26,High,86.1,192
+RESP060,South,Control,36,Very low,49.2,36
+RESP061,West,Treatment,48,Medium,72.7,212
+RESP062,West,Control,36,Low,60.6,179
+RESP063,South,Treatment,46,Medium,66.1,93
+RESP064,East,Control,36,Low,57.4,49
+RESP065,South,Treatment,61,Medium,70.1,233
+RESP066,West,Control,57,Medium,71.5,205
+RESP067,East,Treatment,44,Low,60.7,77
+RESP068,North,Control,45,Low,53.1,49
+RESP069,North,Treatment,61,Medium,69.0,111
+RESP070,East,Control,22,Low,57.3,168
+RESP071,South,Treatment,20,Low,58.2,129
+RESP072,South,Control,50,High,83.5,216
+RESP073,East,Treatment,34,Medium,67.9,69
+RESP074,West,Control,55,Low,63.5,30
+RESP075,South,Treatment,24,Medium,72.6,40
+RESP076,West,Control,39,Low,59.9,181
+RESP077,South,Treatment,41,Low,56.3,154
+RESP078,West,Control,25,Very low,42.9,63
+RESP079,South,Treatment,50,Low,65.5,197
+RESP080,South,Control,32,Very low,51.8,118
+RESP081,West,Treatment,57,Low,56.5,185
+RESP082,South,Control,36,Medium,69.5,167
+RESP083,West,Treatment,32,Medium,68.0,68
+RESP084,West,Control,41,Very low,49.1,49
+RESP085,East,Treatment,23,Medium,74.8,193
+RESP086,West,Control,46,Low,53.2,72
+RESP087,North,Treatment,43,Low,63.8,61
+RESP088,South,Control,29,Low,65.5,49
+RESP089,West,Treatment,19,Medium,74.2,238
+RESP090,West,Control,43,Medium,66.4,88
+RESP091,North,Treatment,28,Medium,66.7,144
+RESP092,North,Control,35,Low,58.5,31
+RESP093,North,Treatment,30,Medium,68.8,105
+RESP094,West,Control,47,Medium,73.1,172
+RESP095,South,Treatment,53,Low,65.8,143
+RESP096,South,Control,35,Very low,49.7,156
+RESP097,East,Treatment,39,Low,64.6,86
+RESP098,West,Control,28,Low,61.3,52
+RESP099,South,Treatment,34,High,80.7,173
+RESP100,North,Control,61,Very low,48.2,194
+RESP101,North,Treatment,21,High,80.4,128
+RESP102,West,Control,60,Low,62.9,155
+RESP103,South,Treatment,37,Medium,66.7,208
+RESP104,North,Control,29,Medium,72.8,94
+RESP105,West,Treatment,50,Medium,66.4,53
+RESP106,North,Control,51,Low,55.1,109
+RESP107,East,Treatment,42,Medium,70.8,38
+RESP108,East,Control,37,Medium,72.6,132
+RESP109,South,Treatment,24,Medium,71.8,153
+RESP110,North,Control,48,Low,64.0,114
+RESP111,North,Treatment,39,High,88.7,107
+RESP112,South,Control,50,Low,63.8,101
+RESP113,South,Treatment,27,Medium,74.7,142
+RESP114,South,Control,52,High,88.4,224
+RESP115,East,Treatment,51,Medium,66.5,113
+RESP116,East,Control,53,Low,56.8,205
+RESP117,West,Treatment,47,Medium,76.9,153
+RESP118,North,Control,30,Low,61.5,215
+RESP119,East,Treatment,50,Medium,73.3,82
+RESP120,West,Control,47,Low,62.5,210
+RESP121,West,Treatment,46,Low,62.9,215
+RESP122,North,Control,23,Very low,52.2,111
+RESP123,South,Treatment,26,Medium,70.4,215
+RESP124,East,Control,49,Medium,66.7,134
+RESP125,North,Treatment,27,Medium,74.8,66
+RESP126,North,Control,43,Low,58.2,33
+RESP127,South,Treatment,43,Low,55.4,72
+RESP128,East,Control,37,Medium,69.4,181
+RESP129,East,Treatment,53,Medium,77.2,189
+RESP130,West,Control,20,Low,60.3,36
+RESP131,East,Treatment,59,Medium,67.4,104
+RESP132,North,Control,19,Low,56.6,233
+RESP133,North,Treatment,57,Medium,68.3,84
+RESP134,North,Control,38,Medium,73.8,127
+RESP135,North,Treatment,53,Medium,74.9,50
+RESP136,East,Control,58,Low,60.9,145
+RESP137,North,Treatment,51,Low,56.7,220
+RESP138,South,Control,62,Low,56.7,75
+RESP139,South,Treatment,53,High,83.6,138
+RESP140,South,Control,62,Very low,44.3,57
+RESP141,East,Treatment,55,Medium,71.0,225
+RESP142,North,Control,25,Low,55.3,106
+RESP143,North,Treatment,61,High,81.9,165
+RESP144,South,Control,22,Low,55.1,238
+RESP145,East,Treatment,43,Medium,77.0,190
+RESP146,West,Control,43,Very low,46.2,205
+RESP147,North,Treatment,22,Medium,75.0,139
+RESP148,East,Control,25,Low,59.5,98
+RESP149,North,Treatment,38,Medium,69.3,85
+RESP150,North,Control,22,Medium,78.9,43
+RESP151,North,Treatment,35,Medium,70.3,231
+RESP152,North,Control,35,Low,54.5,32
+RESP153,South,Treatment,26,Low,58.2,83
+RESP154,West,Control,25,Low,62.1,228
+RESP155,West,Treatment,20,Low,53.5,71
+RESP156,North,Control,64,Low,59.8,144
+RESP157,West,Treatment,36,Low,54.2,123
+RESP158,South,Control,59,Very low,48.0,111
+RESP159,South,Treatment,49,Low,61.3,195
+RESP160,East,Control,40,High,79.9,111
+RESP161,South,Treatment,54,Very low,40.6,200
+RESP162,East,Control,45,Low,59.2,77
+RESP163,North,Treatment,57,Low,57.0,208
+RESP164,North,Control,29,Low,56.4,36
+RESP165,South,Treatment,57,Medium,66.3,32
+RESP166,West,Control,51,Medium,72.7,163
+RESP167,North,Treatment,32,Medium,74.3,211
+RESP168,West,Control,56,Low,60.1,183
+RESP169,East,Treatment,32,Low,64.8,31
+RESP170,East,Control,59,Medium,67.6,45
+RESP171,West,Treatment,22,Low,63.2,77
+RESP172,East,Control,37,Medium,74.6,191
+RESP173,North,Treatment,46,Low,61.1,95
+RESP174,South,Control,52,Low,54.7,218
+RESP175,West,Treatment,57,High,79.9,68
+RESP176,North,Control,34,Medium,68.8,173
+RESP177,North,Treatment,39,Low,62.5,135
+RESP178,South,Control,38,Medium,76.0,55
+RESP179,East,Treatment,27,Medium,78.6,97
+RESP180,West,Control,60,Low,60.5,213
