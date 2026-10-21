@@ -502,3 +502,103 @@ DESCRIPTIVES centred
 The factor analysis recovers the two planted clusters: the first three
 items load on the first component at about -0.85 and the last three on
 the second at about -0.8.
+
+## 10. Phase 5 to 8 — the GLM, the icons, the app icon and the dark theme
+
+### 10.1 The general linear model
+
+`src/glm.rs` fits a general linear model on a design matrix built from
+any number of factors, with or without a covariate, and reports the
+three types of sums of squares:
+
+| Type | What it is |
+|---|---|
+| **I** | Sequential: each effect is added to the model built from the effects before it. |
+| **II** | Each effect is tested after all the others *except* the higher-order ones that contain it. |
+| **III** | Each effect's own coefficients are hypothesised to be zero, with every other effect in the model. |
+
+The design uses treatment coding with the **first** level as the
+reference, the way SPSS does, and the sums of squares come from a Wald
+test on the fitted coefficients:
+
+```
+SS = (L beta)' (L (X'X)^-1 L')^-1 (L beta)
+```
+
+`tools/glm_reference.py` writes the test data and prints the expected
+values, using statsmodels. The Rust tests check the balanced and the
+unbalanced design against them for all three types, and the two
+designs differ exactly where the types differ — for the unbalanced
+case Type I gives `C(a)` 333.21, Type II 249.77 and Type III 196.76.
+
+Three things had to be right, and each was a bug first:
+
+- **The factor's levels are sorted** — numerically for a numeric
+  variable, alphabetically for a string. The reference level is the
+  first one, and the Type III sums of squares depend on which level it
+  is: with the last level as the reference the same data gives 70.30
+  instead of 196.76.
+- **The Cholesky inverse** multiplies the factors in the wrong order.
+  `(L L')^-1` is `(L')^-1 L^-1`, not `L^-1 (L')^-1`.
+- **The Type II rule** is "tested after all the other effects except
+  the higher-order ones that contain it", which is not the same as
+  "adjusted for the effects that share no factor".
+
+The command is:
+
+```sps
+GLM score BY group condition /METHOD=SSTYPE(3)
+GLM score BY group condition WITH age
+```
+
+### 10.2 The icon set
+
+The icons were monochrome line glyphs tinted at draw time, which is
+what made the ribbon look dull. The new set gives every icon its own
+coloured tile — a rounded square in one of the Dracula accents with
+the glyph in near-white on top.
+
+The accents are assigned by family, so the ribbon reads as a set
+rather than a random collection:
+
+| Colour | The procedures |
+|---|---|
+| Orange | the file operations |
+| Yellow | the editing operations |
+| Pink | the data handling |
+| Purple | the data procedures |
+| Green | the modelling procedures |
+| Cyan | the reporting procedures |
+
+The near-white glyph on a saturated tile reads on a white surface and
+on a dark one alike, because the tile provides the contrast. The icons
+are drawn at full colour, so a disabled button is dimmed with an alpha
+rather than with a tint — a tint would wash the tile out.
+
+### 10.3 The app icon
+
+A rounded square in the Dracula background with three ascending bars in
+the brand accents and a rising plot line across them, in three places
+from one design: the SVG for the Linux package, a multi-resolution
+`.ico` for Windows, and a pixel buffer drawn at run time for the
+window icon.
+
+Both executables embed the icon and the version information, so the
+file's properties show "StatsCraft Statistics" and the version rather
+than "unknown".
+
+### 10.4 The dark theme
+
+The colours were constants, so there was one look and no way to change
+it. They are now a palette in a struct, with a light theme and a dark
+one, and the accessors read whichever is active — so a widget that
+writes `theme::surface()` gets the colour of the current theme, and
+the egui style is built from the same palette.
+
+The dark theme follows the Dracula palette: the background is
+`#282A36`, the accent is the purple `#BD93F9`, and the text is a
+shade off Dracula's foreground, because that foreground is close
+enough to white to be harsh in a data grid that is read for hours.
+
+The theme is switched from the **View** menu, and `statscraft data.csv
+--dark` starts in the dark one.

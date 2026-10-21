@@ -10,11 +10,22 @@ The UI is a modern take on the SPSS workbench, not a pixel copy of it:
 
 - **Typography** — the bundled **Inter** family (Regular / Medium / SemiBold /
   Bold), embedded in the binary so the app looks the same on every machine.
-- **Icons** — a 28-glyph **SVG line-icon set** drawn with VectorCraft and
-  embedded in the binary. Toolbar buttons, menu entries, tabs and the app
-  icon all use it. Regenerate with `python tools/build_icons.py`.
-- **Palette** — a single accent blue with a teal "ready" state, defined once
-  in `src/theme.rs`.
+- **Icons** — a 37-glyph **SVG icon set** embedded in the binary. Each
+  icon is a rounded tile in one of the Dracula accents with a near-white
+  glyph on top, so the ribbon reads as a set of distinct, colourful
+  buttons and every icon is legible on a white surface and on a dark
+  one. The colours are assigned by family — the file operations are
+  orange, the editing ones yellow, the data handling pink, the data
+  procedures purple, the modelling ones green and the reporting ones
+  cyan. Regenerate with `python tools/build_icons2.py`.
+- **Palette** — two themes, defined once in `src/theme.rs`: the light
+  workbench one and a dark one after the **Dracula** palette. The
+  colours live in a struct rather than in constants, so the widgets and
+  the style always agree, and the theme is switched from the **View**
+  menu. `statscraft data.csv --dark` starts in the dark one.
+- **App icon** — a rounded square in the Dracula background with three
+  ascending bars and a rising plot line, embedded in the executable, in
+  the installer and in the Start Menu shortcut.
 - **Chrome** — rounded cards, soft shadows, zebra-striped grid, pill-shaped
   document tabs, hairline borders, and a proper primary button for *Run Syntax*.
 
@@ -114,7 +125,9 @@ cd installer && cargo build --release   # Windows installer (embeds the app exe)
   the value labels, the measures and the display widths intact
 - Procedures: Descriptives, Frequencies, Correlations, Linear Regression,
   Independent-Samples T Test, Paired-Samples T Test, One-Way ANOVA,
-  Crosstabs with Pearson Chi-Square, **Reliability (Cronbach's alpha)**,
+  Crosstabs with Pearson Chi-Square, **General Linear Model** (factorial
+  ANOVA with the three types of sums of squares), **Reliability
+  (Cronbach's alpha)**,
   **Factor Analysis (principal components)**, **ROC curves**, **Means**,
   **Explore**, and the **nonparametric** family (Mann-Whitney U,
   Kruskal-Wallis H, Wilcoxon signed-rank, Friedman)

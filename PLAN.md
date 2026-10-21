@@ -207,8 +207,12 @@ now, against the design above.
 | 2 | The SPSS-style procedure dialogs — source list, target list, move arrow, sub-dialog buttons, OK / Paste / Reset / Cancel — wired to the syntax runner, so a dialog builds syntax and the same runner executes it. |
 | 3 | The options reached the engine: `/CELLS`, `/STATISTICS`, `/POSTHOC`, the effect sizes, the significance stars and the missing-value mode all change the output. Explore, Means and the four nonparametric procedures were added, and the Output Viewer learned to draw charts. |
 | 4 | Reliability, Factor Analysis, ROC curves, Welch's and Brown-Forsythe's variance tests, `COMPUTE`, and a `.sav` writer that round-trips. |
+| 5 | The general linear model: a factorial ANOVA with any number of factors, a covariate, and the three types of sums of squares, checked against statsmodels. |
+| 6 | A new icon set: every icon a coloured tile in a Dracula accent, so the ribbon reads as a set of colourful buttons on either background. |
+| 7 | An app icon, in the executable, the installer, the shortcuts and the window title bar. |
+| 8 | A dark theme after the Dracula palette, switched from the View menu. |
 
-Nineteen procedures, 67 tests, one runner behind both the menus and the
+Nineteen procedures, 75 tests, one runner behind both the menus and the
 Syntax Editor. `docs/SPSS_REFERENCE.md` records what was observed in the
 installed IBM SPSS Statistics 27 and where the app deliberately differs
 from it.
