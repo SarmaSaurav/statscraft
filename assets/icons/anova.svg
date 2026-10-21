@@ -1,10 +1,12 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="24" height="24" viewBox="0 0 24 24">
-  <title>anova</title>
-  <g id="Layer_1" data-name="Layer 1">
-    <path d="M4 3.5 L4 20.5 L20.5 20.5" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
-    <path d="M7 20.5 L7 12 L10.5 12 L10.5 20.5" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
-    <path d="M12 20.5 L12 7 L15.5 7 L15.5 20.5" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
-    <path d="M17 20.5 L17 15 L20 15 L20 20.5" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none">
+  <!-- anova: a #50FA7B tile with a near-white glyph. -->
+  <rect x="1" y="1" width="22" height="22" rx="5.5" fill="#50FA7B"/>
+  <rect x="1" y="1" width="22" height="11" rx="5.5" fill="#FFFFFF" fill-opacity="0.16"/>
+  <rect x="1" y="1" width="22" height="22" rx="5.5" fill="none" stroke="#000000" stroke-opacity="0.16" stroke-width="0.75"/>
+  <g stroke="#F8F8F2" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M4 4 V20 H20"/>
+    <path d="M6 17 V11"/>
+    <path d="M11 17 V7"/>
+    <path d="M16 17 V13"/>
   </g>
 </svg>

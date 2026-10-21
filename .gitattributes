@@ -1,0 +1,11 @@
+# The shell scripts and the packaging files are read by bash and by
+# dpkg on Linux, where a carriage return is part of the command. The
+# Windows sources keep CRLF.
+*.sh text eol=lf
+packaging/linux/control text eol=lf
+tools/ci_linux.sh text eol=lf
+
+# The Windows sources and the project files keep CRLF.
+*.rs text eol=crlf
+*.toml text eol=crlf
+*.ps1 text eol=crlf

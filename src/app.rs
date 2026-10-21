@@ -843,15 +843,15 @@ impl eframe::App for StatsCraftApp {
                         ui.menu_button("Descriptive Statistics", |ui| {
                             if crate::icon::menu_item(ui, crate::theme::Icon::Histogram, "Frequencies…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Frequencies); }
                             if crate::icon::menu_item(ui, crate::theme::Icon::Describe, "Descriptives…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Descriptives); }
-                            if ui.button("Explore…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Explore); }
+                            if crate::icon::menu_item(ui, crate::theme::Icon::Explore, "Explore…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Explore); }
                             if crate::icon::menu_item(ui, crate::theme::Icon::Crosstabs, "Crosstabs…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Crosstabs); }
                         });
                         ui.menu_button("Compare Means", |ui| {
-                            if ui.button("Means…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Means); }
+                            if crate::icon::menu_item(ui, crate::theme::Icon::Means, "Means…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Means); }
                             if crate::icon::menu_item(ui, crate::theme::Icon::TTest, "Independent-Samples T Test…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::TTest); }
                             if crate::icon::menu_item(ui, crate::theme::Icon::TTest, "Paired-Samples T Test…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::PairedT); }
                             if crate::icon::menu_item(ui, crate::theme::Icon::Anova, "One-Way ANOVA…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Anova); }
-                            if crate::icon::menu_item(ui, crate::theme::Icon::Anova, "General Linear Model…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Glm); }
+                            if crate::icon::menu_item(ui, crate::theme::Icon::Glm, "General Linear Model…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Glm); }
                         });
                         ui.menu_button("Correlate", |ui| {
                             if crate::icon::menu_item(ui, crate::theme::Icon::Correlation, "Bivariate…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Correlations); }

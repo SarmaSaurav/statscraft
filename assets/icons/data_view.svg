@@ -1,12 +1,13 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
-  <title>data-view</title>
-  <g id="Layer_1" data-name="Layer 1">
-    <!-- A data grid: an outer box, a header band and a column rule.
-         Kept light so it still reads at 15 px. -->
-    <rect x="3.5" y="5" width="17" height="14" rx="1" fill="none" stroke="#000000" stroke-width="1.5"/>
-    <path d="M3.5 9 L20.5 9" fill="none" stroke="#000000" stroke-width="1.5" stroke-linecap="round"/>
-    <path d="M10 9 L10 19" fill="none" stroke="#000000" stroke-width="1.5" stroke-linecap="round"/>
-    <path d="M3.5 14 L20.5 14" fill="none" stroke="#000000" stroke-width="1.2" stroke-linecap="round" opacity="0.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none">
+  <!-- data_view: a #FF79C6 tile with a near-white glyph. -->
+  <rect x="1" y="1" width="22" height="22" rx="5.5" fill="#FF79C6"/>
+  <rect x="1" y="1" width="22" height="11" rx="5.5" fill="#FFFFFF" fill-opacity="0.16"/>
+  <rect x="1" y="1" width="22" height="22" rx="5.5" fill="none" stroke="#000000" stroke-opacity="0.16" stroke-width="0.75"/>
+  <g stroke="#F8F8F2" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M4 5.5 H20 V18.5 H4 Z"/>
+    <path d="M4 9.5 H20"/>
+    <path d="M4 14 H20"/>
+    <path d="M9 5.5 V18.5"/>
+    <path d="M15 5.5 V18.5"/>
   </g>
 </svg>

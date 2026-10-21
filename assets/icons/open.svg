@@ -1,9 +1,11 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="24" height="24" viewBox="0 0 24 24">
-  <title>open</title>
-  <g id="Layer_1" data-name="Layer 1">
-    <path d="M3 7.5 C3 6.672 3.672 6 4.5 6 L9.5 6 L11.5 8.5 L19.5 8.5 C20.328 8.5 21 9.172 21 10 L21 18 C21 18.828 20.328 19.5 19.5 19.5 L4.5 19.5 C3.672 19.5 3 18.828 3 18 Z" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
-    <path d="M7 12.5 L17 12.5" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
-    <path d="M7 15.5 L13 15.5" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none">
+  <!-- open: a #FFB86C tile with a near-white glyph. -->
+  <rect x="1" y="1" width="22" height="22" rx="5.5" fill="#FFB86C"/>
+  <rect x="1" y="1" width="22" height="11" rx="5.5" fill="#FFFFFF" fill-opacity="0.16"/>
+  <rect x="1" y="1" width="22" height="22" rx="5.5" fill="none" stroke="#000000" stroke-opacity="0.16" stroke-width="0.75"/>
+  <g stroke="#F8F8F2" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M3 7.5 A1.5 1.5 0 0 1 4.5 6 H9.5 L11.5 8.5 H19.5 A1.5 1.5 0 0 1 21 10 V18 A1.5 1.5 0 0 1 19.5 19.5 H4.5 A1.5 1.5 0 0 1 3 18 Z"/>
+    <path d="M7 12.5 H17"/>
+    <path d="M7 15.5 H13"/>
   </g>
 </svg>

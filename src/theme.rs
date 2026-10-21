@@ -370,6 +370,9 @@ pub mod icons {
         measure_scale => "measure_scale",
         measure_nominal => "measure_nominal",
         data_view => "data_view",
+        glm => "glm",
+        means => "means",
+        explore => "explore",
     );
 }
 
@@ -410,6 +413,12 @@ pub enum Icon {
     MeasureNominal,
     /// A data grid — the Data View tab.
     DataView,
+    /// The general linear model.
+    Glm,
+    /// Group means.
+    Means,
+    /// The explore procedure.
+    Explore,
 }
 
 impl Icon {
@@ -447,6 +456,9 @@ impl Icon {
             Icon::MeasureScale => icons::measure_scale,
             Icon::MeasureNominal => icons::measure_nominal,
             Icon::DataView => icons::data_view,
+            Icon::Glm => icons::glm,
+            Icon::Means => icons::means,
+            Icon::Explore => icons::explore,
         }
     }
 
@@ -484,6 +496,9 @@ impl Icon {
             Icon::MeasureScale => "Measure scale",
             Icon::MeasureNominal => "Measure nominal",
             Icon::DataView => "Data View",
+            Icon::Glm => "General Linear Model",
+            Icon::Means => "Means",
+            Icon::Explore => "Explore",
         }
     }
 }

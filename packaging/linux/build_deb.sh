@@ -1,9 +1,26 @@
 #!/usr/bin/env bash
 # Builds a Debian .deb package for StatsCraft.
 # Run on Linux (locally or in CI). Produces StatsCraft_<version>_<arch>.deb
+#
+# The script has to work even when it is checked out with Windows line
+# endings: bash reads the carriage return as part of the command, and
+# "set -euo pipefail" then fails with "invalid option name". The
+# .gitattributes keeps the file LF. If a stray carriage return does
+# get in, the script runs from a clean copy of itself - it cannot
+# rewrite itself in place, because bash reads a script incrementally
+# and would then read the rewritten bytes out of step.
+#
+# The guard is one line, and it must stay one line: a multi-line `if`
+# block here would be parsed before it runs, and the parse would fail
+# on the very carriage return the guard is meant to remove.
+grep -q "$(printf '\r')" "$0" 2>/dev/null && exec bash -c 'tr -d "\r" < "$1" > "$2" && exec bash "$2" "${@:3}"' _ "$0" "$(mktemp)" "$0" "$@"
 set -euo pipefail
 
-cd "$(dirname "$0")/../.." # repo root
+# The original script's path, which the line-ending guard passes in as
+# the first argument. Without it the clean copy would be looked for in
+# the temporary directory.
+ORIG="${1:-$0}"
+cd "$(dirname "$ORIG")/../.." # repo root
 
 # The version comes from Cargo.toml.
 #

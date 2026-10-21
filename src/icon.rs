@@ -61,7 +61,12 @@ fn icon_texture(ctx: &egui::Context, icon: Icon) -> Option<egui::TextureId> {
     Some(tex_id)
 }
 
-/// A flat, modern toolbar button: no chrome until hover, tinted icon.
+/// A flat, modern toolbar button: no chrome until hover.
+///
+/// The icons carry their own colour - each one is a coloured tile with
+/// a near-white glyph - so they are drawn at full colour. A tint would
+/// multiply the colour and wash the tile out, so a disabled button is
+/// dimmed by drawing the icon with a reduced alpha instead.
 pub fn icon_button(ui: &mut egui::Ui, icon: Icon, tip: &str) -> egui::Response {
     icon_button_enabled(ui, icon, tip, true)
 }
@@ -90,12 +95,12 @@ pub fn icon_button_enabled(
         p.rect_filled(rect.shrink(2.0), theme::RADIUS_SM, theme::ACCENT_SOFT);
     }
 
-    let tint = if !enabled {
-        theme::TEXT_FAINT
-    } else if hovered {
-        theme::ACCENT
+    // The icon's own colour, with a dimmed version for a disabled
+    // button.
+    let tint = if enabled {
+        egui::Color32::WHITE
     } else {
-        theme::TEXT_MUTED
+        egui::Color32::from_white_alpha(82)
     };
 
     let ctx = ui.ctx().clone();
@@ -167,12 +172,8 @@ pub fn menu_item(ui: &mut egui::Ui, icon: Icon, label: &str) -> egui::Response {
         egui::pos2(rect.left() + 14.0, rect.center().y),
         egui::vec2(16.0, 16.0),
     );
-    let tint = if resp.hovered() {
-        theme::ACCENT
-    } else {
-        theme::TEXT_MUTED
-    };
-    paint_icon(p, &ctx, icon, icon_rect, tint);
+    // The icon carries its own colour, so it is drawn at full colour.
+    paint_icon(p, &ctx, icon, icon_rect, egui::Color32::WHITE);
 
     let text_color = if resp.hovered() {
         theme::ACCENT
