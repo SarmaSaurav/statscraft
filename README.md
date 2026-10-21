@@ -2,6 +2,8 @@
 
 Lightweight SPSS-like statistical workbench written in Rust (native desktop app).
 
+![StatsCraft product showcase](docs/showcase/showcase.png)
+
 ## Interface
 
 The UI is a modern take on the SPSS workbench, not a pixel copy of it:

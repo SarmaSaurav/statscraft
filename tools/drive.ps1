@@ -126,7 +126,7 @@ if (-not $SkipSyntax) {
     [System.Windows.Forms.SendKeys]::SendWait('^a')
     Start-Sleep -Milliseconds 250
     [System.Windows.Forms.SendKeys]::SendWait(
-      'FREQUENCIES region group satisfaction{ENTER}DESCRIPTIVES score age response_time{ENTER}T-TEST score BY group{ENTER}CROSSTABS region BY group{ENTER}CORRELATIONS score age response_time')
+      'RELIABILITY i1 i2 i3 i4 i5 i6 /SCALE{(}Overall{)}{ENTER}FACTOR i1 i2 i3 i4 i5 i6 /EXTRACTION=PC2{ENTER}ONEWAY score BY group /STATISTICS=WELCH{ENTER}ROC score BY status /POSITIVE{(}case{)}{ENTER}COMPUTE centred = score - 50{ENTER}DESCRIPTIVES centred')
     Start-Sleep -Milliseconds 900
     Save-Win 'Syntax1' "$OutDir/shot4_syntax.png"
 

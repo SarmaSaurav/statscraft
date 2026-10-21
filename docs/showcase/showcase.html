@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>StatsCraft — product showcase</title>
+<style>
+  :root {
+    --accent:      #2F6FED;
+    --accent-soft: #E8EFFD;
+    --teal:        #0FA87E;
+    --surface:     #FAFBFD;
+    --surface-alt: #F3F5FA;
+    --ink:         #1A1F2B;
+    --ink-muted:   #5B6678;
+    --ink-faint:   #8F9AAC;
+    --border:      #DCE2EC;
+    --border-str:  #C3CCDC;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    background: #E7EAF1;
+    font-family: 'Inter', -apple-system, 'Segoe UI', sans-serif;
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+  .canvas {
+    width: 1600px; height: 1000px; position: relative; overflow: hidden;
+    display: flex; flex-direction: column;
+    background:
+      radial-gradient(1000px 540px at 6% -10%, #FFFFFF 0%, rgba(255,255,255,0) 58%),
+      radial-gradient(820px 480px at 99% 4%, #E8EFFD 0%, rgba(232,239,253,0) 56%),
+      linear-gradient(168deg, #F5F7FB 0%, #E3E8F1 100%);
+  }
+
+  /* ---------------- header ---------------- */
+  .head { display: flex; align-items: center; gap: 20px; padding: 30px 50px 0 50px; }
+  .mark {
+    width: 50px; height: 50px; border-radius: 12px; background: #fff;
+    border: 1px solid var(--border);
+    box-shadow: 0 1px 2px rgba(20,30,60,.06), 0 8px 18px rgba(20,30,60,.10);
+    display: grid; place-items: center; flex: 0 0 auto;
+  }
+  .wordmark h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.022em; line-height: 1.05; }
+  .wordmark p  { font-size: 13px; color: var(--ink-muted); font-weight: 450; margin-top: 3px; }
+  .spacer { flex: 1; }
+  .badges { display: flex; gap: 7px; }
+  .badge {
+    font-size: 10.5px; font-weight: 600; letter-spacing: .02em;
+    padding: 6px 11px; border-radius: 999px; background: #fff;
+    border: 1px solid var(--border); color: var(--ink-muted);
+    box-shadow: 0 1px 2px rgba(20,30,60,.05);
+  }
+  .badge.on { background: var(--accent-soft); border-color: #C6D7FB; color: #1E4FBF; }
+
+  /* ---------------- stage: 2x2 grid of shots ---------------- */
+  .stage {
+    flex: 1; min-height: 0;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 16px;
+    padding: 20px 50px 0 50px;
+  }
+  .win {
+    background: #fff; border: 1px solid var(--border-str); border-radius: 10px;
+    overflow: hidden; display: flex; flex-direction: column; min-height: 0;
+    box-shadow: 0 1px 2px rgba(20,30,60,.05), 0 10px 26px rgba(20,30,60,.10);
+  }
+  .win .bar {
+    padding: 7px 13px; background: var(--surface-alt);
+    border-bottom: 1px solid var(--border);
+    font-size: 10px; font-weight: 700; letter-spacing: .085em; text-transform: uppercase;
+    color: var(--ink-faint); display: flex; align-items: center; gap: 7px; flex: 0 0 auto;
+  }
+  .win .bar .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+  .win .bar .dot.t { background: var(--teal); }
+  .win .bar .r { margin-left: auto; font-weight: 600; letter-spacing: .04em; color: #A8B2C2; }
+  .win .body { flex: 1; min-height: 0; overflow: hidden; display: flex; align-items: flex-start; }
+  .win img { display: block; width: 100%; height: auto; }
+  .win .foot {
+    padding: 7px 13px 9px; font-size: 11px; color: var(--ink-muted);
+    border-top: 1px solid var(--border); background: var(--surface); line-height: 1.35;
+    flex: 0 0 auto;
+  }
+  .win .foot b { color: var(--ink); font-weight: 600; }
+
+  /* ---------------- feature strip ---------------- */
+  .features {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px;
+    background: var(--border); border-top: 1px solid var(--border); margin-top: 16px;
+  }
+  .feat { background: #fff; padding: 13px 22px 15px 22px; }
+  .feat .l em { font-style: normal; font-weight: 600; color: var(--ink-muted); }
+  .feat .k { font-size: 17px; font-weight: 700; letter-spacing: -0.018em; line-height: 1.15; }
+  .feat .k span { color: var(--accent); }
+  .feat .l { margin-top: 3px; font-size: 11px; color: var(--ink-muted); line-height: 1.4; }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+  <div class="head">
+    <div class="mark">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+        <rect x="1.5" y="13" width="4.6" height="8" rx="1" fill="#2F6FED"/>
+        <rect x="9.7" y="8" width="4.6" height="13" rx="1" fill="#4A9AF5"/>
+        <rect x="17.9" y="2.5" width="4.6" height="18.5" rx="1" fill="#0FA87E"/>
+      </svg>
+    </div>
+    <div class="wordmark">
+      <h1>StatsCraft</h1>
+      <p>A lightweight SPSS-style statistical workbench, written in Rust.</p>
+    </div>
+    <div class="spacer"></div>
+    <div class="badges">
+      <span class="badge on">Native desktop</span>
+      <span class="badge">Rust + egui</span>
+      <span class="badge">MIT</span>
+      <span class="badge">Windows &amp; Linux</span>
+    </div>
+  </div>
+
+  <div class="stage">
+
+    <div class="win">
+      <div class="bar"><span class="dot"></span>Data Editor<span class="r">01</span></div>
+      <div class="body"><img src="show1_data.png" alt="StatsCraft Data Editor"></div>
+      <div class="foot">SPSS-style grid — click a cell, double-click to edit, Delete to clear.</div>
+    </div>
+
+    <div class="win">
+      <div class="bar"><span class="dot t"></span>Variable View<span class="r">02</span></div>
+      <div class="body"><img src="show2_vars.png" alt="StatsCraft Variable View"></div>
+      <div class="foot">The full SPSS column set: type, label, values, measure, role.</div>
+    </div>
+
+    <div class="win">
+      <div class="bar"><span class="dot"></span>Output Viewer<span class="r">03</span></div>
+      <div class="body"><img src="show3_output.png" alt="StatsCraft Output Viewer"></div>
+      <div class="foot">Pivot tables with SPSS notes, plus ROC curves and bar charts.</div>
+    </div>
+
+    <div class="win">
+      <div class="bar"><span class="dot t"></span>Syntax Editor<span class="r">04</span></div>
+      <div class="body"><img src="show4_syntax.png" alt="StatsCraft Syntax Editor"></div>
+      <div class="foot">Menus and dialogs emit <b>SPSS syntax</b>; one runner executes it.</div>
+    </div>
+
+  </div>
+
+  <div class="features">
+    <div class="feat">
+      <div class="k"><span>19</span> procedures</div>
+      <div class="l">Frequencies, Descriptives, Crosstabs, t-tests, ANOVA, Correlations, Regression, Means, Explore, Reliability, Factor, ROC, and the nonparametric family.</div>
+    </div>
+    <div class="feat">
+      <div class="k">CSV &amp; <span>.sav</span></div>
+      <div class="l">Reads <em>and writes</em> SPSS system files — labels, value labels, measures and display widths intact.</div>
+    </div>
+    <div class="feat">
+      <div class="k"><span>67</span> tests</div>
+      <div class="l">Every procedure checked against closed-form reference values, not against itself.</div>
+    </div>
+    <div class="feat">
+      <div class="k">Dialog → <span>syntax</span></div>
+      <div class="l">Menus and dialogs emit SPSS syntax; one runner executes it. Charts in the Output Viewer.</div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
