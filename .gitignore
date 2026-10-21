@@ -20,3 +20,7 @@ logo_idea1.jpg
 # Packaging scratch
 target/deb/
 packaging/linux/debroot/
+
+# The build artifacts of the packaging scripts.
+*.deb
+target/deb/
