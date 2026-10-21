@@ -30,6 +30,9 @@ pub struct StateCraftApp {
     /// Cell currently being edited.
     pub editing_cell: Option<(usize, usize)>,
     pub edit_buf: String,
+    /// Phase 4: separate OS document windows (Output Viewer / Syntax editor).
+    pub show_output_window: bool,
+    pub show_syntax_window: bool,
 }
 
 impl Default for StateCraftApp {
@@ -49,6 +52,8 @@ impl Default for StateCraftApp {
             sel_cell: None,
             editing_cell: None,
             edit_buf: String::new(),
+            show_output_window: false,
+            show_syntax_window: false,
         }
     }
 }
@@ -94,8 +99,9 @@ impl StateCraftApp {
     pub fn paste_and_run(&mut self, cmd: String) {
         self.status = format!("Pasted: {}", cmd);
         crate::syntax::run(self, &cmd);
+        // SPSS raises the Output Viewer document window
         if !self.outputs.is_empty() {
-            self.view = View::Output;
+            self.show_output_window = true;
         }
     }
 
@@ -187,9 +193,66 @@ impl StateCraftApp {
                 md.push_str(" |\n");
             }
             md.push('\n');
+            if !t.note.is_empty() {
+                md.push_str(&format!("*{}*\n\n", t.note));
+            }
         }
         match std::fs::write(path, md) {
             Ok(_) => self.status = format!("Exported output to {}", path.display()),
+            Err(e) => self.status = format!("Export failed: {}", e),
+        }
+    }
+
+    /// SPSS-like pivot table exported as a styled HTML document.
+    pub fn export_output_html_to(&mut self, path: &std::path::Path) {
+        if self.outputs.is_empty() {
+            self.status = "No output to export.".to_string();
+            return;
+        }
+        let mut h = String::from(
+            "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n\
+             <title>StateCraft Output</title>\n<style>\n\
+             body{font-family:'Segoe UI',Arial,sans-serif;margin:24px;}\n\
+             h2{font-size:14pt;margin-bottom:4px;}\n\
+             table{border-collapse:collapse;font-size:10.5pt;margin-bottom:8px;}\n\
+             th{background:#e8eef7;border:1px solid #8a8a8a;padding:3px 10px;text-align:left;}\n\
+             td{border:1px solid #b5b5b5;padding:2px 10px;}\n\
+             td.num{text-align:right;font-variant-numeric:tabular-nums;}\n\
+             td.stub{font-weight:600;background:#f6f8fb;}\n\
+             .note{color:#555;font-size:9.5pt;}\n\
+             </style>\n</head>\n<body>\n",
+        );
+        for t in &self.outputs {
+            h.push_str(&format!(
+                "<h2>{}</h2>\n<table>\n<tr>",
+                html_escape(&t.title)
+            ));
+            for hdr in &t.headers {
+                h.push_str(&format!("<th>{}</th>", html_escape(hdr)));
+            }
+            h.push_str("</tr>\n");
+            for row in &t.rows {
+                h.push_str("<tr>");
+                for (k, cell) in row.iter().enumerate() {
+                    let esc = html_escape(cell);
+                    if k > 0 && cell.trim().parse::<f64>().is_ok() {
+                        h.push_str(&format!("<td class=\"num\">{}</td>", esc));
+                    } else if k == 0 {
+                        h.push_str(&format!("<td class=\"stub\">{}</td>", esc));
+                    } else {
+                        h.push_str(&format!("<td>{}</td>", esc));
+                    }
+                }
+                h.push_str("</tr>\n");
+            }
+            h.push_str("</table>\n");
+            if !t.note.is_empty() {
+                h.push_str(&format!("<p class=\"note\">{}</p>\n", html_escape(&t.note)));
+            }
+        }
+        h.push_str("</body>\n</html>\n");
+        match std::fs::write(path, h) {
+            Ok(_) => self.status = format!("Exported output (HTML) to {}", path.display()),
             Err(e) => self.status = format!("Export failed: {}", e),
         }
     }
@@ -248,6 +311,86 @@ impl StateCraftApp {
 
 impl eframe::App for StateCraftApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // ---- Phase 4: real OS document windows (SPSS multi-document UX) ----
+        // The Output Viewer and Syntax editor live in their own viewports;
+        // the Data Editor stays the main window, like IBM SPSS.
+        if self.show_output_window {
+            ctx.show_viewport_immediate(
+                egui::ViewportId::from_hash_of("statecraft_output"),
+                egui::ViewportBuilder::default()
+                    .with_title(format!("Output1 - StateCraft Output Viewer"))
+                    .with_inner_size([780.0, 560.0]),
+                |vctx, _class| {
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::none().fill(egui::Color32::WHITE).inner_margin(egui::Margin::same(8.0)))
+                        .show(vctx, |ui| {
+                            egui::TopBottomPanel::top("ov_title")
+                                .frame(egui::Frame::none().inner_margin(egui::Margin::same(3.0)))
+                                .show_inside(ui, |ui| {
+                                    ui.heading(egui::RichText::new("Output1").strong());
+                                    ui.separator();
+                                });
+                            if self.outputs.is_empty() {
+                                ui.label("No output yet. Run an analysis from the Data Editor menus.");
+                                return;
+                            }
+                            egui::ScrollArea::vertical()
+                                .auto_shrink([false, false])
+                                .show(ui, |ui| {
+                                    for t in &self.outputs {
+                                        ui.add_space(6.0);
+                                        ui.heading(egui::RichText::new(&t.title).strong());
+                                        ui.add_space(4.0);
+                                        render_output_table(ui, t);
+                                    }
+                                });
+                        });
+                    // closing the window hides it until re-opened from Window menu
+                    if vctx.input(|i| i.viewport().close_requested()) {
+                        vctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                        self.show_output_window = false;
+                    }
+                },
+            );
+        }
+        if self.show_syntax_window {
+            ctx.show_viewport_immediate(
+                egui::ViewportId::from_hash_of("statecraft_syntax"),
+                egui::ViewportBuilder::default()
+                    .with_title(format!("Syntax1 - StateCraft Syntax Editor"))
+                    .with_inner_size([640.0, 440.0]),
+                |vctx, _class| {
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::none().fill(egui::Color32::WHITE).inner_margin(egui::Margin::same(8.0)))
+                        .show(vctx, |ui| {
+                            egui::TopBottomPanel::top("sx_title")
+                                .frame(egui::Frame::none().inner_margin(egui::Margin::same(3.0)))
+                                .show_inside(ui, |ui| {
+                                    ui.heading(egui::RichText::new("Syntax1").strong());
+                                    ui.separator();
+                                });
+                            egui::ScrollArea::vertical().show(ui, |ui| {
+                                ui.add(
+                                    egui::TextEdit::multiline(&mut self.syntax_text)
+                                        .code_editor()
+                                        .desired_rows(16)
+                                        .desired_width(f32::INFINITY),
+                                );
+                            });
+                            ui.add_space(6.0);
+                            if ui.button("Run").clicked() {
+                                let script = self.syntax_text.clone();
+                                crate::syntax::run(self, &script);
+                            }
+                        });
+                    if vctx.input(|i| i.viewport().close_requested()) {
+                        vctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                        self.show_syntax_window = false;
+                    }
+                },
+            );
+        }
+
         ctx.style_mut(|s| {
             s.visuals = egui::Visuals::light();
             s.visuals.panel_fill = egui::Color32::WHITE;
@@ -286,9 +429,14 @@ impl eframe::App for StateCraftApp {
                             self.export_data_csv_to(&p);
                         }
                     }
-                    if ui.button("Export Output...").clicked() { ui.close_menu();
+                    if ui.button("Export Output (Markdown)...").clicked() { ui.close_menu();
                         if let Some(p) = rfd::FileDialog::new().add_filter("Markdown", &["md"]).save_file() {
                             self.export_output_to(&p);
+                        }
+                    }
+                    if ui.button("Export Output (HTML)...").clicked() { ui.close_menu();
+                        if let Some(p) = rfd::FileDialog::new().add_filter("HTML", &["html", "htm"]).save_file() {
+                            self.export_output_html_to(&p);
                         }
                     }
                     ui.separator();
@@ -386,8 +534,9 @@ impl eframe::App for StateCraftApp {
                 // ---------------- Window ----------------
                 ui.menu_button("Window", |ui| {
                     if ui.button("Data Editor").clicked() { ui.close_menu(); self.view = View::Data; }
-                    if ui.button("Output Viewer").clicked() { ui.close_menu(); self.view = View::Output; }
-                    if ui.button("Syntax Editor").clicked() { ui.close_menu(); self.view = View::Syntax; }
+                    if ui.button("Show Output1").clicked() { ui.close_menu(); self.show_output_window = true; }
+                    if ui.button("Show Syntax1").clicked() { ui.close_menu(); self.show_syntax_window = true; }
+                    if ui.button("Reset Windows").clicked() { ui.close_menu(); self.show_output_window = false; self.show_syntax_window = false; self.view = View::Data; }
                 });
                 // ---------------- Help ----------------
                 ui.menu_button("Help", |ui| {
@@ -565,22 +714,35 @@ impl eframe::App for StateCraftApp {
                         self.selected_output = 0;
                     }
                     ui.columns(2, |cols| {
-                        // left outline
+                        // left outline (SPSS Output Viewer tree)
                         cols[0].group(|ui| {
-                            ui.label("Output Outline");
+                            ui.label(
+                                egui::RichText::new("Outline")
+                                    .strong()
+                                    .color(egui::Color32::from_rgb(0x55, 0x55, 0x55)),
+                            );
                             egui::ScrollArea::vertical().show(ui, |ui| {
                                 for (i, t) in self.outputs.iter().enumerate() {
-                                    if ui.selectable_label(self.selected_output == i, &t.title).clicked() {
+                                    let label = format!("▤  {}", t.title);
+                                    if ui
+                                        .selectable_label(self.selected_output == i, label)
+                                        .clicked()
+                                    {
                                         self.selected_output = i;
                                     }
                                 }
                             });
                         });
-                        // right content
+                        // right content: SPSS pivot-table display
                         cols[1].group(|ui| {
-                            let t = &self.outputs[self.selected_output];
-                            ui.heading(&t.title);
-                            render_output_table(ui, t);
+                            egui::ScrollArea::vertical()
+                                .auto_shrink([false, false])
+                                .show(ui, |ui| {
+                                    ui.add_space(2.0);
+                                    ui.heading(egui::RichText::new(&self.outputs[self.selected_output].title));
+                                    ui.add_space(4.0);
+                                    render_output_table(ui, &self.outputs[self.selected_output]);
+                                });
                         });
                     });
                 }
@@ -989,19 +1151,84 @@ fn commit_edit(table: &mut DataTable, ci: usize, di: usize, buf: &str) {
     table.columns[ci].values[di] = v;
 }
 
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn html_export_escapes_and_right_aligns_numbers() {
+        let mut app = StateCraftApp::default();
+        app.outputs.push(crate::output::OutputTable {
+            title: "T<1>".into(),
+            headers: vec!["A".into(), "B".into()],
+            rows: vec![vec!["x".into(), "1.5".into()]],
+            note: "n".into(),
+        });
+        let path = std::env::temp_dir().join("sc_out.html");
+        app.export_output_html_to(&path);
+        let s = std::fs::read_to_string(&path).unwrap();
+        assert!(s.contains("T&lt;1&gt;"), "title escaped");
+        assert!(s.contains("<td class=\"num\">1.5</td>"), "numeric right-aligned");
+        assert!(s.contains("<p class=\"note\">n</p>"), "note rendered");
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+/// SPSS pivot-table look: bordered cells, shaded header band, right-aligned
+/// numerics, footnote note beneath the table.
 fn render_output_table(ui: &mut egui::Ui, t: &OutputTable) {
-    egui::Grid::new(&t.title).striped(true).show(ui, |ui| {
-        for h in &t.headers {
-            ui.strong(h);
-        }
-        ui.end_row();
-        for row in &t.rows {
-            for cell in row {
-                ui.label(cell);
+    let header_fill = egui::Color32::from_rgb(0xEA, 0xF0, 0xF8);
+    let edge = egui::Color32::from_rgb(0x99, 0x99, 0x99);
+    egui::Grid::new(&t.title)
+        .striped(false)
+        .spacing([0.0, 0.0])
+        .show(ui, |ui| {
+            for h in &t.headers {
+                egui::Frame::none()
+                    .fill(header_fill)
+                    .stroke(egui::Stroke::new(0.5, edge))
+                    .inner_margin(egui::Margin::symmetric(8.0, 3.0))
+                    .show(ui, |ui| {
+                        ui.set_min_width(ui.available_width().min(90.0));
+                        ui.strong(egui::RichText::new(h).size(12.0));
+                    });
             }
             ui.end_row();
-        }
-    });
+            for row in &t.rows {
+                for (k, cell) in row.iter().enumerate() {
+                    let is_num = k > 0 && cell.parse::<f64>().is_ok();
+                    egui::Frame::none()
+                        .fill(egui::Color32::WHITE)
+                        .stroke(egui::Stroke::new(0.5, edge))
+                        .inner_margin(egui::Margin::symmetric(8.0, 2.0))
+                        .show(ui, |ui| {
+                            ui.set_min_width(ui.available_width().min(90.0));
+                            ui.with_layout(
+                                if is_num {
+                                    egui::Layout::right_to_left(egui::Align::Center)
+                                } else {
+                                    egui::Layout::left_to_right(egui::Align::Center)
+                                },
+                                |ui| {
+                                    ui.label(egui::RichText::new(cell).size(12.0));
+                                },
+                            );
+                        });
+                }
+                ui.end_row();
+            }
+        });
+    if !t.note.is_empty() {
+        ui.add_space(3.0);
+        ui.label(egui::RichText::new(&t.note).size(10.5).weak());
+    }
 }
 
 fn render_charts(ui: &mut egui::Ui, table: &DataTable) {

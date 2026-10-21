@@ -1,4 +1,4 @@
-use crate::app::StateCraftApp;
+﻿use crate::app::StateCraftApp;
 use crate::output::OutputTable;
 use crate::stats;
 
@@ -51,7 +51,7 @@ fn execute_line(app: &mut StateCraftApp, line: &str) {
                     app.outputs.push(OutputTable::from_descriptives(&d));
                     app.status = format!("DESCRIPTIVES executed for {} variables.", d.len());
                     if !app.outputs.is_empty() {
-                        app.view = crate::app::View::Output;
+                        app.show_output_window = true;
                     }
                 }
             }
@@ -73,7 +73,7 @@ fn execute_line(app: &mut StateCraftApp, line: &str) {
                     }
                     app.status = format!("FREQUENCIES executed for {} variables.", n);
                     if !app.outputs.is_empty() {
-                        app.view = crate::app::View::Output;
+                        app.show_output_window = true;
                     }
                 }
             }
@@ -90,7 +90,7 @@ fn execute_line(app: &mut StateCraftApp, line: &str) {
                     app.outputs.push(OutputTable::from_correlations(&c));
                     app.status = format!("CORRELATIONS executed: {} pair(s).", c.len());
                     if !app.outputs.is_empty() {
-                        app.view = crate::app::View::Output;
+                        app.show_output_window = true;
                     }
                 }
             }
@@ -136,7 +136,7 @@ fn execute_line(app: &mut StateCraftApp, line: &str) {
                     return;
                 }
                 if !app.outputs.is_empty() {
-                    app.view = crate::app::View::Output;
+                    app.show_output_window = true;
                 }
             }
         }
@@ -165,7 +165,7 @@ fn execute_line(app: &mut StateCraftApp, line: &str) {
                         app.outputs.push(OutputTable::from_ttest(&r));
                         app.status = format!("T-TEST executed: {} BY {}.", t.columns[yi].name, t.columns[gi].name);
                         if !app.outputs.is_empty() {
-                            app.view = crate::app::View::Output;
+                            app.show_output_window = true;
                         }
                     }
                     None => {
@@ -214,7 +214,7 @@ fn execute_line(app: &mut StateCraftApp, line: &str) {
             }
         }
         "DATASET" | "DATASETNAME" => {
-            // DATASET NAME <name>  — acknowledged; datasets are single in this build
+            // DATASET NAME <name>  â€” acknowledged; datasets are single in this build
             app.status = "DATASET NAME acknowledged.".to_string();
         }
         _ => {
@@ -225,7 +225,7 @@ fn execute_line(app: &mut StateCraftApp, line: &str) {
 
 /// Resolve variable names to column indices.
 /// `numeric_only` filters to numeric columns.
-/// Empty args default to all numeric (or all) columns — like menu defaults.
+/// Empty args default to all numeric (or all) columns â€” like menu defaults.
 /// On failure sets app.status and returns None.
 fn resolve_vars(app: &mut StateCraftApp, args: &[String], numeric_only: bool) -> Option<Vec<usize>> {
     let t = app.table.as_ref()?;

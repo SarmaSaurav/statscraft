@@ -3,6 +3,8 @@ pub struct OutputTable {
     pub title: String,
     pub headers: Vec<String>,
     pub rows: Vec<Vec<String>>,
+    /// Footnote rendered beneath the pivot table (SPSS "Notes").
+    pub note: String,
 }
 
 impl OutputTable {
@@ -29,6 +31,7 @@ impl OutputTable {
                 "Max".into(),
             ],
             rows,
+            ..Default::default()
         }
     }
 
@@ -41,6 +44,7 @@ impl OutputTable {
             title: "Correlations".to_string(),
             headers: vec!["Variable 1".into(), "Variable 2".into(), "Pearson r".into()],
             rows,
+            ..Default::default()
         }
     }
 
@@ -64,6 +68,7 @@ impl OutputTable {
                 "R²".into(),
             ],
             rows,
+            ..Default::default()
         }
     }
 
@@ -97,6 +102,7 @@ impl OutputTable {
                 "p (2-tail)".into(),
             ],
             rows,
+            ..Default::default()
         }
     }
 
@@ -113,6 +119,7 @@ impl OutputTable {
             title: format!("Frequencies: {}", var),
             headers: vec!["Value".into(), "Count".into(), "Percent".into()],
             rows,
+            ..Default::default()
         }
     }
 }
