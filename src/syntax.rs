@@ -16,6 +16,93 @@ pub fn run(app: &mut StatsCraftApp, script: &str) {
     }
 }
 
+
+/// A parsed SPSS command line: the positional arguments plus the
+/// `/SUBCOMMAND=KEYWORD KEYWORD` subcommands.
+///
+/// IBM SPSS writes procedure options as subcommands, e.g.
+/// `DESCRIPTIVES score age /STATISTICS=MEAN STDDEV.`
+/// The procedure dialogs generate exactly this shape, so the runner and
+/// the dialogs share one grammar.
+#[derive(Debug, Default, Clone)]
+pub struct Command {
+    /// The command word, upper-cased.
+    pub name: String,
+    /// The positional arguments, in order.
+    pub args: Vec<String>,
+    /// The subcommands, each a (name, keywords) pair. The name is
+    /// upper-cased; keywords are upper-cased too.
+    pub subcommands: Vec<(String, Vec<String>)>,
+}
+
+impl Command {
+    /// Parse one line of SPSS syntax.
+    pub fn parse(line: &str) -> Command {
+        // Split on whitespace, but keep "/SUB=..." groups together.
+        let mut tokens: Vec<String> = Vec::new();
+        let mut current = String::new();
+        for ch in line.chars() {
+            if ch.is_whitespace() {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            } else {
+                current.push(ch);
+            }
+        }
+        if !current.is_empty() {
+            tokens.push(current);
+        }
+
+        let mut cmd = Command::default();
+        let mut i = 0;
+        while i < tokens.len() {
+            let t = &tokens[i];
+            if let Some(rest) = t.strip_prefix('/') {
+                // "/STATISTICS=MEAN STDDEV" — the keywords after the '='
+                // are separate tokens until the next "/".
+                let (name, inline) = match rest.split_once('=') {
+                    Some((n, v)) => (n.to_string(), Some(v.to_string())),
+                    None => (rest.to_string(), None),
+                };
+                let mut words = Vec::new();
+                if let Some(v) = inline {
+                    words.extend(v.split_whitespace().map(|s| s.to_uppercase()));
+                }
+                i += 1;
+                while i < tokens.len() && !tokens[i].starts_with('/') {
+                    words.push(tokens[i].to_uppercase());
+                    i += 1;
+                }
+                cmd.subcommands.push((name.to_uppercase(), words));
+            } else {
+                if cmd.name.is_empty() {
+                    cmd.name = t.to_uppercase();
+                } else {
+                    cmd.args.push(t.clone());
+                }
+                i += 1;
+            }
+        }
+        cmd
+    }
+
+    /// The keywords of a subcommand, if present.
+    pub fn sub(&self, name: &str) -> Option<&[String]> {
+        self.subcommands
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            .map(|(_, k)| k.as_slice())
+    }
+
+    /// The position of a keyword such as "BY" in the positional arguments.
+    pub fn pos(&self, keyword: &str) -> Option<usize> {
+        self.args
+            .iter()
+            .position(|a| a.eq_ignore_ascii_case(keyword))
+    }
+}
+
 fn execute_line(app: &mut StatsCraftApp, line: &str) {
     let tokens: Vec<String> = line.split_whitespace().map(|s| s.to_string()).collect();
     if tokens.is_empty() {
@@ -40,15 +127,26 @@ fn execute_line(app: &mut StatsCraftApp, line: &str) {
             app.status = "Dataset cleared.".to_string();
         }
         "DESCRIPTIVES" | "DESCRIPTIVE" => {
-            let vars = resolve_vars(app, &tokens[1..], true);
+            let cmd = Command::parse(line);
+            let vars = resolve_vars(app, &cmd.args, true);
             if let Some(res) = vars {
                 if res.is_empty() {
                     app.status = "DESCRIPTIVES: no numeric variables resolved.".to_string();
                     return;
                 }
+                // The statistics the user ticked in the dialog's
+                // Statistics... sub-dialog.
+                let mut set = match cmd.sub("STATISTICS") {
+                    Some(kw) if !kw.is_empty() => stats::StatSet::parse(kw),
+                    _ => stats::StatSet::defaults(),
+                };
+                if set.is_empty() {
+                    set = stats::StatSet::defaults();
+                }
                 if let Some(t) = &app.table {
-                    let d = stats::descriptives_in(t, &res);
-                    app.outputs.push(OutputTable::from_descriptives(&d));
+                    let d = stats::descriptives_with(t, &res, &set);
+                    app.outputs
+                        .push(OutputTable::descriptives_with(&d, &set));
                     app.status = format!("DESCRIPTIVES executed for {} variables.", d.len());
                     if !app.outputs.is_empty() {
                         app.show_output_window = true;
@@ -57,18 +155,38 @@ fn execute_line(app: &mut StatsCraftApp, line: &str) {
             }
         }
         "FREQUENCIES" | "FREQ" => {
-            let vars = resolve_vars(app, &tokens[1..], false);
+            let cmd = Command::parse(line);
+            let vars = resolve_vars(app, &cmd.args, false);
             if let Some(res) = vars {
                 if res.is_empty() {
                     app.status = "FREQUENCIES: no variables resolved.".to_string();
                     return;
                 }
+                // Frequencies may also report descriptive statistics.
+                let set = cmd
+                    .sub("STATISTICS")
+                    .filter(|kw| !kw.is_empty())
+                    .map(stats::StatSet::parse)
+                    .filter(|s| !s.is_empty());
+                let show_tables = cmd
+                    .sub("FORMAT")
+                    .map(|kw| !kw.iter().any(|k| k == "NOTABLE"))
+                    .unwrap_or(true);
                 if let Some(t) = &app.table {
                     let mut n = 0usize;
                     for &ci in &res {
                         let name = t.columns[ci].name.clone();
-                        let rows = stats::frequencies(t, ci);
-                        app.outputs.push(OutputTable::from_frequencies(&name, &rows));
+                        if show_tables {
+                            let rows = stats::frequencies(t, ci);
+                            app.outputs.push(OutputTable::from_frequencies(&name, &rows));
+                        }
+                        if let Some(s) = &set {
+                            if t.columns[ci].kind == crate::data::ColumnKind::Numeric {
+                                let d = stats::descriptives_with(t, &[ci], s);
+                                app.outputs
+                                    .push(OutputTable::descriptives_with(&d, s));
+                            }
+                        }
                         n += 1;
                     }
                     app.status = format!("FREQUENCIES executed for {} variables.", n);
@@ -378,6 +496,58 @@ mod tests {
         writeln!(f, "4,B,16,24").unwrap();
         writeln!(f, "5,A,11,25").unwrap();
         writeln!(f, "6,B,15,26").unwrap();
+    }
+
+    #[test]
+    fn the_parser_splits_a_command_into_args_and_subcommands() {
+        let c = Command::parse("DESCRIPTIVES score age /STATISTICS=MEAN STDDEV /SORT=MEAN");
+        assert_eq!(c.name, "DESCRIPTIVES");
+        assert_eq!(c.args, vec!["score", "age"]);
+        assert_eq!(c.sub("STATISTICS").unwrap(), &["MEAN".to_string(), "STDDEV".to_string()]);
+        assert_eq!(c.sub("SORT").unwrap(), &["MEAN".to_string()]);
+        assert!(c.sub("MISSING").is_none());
+    }
+
+    #[test]
+    fn the_parser_finds_the_position_of_a_keyword() {
+        let c = Command::parse("CROSSTABS region BY group");
+        assert_eq!(c.pos("BY"), Some(1));
+    }
+
+    #[test]
+    fn a_stat_set_is_parsed_from_its_keywords() {
+        let s = crate::stats::StatSet::parse(&[
+            "MEAN".to_string(),
+            "MEDIAN".to_string(),
+            "STDDEV".to_string(),
+        ]);
+        assert!(s.mean && s.median && s.stddev);
+        assert!(!s.variance);
+        assert!(!s.is_empty());
+    }
+
+    #[test]
+    fn the_statistics_subcommand_changes_the_output_table() {
+        let dir = std::env::temp_dir();
+        let csv = dir.join("statscraft_stats_test.csv");
+        std::fs::write(
+            &csv,
+            "id,score\n1,10\n2,12\n3,14\n4,16\n5,18\n6,20\n",
+        )
+        .unwrap();
+        let mut app = StatsCraftApp::default();
+        app.path_input = csv.display().to_string();
+        app.load();
+        run(
+            &mut app,
+            "DESCRIPTIVES score /STATISTICS=MEAN MEDIAN VARIANCE",
+        );
+        assert_eq!(app.outputs.len(), 1);
+        let t = &app.outputs[0];
+        // One block: the variable row, then Mean, Median, Variance.
+        assert!(t.headers.contains(&"Median".to_string()), "headers: {:?}", t.headers);
+        assert!(t.headers.contains(&"Variance".to_string()), "headers: {:?}", t.headers);
+        assert!(!t.headers.contains(&"Std. Deviation".to_string()));
     }
 
     #[test]

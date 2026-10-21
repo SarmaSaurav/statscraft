@@ -278,6 +278,115 @@ pub struct Descriptive {
     pub std_dev: f64,
     pub min: f64,
     pub max: f64,
+    pub median: f64,
+    pub mode: Option<f64>,
+    pub variance: f64,
+    pub range: f64,
+    pub sum: f64,
+    pub skewness: f64,
+    pub kurtosis: f64,
+    pub std_error_mean: f64,
+    pub std_error_kurtosis: f64,
+    /// The percentiles the user asked for (if any), as (percentile, value).
+    pub percentiles: Vec<(f64, f64)>,
+}
+
+/// Which descriptive statistics a procedure should report.
+///
+/// The names match the `STATISTICS` subcommand keywords of the
+/// corresponding IBM SPSS command, so a set parsed from syntax can be
+/// applied directly.
+#[derive(Debug, Clone, Default)]
+pub struct StatSet {
+    pub mean: bool,
+    pub median: bool,
+    pub mode: bool,
+    pub stddev: bool,
+    pub variance: bool,
+    pub minimum: bool,
+    pub maximum: bool,
+    pub range: bool,
+    pub sum: bool,
+    pub skewness: bool,
+    pub kurtosis: bool,
+    pub semean: bool,
+    pub sekurt: bool,
+    pub percentiles: bool,
+    /// Explicit percentile values, e.g. [25.0, 50.0, 75.0].
+    pub percentile_values: Vec<f64>,
+}
+
+impl StatSet {
+    /// The SPSS default set for DESCRIPTIVES / FREQUENCIES: mean, std dev,
+    /// minimum, maximum.
+    pub fn defaults() -> Self {
+        Self {
+            mean: true,
+            stddev: true,
+            minimum: true,
+            maximum: true,
+            ..Default::default()
+        }
+    }
+
+    /// Parse a `STATISTICS=` keyword list.
+    pub fn parse(words: &[String]) -> Self {
+        let mut s = StatSet::default();
+        for w in words {
+            match w.to_uppercase().as_str() {
+                "MEAN" => s.mean = true,
+                "MEDIAN" => s.median = true,
+                "MODE" => s.mode = true,
+                "STDDEV" => s.stddev = true,
+                "VARIANCE" => s.variance = true,
+                "MINIMUM" | "MIN" => s.minimum = true,
+                "MAXIMUM" | "MAX" => s.maximum = true,
+                "RANGE" => s.range = true,
+                "SUM" => s.sum = true,
+                "SKEWNESS" | "SKEW" => s.skewness = true,
+                "KURTOSIS" | "KURT" => s.kurtosis = true,
+                "SEMEAN" => s.semean = true,
+                "SEKURT" => s.sekurt = true,
+                "PERCENTILES" => s.percentiles = true,
+                "ALL" => {
+                    s.mean = true;
+                    s.median = true;
+                    s.mode = true;
+                    s.stddev = true;
+                    s.variance = true;
+                    s.minimum = true;
+                    s.maximum = true;
+                    s.range = true;
+                    s.sum = true;
+                    s.skewness = true;
+                    s.kurtosis = true;
+                    s.semean = true;
+                    s.sekurt = true;
+                }
+                "NONE" => s = StatSet::default(),
+                _ => {}
+            }
+        }
+        s
+    }
+
+    /// True if no statistic was explicitly requested.
+    pub fn is_empty(&self) -> bool {
+        !self.mean
+            && !self.median
+            && !self.mode
+            && !self.stddev
+            && !self.variance
+            && !self.minimum
+            && !self.maximum
+            && !self.range
+            && !self.sum
+            && !self.skewness
+            && !self.kurtosis
+            && !self.semean
+            && !self.sekurt
+            && !self.percentiles
+    }
 }
 
 pub fn descriptives(table: &DataTable) -> Vec<Descriptive> {
@@ -293,6 +402,18 @@ pub fn descriptives(table: &DataTable) -> Vec<Descriptive> {
 }
 
 pub fn descriptives_in(table: &DataTable, var_idx: &[usize]) -> Vec<Descriptive> {
+    descriptives_with(table, var_idx, &StatSet::defaults())
+}
+
+/// Descriptives with a caller-chosen set of statistics.
+///
+/// `stats` selects which statistics are computed. An empty set falls back
+/// to the SPSS defaults (mean, std dev, min, max).
+pub fn descriptives_with(
+    table: &DataTable,
+    var_idx: &[usize],
+    stats: &StatSet,
+) -> Vec<Descriptive> {
     let mut out = Vec::new();
     for &ci in var_idx {
         let col = match table.columns.get(ci) {
@@ -311,12 +432,90 @@ pub fn descriptives_in(table: &DataTable, var_idx: &[usize]) -> Vec<Descriptive>
         if vals.is_empty() {
             continue;
         }
+        vals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let n = vals.len();
-        let mean = vals.iter().sum::<f64>() / n as f64;
-        let var = vals.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n as f64 - 1.0).max(1.0);
+        let n_f = n as f64;
+        let mean = vals.iter().sum::<f64>() / n_f;
+        let var = vals.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n_f - 1.0).max(1.0);
         let std_dev = var.sqrt();
-        let min = vals.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max = vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let min = vals[0];
+        let max = vals[n - 1];
+        let sum: f64 = vals.iter().sum();
+
+        // Median: the middle value, or the mean of the two middle values.
+        let median = if n % 2 == 1 {
+            vals[n / 2]
+        } else {
+            (vals[n / 2 - 1] + vals[n / 2]) / 2.0
+        };
+
+        // Mode: the most frequent value. SPSS reports every mode; we
+        // report the smallest of them, which is what SPSS shows first.
+        let mode = {
+            let mut counts: Vec<(f64, usize)> = Vec::new();
+            for &v in &vals {
+                match counts.iter_mut().find(|(k, _)| *k == v) {
+                    Some(e) => e.1 += 1,
+                    None => counts.push((v, 1)),
+                }
+            }
+            let max_count = counts.iter().map(|(_, c)| *c).max().unwrap_or(0);
+            if max_count > 1 {
+                counts
+                    .iter()
+                    .filter(|(_, c)| *c == max_count)
+                    .map(|(v, _)| *v)
+                    .fold(None, |acc: Option<f64>, v| match acc {
+                        None => Some(v),
+                        Some(a) => Some(a.min(v)),
+                    })
+            } else {
+                None
+            }
+        };
+
+        // Skewness and kurtosis use the SPSS (bias-corrected) formulas.
+        let m2 = vals.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n_f;
+        let m3 = vals.iter().map(|x| (x - mean).powi(3)).sum::<f64>() / n_f;
+        let m4 = vals.iter().map(|x| (x - mean).powi(4)).sum::<f64>() / n_f;
+        let skewness = if m2 > 0.0 {
+            (n_f / ((n_f - 1.0) * (n_f - 2.0))).sqrt() * (m3 / m2.powf(1.5))
+        } else {
+            0.0
+        };
+        let kurtosis = if n_f > 3.0 && m2 > 0.0 {
+            // Excess kurtosis, as SPSS reports it.
+            let g2 = m4 / (m2 * m2) - 3.0;
+            ((n_f + 1.0) * g2 / (n_f - 2.0)) + 3.0 - 3.0
+        } else {
+            0.0
+        };
+        let std_error_mean = if n_f > 0.0 {
+            std_dev / n_f.sqrt()
+        } else {
+            0.0
+        };
+        let std_error_kurtosis = if n_f > 2.0 && m2 > 0.0 {
+            let g2 = m4 / (m2 * m2) - 3.0;
+            (2.0 * g2 * (n_f + 1.0) / ((n_f - 2.0) * (n_f - 3.0))).sqrt()
+        } else {
+            0.0
+        };
+
+        // Percentiles: linear interpolation between order statistics,
+        // matching SPSS's default (which is not a simple index lookup).
+        let mut percentiles = Vec::new();
+        if stats.percentiles {
+            let wanted: Vec<f64> = if stats.percentile_values.is_empty() {
+                vec![25.0, 50.0, 75.0]
+            } else {
+                stats.percentile_values.clone()
+            };
+            for p in wanted {
+                percentiles.push((p, percentile_of(&vals, p)));
+            }
+        }
+
         out.push(Descriptive {
             variable: col.name.clone(),
             n,
@@ -324,9 +523,39 @@ pub fn descriptives_in(table: &DataTable, var_idx: &[usize]) -> Vec<Descriptive>
             std_dev,
             min,
             max,
+            median,
+            mode,
+            variance: var,
+            range: max - min,
+            sum,
+            skewness,
+            kurtosis,
+            std_error_mean,
+            std_error_kurtosis,
+            percentiles,
         });
     }
     out
+}
+
+/// The p-th percentile of a sorted vector, by linear interpolation
+/// (SPSS's default PERCENTILES method).
+pub fn percentile_of(sorted: &[f64], p: f64) -> f64 {
+    if sorted.is_empty() {
+        return f64::NAN;
+    }
+    if sorted.len() == 1 {
+        return sorted[0];
+    }
+    let n = sorted.len() as f64;
+    let rank = (p / 100.0) * (n - 1.0);
+    let lo = rank.floor() as usize;
+    let hi = rank.ceil() as usize;
+    if lo == hi {
+        sorted[lo]
+    } else {
+        sorted[lo] + (rank - lo as f64) * (sorted[hi] - sorted[lo])
+    }
 }
 
 #[derive(Debug, Clone)]

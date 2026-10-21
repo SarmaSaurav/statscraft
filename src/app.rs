@@ -32,6 +32,8 @@ pub struct StatsCraftApp {
     /// Phase 4: separate OS document windows (Output Viewer / Syntax editor).
     pub show_output_window: bool,
     pub show_syntax_window: bool,
+    /// Phase 5: the open procedure dialog, if any.
+    pub dialog: Option<crate::dialog::DialogState>,
 }
 
 impl Default for StatsCraftApp {
@@ -53,6 +55,7 @@ impl Default for StatsCraftApp {
             edit_buf: String::new(),
             show_output_window: false,
             show_syntax_window: false,
+            dialog: None,
         }
     }
 }
@@ -115,6 +118,34 @@ impl StatsCraftApp {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// Open a procedure dialog. This is what every Analyze menu item does
+    /// now — the user chooses variables and options, then presses OK.
+    pub fn open_dialog(&mut self, procedure: crate::dialog::Procedure) {
+        if self.table.is_none() {
+            self.status = "No data loaded — open a data file first.".to_string();
+            return;
+        }
+        self.dialog = Some(crate::dialog::DialogState::new(procedure));
+    }
+
+    /// Handle the result of a dialog that closed: either run the syntax
+    /// (OK) or paste it into the Syntax Editor (Paste).
+    pub fn close_dialog(&mut self, d: crate::dialog::DialogState) {
+        if let Some(syntax) = d.confirmed {
+            self.paste_and_run(syntax);
+        } else if let Some(syntax) = d.pasted {
+            // SPSS's Paste puts the command in the syntax window without
+            // running it.
+            self.syntax_text = if self.syntax_text.trim().is_empty() {
+                syntax.clone()
+            } else {
+                format!("{}\n{}", self.syntax_text.trim_end(), syntax)
+            };
+            self.show_syntax_window = true;
+            self.status = format!("Pasted into Syntax1:\n{}", syntax);
+        }
     }
 
     pub fn analyze_descriptives(&mut self) {
@@ -541,6 +572,25 @@ impl eframe::App for StatsCraftApp {
                 },
             );
         }
+        // ---- Phase 5: the open procedure dialog ----
+        // SPSS opens a modal dialog for every procedure. We draw it in the
+        // main window so the Data Editor stays visible behind it.
+        if self.dialog.is_some() {
+            // Take the dialog out of the app while it draws, so the dialog
+            // can hold a mutable borrow of the app without aliasing.
+            let mut d = self.dialog.take().expect("dialog present");
+            crate::dialog::show(ctx, self, &mut d);
+            if d.confirmed.is_some() || d.pasted.is_some() {
+                // The user pressed OK or Paste: the dialog is done.
+                self.close_dialog(d);
+            } else if d.cancelled {
+                // The window was closed with the X or Cancel.
+                self.dialog = None;
+            } else {
+                self.dialog = Some(d);
+            }
+        }
+
         if self.show_syntax_window {
             ctx.show_viewport_immediate(
                 egui::ViewportId::from_hash_of("statscraft_syntax"),
@@ -770,24 +820,26 @@ impl eframe::App for StatsCraftApp {
                         if ui.button("Automatic Recode…").clicked() { ui.close_menu(); self.status = "Automatic Recode: not implemented yet.".to_string(); }
                     });
                     // ---------------- Analyze ----------------
+                    // Every procedure opens a dialog, as in SPSS: the user
+                    // picks the variables and the options, then presses OK.
                     ui.menu_button("Analyze", |ui| {
                         ui.menu_button("Descriptive Statistics", |ui| {
-                            if crate::icon::menu_item(ui, crate::theme::Icon::Histogram, "Frequencies…").clicked() { ui.close_menu(); self.analyze_frequencies(); }
-                            if crate::icon::menu_item(ui, crate::theme::Icon::Describe, "Descriptives…").clicked() { ui.close_menu(); self.analyze_descriptives(); }
-                            if ui.button("Explore…").clicked() { ui.close_menu(); self.status = "Explore: not implemented yet.".to_string(); }
-                            if crate::icon::menu_item(ui, crate::theme::Icon::Crosstabs, "Crosstabs…").clicked() { ui.close_menu(); self.analyze_crosstabs(); }
+                            if crate::icon::menu_item(ui, crate::theme::Icon::Histogram, "Frequencies…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Frequencies); }
+                            if crate::icon::menu_item(ui, crate::theme::Icon::Describe, "Descriptives…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Descriptives); }
+                            if ui.button("Explore…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Explore); }
+                            if crate::icon::menu_item(ui, crate::theme::Icon::Crosstabs, "Crosstabs…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Crosstabs); }
                         });
                         ui.menu_button("Compare Means", |ui| {
-                            if ui.button("Means…").clicked() { ui.close_menu(); self.status = "Means: not implemented yet.".to_string(); }
-                            if crate::icon::menu_item(ui, crate::theme::Icon::TTest, "Independent-Samples T Test…").clicked() { ui.close_menu(); self.analyze_ttest(); }
-                            if crate::icon::menu_item(ui, crate::theme::Icon::TTest, "Paired-Samples T Test…").clicked() { ui.close_menu(); self.analyze_paired_t(); }
-                            if crate::icon::menu_item(ui, crate::theme::Icon::Anova, "One-Way ANOVA…").clicked() { ui.close_menu(); self.analyze_anova(); }
+                            if ui.button("Means…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Means); }
+                            if crate::icon::menu_item(ui, crate::theme::Icon::TTest, "Independent-Samples T Test…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::TTest); }
+                            if crate::icon::menu_item(ui, crate::theme::Icon::TTest, "Paired-Samples T Test…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::PairedT); }
+                            if crate::icon::menu_item(ui, crate::theme::Icon::Anova, "One-Way ANOVA…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Anova); }
                         });
                         ui.menu_button("Correlate", |ui| {
-                            if crate::icon::menu_item(ui, crate::theme::Icon::Correlation, "Bivariate…").clicked() { ui.close_menu(); self.analyze_correlations(); }
+                            if crate::icon::menu_item(ui, crate::theme::Icon::Correlation, "Bivariate…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Correlations); }
                         });
                         ui.menu_button("Regression", |ui| {
-                            if crate::icon::menu_item(ui, crate::theme::Icon::Regression, "Linear…").clicked() { ui.close_menu(); self.analyze_regression(); }
+                            if crate::icon::menu_item(ui, crate::theme::Icon::Regression, "Linear…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Regression); }
                             if ui.button("Curve Estimation…").clicked() { ui.close_menu(); self.status = "Curve Estimation: not implemented yet.".to_string(); }
                         });
                         ui.separator();
@@ -1917,6 +1969,18 @@ fn app_icon() -> egui::IconData {
 }
 
 pub fn run(initial_path: Option<String>) -> eframe::Result<()> {
+    run_with(initial_path, None)
+}
+
+/// Run the app, optionally opening a procedure dialog on start.
+///
+/// The dialog argument exists so the app can be launched straight into a
+/// procedure (handy for scripting, demos and screenshots) without going
+/// through the Analyze menu.
+pub fn run_with(
+    initial_path: Option<String>,
+    initial_dialog: Option<crate::dialog::Procedure>,
+) -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_icon(app_icon())
@@ -1937,6 +2001,9 @@ pub fn run(initial_path: Option<String>) -> eframe::Result<()> {
             if let Some(p) = initial_path {
                 app.path_input = p;
                 app.load();
+            }
+            if let Some(proc) = initial_dialog {
+                app.dialog = Some(crate::dialog::DialogState::new(proc));
             }
             Ok(Box::new(app))
         }),

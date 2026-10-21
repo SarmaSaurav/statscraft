@@ -367,6 +367,8 @@ pub mod icons {
         refresh => "refresh",
         settings => "settings",
         check => "check",
+        measure_scale => "measure_scale",
+        measure_nominal => "measure_nominal",
     );
 }
 
@@ -401,6 +403,10 @@ pub enum Icon {
     Refresh,
     Settings,
     Check,
+    /// A ruler — SPSS's measure-level icon for a numeric/scale variable.
+    MeasureScale,
+    /// A pencil — SPSS's measure-level icon for a string/nominal variable.
+    MeasureNominal,
 }
 
 impl Icon {
@@ -435,6 +441,8 @@ impl Icon {
             Icon::Refresh => icons::refresh,
             Icon::Settings => icons::settings,
             Icon::Check => icons::check,
+            Icon::MeasureScale => icons::measure_scale,
+            Icon::MeasureNominal => icons::measure_nominal,
         }
     }
 
@@ -469,6 +477,8 @@ impl Icon {
             Icon::Refresh => "Refresh",
             Icon::Settings => "Settings",
             Icon::Check => "Check",
+            Icon::MeasureScale => "Measure scale",
+            Icon::MeasureNominal => "Measure nominal",
         }
     }
 }

@@ -9,29 +9,119 @@ pub struct OutputTable {
 
 impl OutputTable {
     pub fn from_descriptives(descs: &[crate::stats::Descriptive]) -> Self {
+        let mut set = crate::stats::StatSet::defaults();
+        set.sum = false;
+        Self::descriptives_with(descs, &set)
+    }
+
+    /// Descriptives rendered with only the statistics the user asked for.
+    ///
+    /// SPSS builds one table per variable when several variables are
+    /// analysed, with a row per statistic. We follow that layout.
+    pub fn descriptives_with(
+        descs: &[crate::stats::Descriptive],
+        stats: &crate::stats::StatSet,
+    ) -> Self {
+        // The statistic rows, in SPSS's order.
+        let mut stat_rows: Vec<(
+            String,
+            Box<dyn Fn(&crate::stats::Descriptive) -> String>,
+        )> = Vec::new();
+        if stats.mean {
+            stat_rows.push(("Mean".to_string(), Box::new(|d: &crate::stats::Descriptive| format!("{:.4}", d.mean))));
+        }
+        if stats.stddev {
+            stat_rows.push(("Std. Deviation".to_string(), Box::new(|d: &crate::stats::Descriptive| format!("{:.4}", d.std_dev))));
+        }
+        if stats.variance {
+            stat_rows.push(("Variance".to_string(), Box::new(|d: &crate::stats::Descriptive| format!("{:.4}", d.variance))));
+        }
+        if stats.median {
+            stat_rows.push(("Median".to_string(), Box::new(|d: &crate::stats::Descriptive| format!("{:.4}", d.median))));
+        }
+        if stats.mode {
+            stat_rows.push(("Mode".to_string(), Box::new(|d: &crate::stats::Descriptive| match d.mode {
+                Some(v) => format!("{:.4}", v),
+                None => "—".to_string(),
+            })));
+        }
+        if stats.minimum {
+            stat_rows.push(("Minimum".to_string(), Box::new(|d: &crate::stats::Descriptive| format!("{:.4}", d.min))));
+        }
+        if stats.maximum {
+            stat_rows.push(("Maximum".to_string(), Box::new(|d: &crate::stats::Descriptive| format!("{:.4}", d.max))));
+        }
+        if stats.range {
+            stat_rows.push(("Range".to_string(), Box::new(|d: &crate::stats::Descriptive| format!("{:.4}", d.range))));
+        }
+        if stats.sum {
+            stat_rows.push(("Sum".to_string(), Box::new(|d: &crate::stats::Descriptive| format!("{:.4}", d.sum))));
+        }
+        if stats.semean {
+            stat_rows.push(("Std. Error of Mean".to_string(), Box::new(|d: &crate::stats::Descriptive| format!("{:.5}", d.std_error_mean))));
+        }
+        if stats.skewness {
+            stat_rows.push(("Skewness".to_string(), Box::new(|d: &crate::stats::Descriptive| format!("{:.4}", d.skewness))));
+        }
+        if stats.kurtosis {
+            stat_rows.push(("Kurtosis".to_string(), Box::new(|d: &crate::stats::Descriptive| format!("{:.4}", d.kurtosis))));
+        }
+        if stats.sekurt {
+            stat_rows.push((
+                "Std. Error of Kurtosis".to_string(),
+                Box::new(|d: &crate::stats::Descriptive| format!("{:.5}", d.std_error_kurtosis)),
+            ));
+        }
+        for (p, label) in percent_labels(stats) {
+            stat_rows.push((
+                label,
+                Box::new(move |d: &crate::stats::Descriptive| {
+                    match d
+                        .percentiles
+                        .iter()
+                        .find(|(pp, _)| (*pp - p).abs() < f64::EPSILON)
+                    {
+                        Some((_, v)) => format!("{:.4}", v),
+                        None => "—".to_string(),
+                    }
+                }),
+            ));
+        }
+
         let mut rows = Vec::new();
         for d in descs {
-            rows.push(vec![
-                d.variable.clone(),
-                d.n.to_string(),
-                format!("{:.4}", d.mean),
-                format!("{:.4}", d.std_dev),
-                format!("{:.4}", d.min),
-                format!("{:.4}", d.max),
-            ]);
+            // One block per variable, laid out the way SPSS does it: the
+            // variable name on the first line with its N, then one line per
+            // statistic with the statistic's name in the first column and
+            // its value under the matching column.
+            rows.push(vec![d.variable.clone(), d.n.to_string()]);
+            for (label, f) in &stat_rows {
+                let mut row = vec![label.clone()];
+                row.push(String::new()); // N is blank on statistic lines
+                for _ in 2..stat_rows.len() {
+                    row.push(String::new());
+                }
+                // The value goes under its own column.
+                let col = 2 + stat_rows
+                    .iter()
+                    .position(|(l, _)| l == label)
+                    .unwrap_or(0);
+                while row.len() <= col {
+                    row.push(String::new());
+                }
+                row[col] = f(d);
+                rows.push(row);
+            }
         }
+
+        let mut headers = vec!["Variable".to_string(), "N".to_string()];
+        headers.extend(stat_rows.iter().map(|(l, _)| l.clone()));
+
         Self {
             title: "Descriptive Statistics".to_string(),
-            headers: vec![
-                "Variable".into(),
-                "N".into(),
-                "Mean".into(),
-                "Std. Dev.".into(),
-                "Min".into(),
-                "Max".into(),
-            ],
+            headers,
             rows,
-            ..Default::default()
+            note: "a. Counts exclude system- and user-missing cases.".to_string(),
         }
     }
 
@@ -237,4 +327,20 @@ impl OutputTable {
 
 fn col_total(ct: &crate::stats::CrosstabsResult, j: usize) -> usize {
     ct.col_totals[j]
+}
+
+/// The percentile column labels implied by a statistic set.
+fn percent_labels(stats: &crate::stats::StatSet) -> Vec<(f64, String)> {
+    if !stats.percentiles {
+        return Vec::new();
+    }
+    let wanted: Vec<f64> = if stats.percentile_values.is_empty() {
+        vec![25.0, 50.0, 75.0]
+    } else {
+        stats.percentile_values.clone()
+    };
+    wanted
+        .into_iter()
+        .map(|p| (p, format!("Percentile {}", p as i64)))
+        .collect()
 }

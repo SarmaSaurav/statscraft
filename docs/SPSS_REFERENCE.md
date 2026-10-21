@@ -241,11 +241,14 @@ status bar, and a proper window title. Already largely done in the
 "Modern UI" commit; this phase closes the remaining gaps (visible-variable
 counter placement, dataset title, empty-state grid).
 
-**Phase 2 — real procedure dialogs** (closes gap #1 and #12)
+**Phase 2 — real procedure dialogs** (closes gap #1 and #12) — DONE
 A reusable dialog shell: source list → target list, move arrow, a
 right-hand column of sub-dialog buttons, procedure-specific options, and a
 gated OK. Every dialog **builds syntax** and hands it to the existing
 runner, so dialog → syntax → output works exactly as SPSS does it.
+
+Implemented in `src/dialog.rs` (see the Phase 2 note at the end of this
+file for the details).
 
 **Phase 3 — procedure depth** (closes gaps #2, #6–#11)
 Statistics options for Frequencies/Descriptives, cell counts and extra
@@ -254,3 +257,67 @@ table for Regression, and charts in the Viewer.
 
 **Phase 4 — the missing procedures** (closes gaps #3–#5, #14)
 Explore, Means, the nonparametric family, reliability, factor.
+
+
+---
+
+## 7. Phase 2 — what the procedure dialogs now do
+
+`src/dialog.rs` implements the SPSS dialog for ten procedures:
+Frequencies, Descriptives, Crosstabs, Independent-Samples T Test,
+Paired-Samples T Test, One-Way ANOVA, Bivariate Correlations, Linear
+Regression, Means and Explore.
+
+**The anatomy**, taken from the SPSS 27 screenshots in
+`docs/spss-reference/`:
+
+| Part | Where | Notes |
+|---|---|---|
+| Source variable list | left | each row carries a measure-level icon: a **ruler** for numeric/scale, a **pencil** for string/nominal |
+| Move arrow | middle | one arrow moves the selected source variable into the target list; a second arrow moves the last one back |
+| Target variable list | right | clicking a target removes it |
+| Sub-dialog buttons | right, below the list | `Statistics…`, `Charts…`, `Format…` for Frequencies; `Options…` for Descriptives; `Cells…` + `Statistics…` for Crosstabs; `Options…` + `Post-hoc…` for ANOVA; and so on |
+| Procedure checkboxes | right, bottom | e.g. `Display frequency tables`, `Create charts (histogram)`, `Save standardized values as variables` |
+| Button row | bottom | `OK`, `Paste`, `Reset`, `Cancel`, `Help` |
+| **Gated OK** | bottom | disabled until the dialog has everything it needs — a target variable, plus a grouping variable for t-test / ANOVA / means / crosstabs |
+
+**The dialog → syntax → output pipeline.** A dialog does not compute
+anything. It *builds SPSS syntax* and hands it to the same runner the
+Syntax Editor uses, so there is one execution path:
+
+```
+Frequencies  region satisfaction
+DESCRIPTIVES score age /STATISTICS=MEAN STDDEV
+T-TEST score BY group
+ONEWAY score BY group /POSTHOC=TUKEY SCHEFFE
+CORRELATIONS score age /PRINT=SIG /MISSING=PAIRWISE
+```
+
+- **OK** runs the syntax and raises the Output Viewer.
+- **Paste** puts the syntax in the Syntax Editor *without* running it —
+  SPSS's behaviour, and the point of the whole pipeline: you can edit the
+  command by hand before running it.
+
+**Supporting changes this phase made:**
+
+- `src/syntax.rs` gained a real command parser. It splits a line into the
+  command name, the positional arguments, and the `/SUBCOMMAND=KEYWORD`
+  options, so `/STATISTICS=`, `/CELLS=`, `/POSTHOC=`, `/PRINT=`,
+  `/MISSING=` and `/ES=` are understood rather than silently ignored.
+- `src/stats.rs` gained a `StatSet` — the set of statistics a procedure
+  should report, parsed from the same keywords SPSS uses — and a
+  `descriptives_with` that computes them: mean, median, mode, variance,
+  range, sum, standard error of the mean, skewness (SPSS's bias-corrected
+  formula), kurtosis, and percentiles by linear interpolation.
+- `src/output.rs` gained `descriptives_with`, which lays the table out the
+  way SPSS does: the variable name and its N on the first line, then one
+  line per statistic with the statistic's name in the first column and its
+  value under the matching column.
+- The app takes a `--dialog <procedure>` flag, which opens a procedure
+  dialog at start-up. Useful for demos, screenshots and scripted checks.
+
+**Still open from the gap list:** the sub-dialogs currently write their
+choices into the syntax, but the *engine* only acts on the statistics
+options (`/STATISTICS=`). `/CELLS=`, `/POSTHOC=`, `/PRINT=`, `/MISSING=`
+and `/ES=` are parsed and round-trip through the dialog, but the
+corresponding output tables do not yet reflect them. That is Phase 3.
