@@ -2117,32 +2117,59 @@ fn render_variables(ui: &mut egui::Ui, table: &mut DataTable) {
         });
 }
 
-/// StatsCraft application icon: ascending white bars on a navy rounded square.
-/// Generated at runtime so the build stays asset-free.
-/// The app icon: a rounded square in the brand accent with three ascending
-/// bars in the StatCraft palette, matching the toolbar's `chart` icon.
+/// The StatsCraft application icon.
+///
+/// It is the same mark as the packaged one - a rounded square in the
+/// Dracula background, three ascending bars in the brand accents, and
+/// a rising plot line across them - drawn into a pixel buffer at
+/// run time so the build stays free of image assets. The shapes are
+/// scaled from the 64-pixel design, so the icon is crisp at every
+/// size Windows asks for.
 fn app_icon() -> egui::IconData {
     const S: usize = 64;
-    // Bar geometry: three ascending bars, baseline at y = 50.
-    const BARS: [(usize, usize, usize); 3] = [
-        // (x_start, x_end, y_top)
-        (12, 22, 34),
-        (27, 37, 24),
-        (42, 52, 12),
+    // The background, the three bar colours and the line.
+    const BG: (u8, u8, u8) = (40, 42, 54);
+    const VIOLET: (u8, u8, u8) = (189, 147, 249);
+    const BLUE: (u8, u8, u8) = (47, 111, 237);
+    const MID: (u8, u8, u8) = (74, 154, 245);
+    const TEAL: (u8, u8, u8) = (15, 168, 126);
+    const FG: (u8, u8, u8) = (248, 248, 242);
+    // The bars: (x start, width, height, colour).
+    const BARS: [(usize, usize, usize, (u8, u8, u8)); 3] = [
+        (12, 10, 19, BLUE),
+        (27, 10, 27, MID),
+        (42, 10, 36, TEAL),
     ];
-    // Brand colours: accent blue, mid blue, teal.
-    const COLORS: [(u8, u8, u8); 3] = [
-        (0x2F, 0x6F, 0xED),
-        (0x4A, 0x9A, 0xF5),
-        (0x0F, 0xA8, 0x7E),
-    ];
+    // The plot line's points, over the bars.
+    const POINTS: [(usize, usize); 3] = [(17, 24), (32, 16), (47, 7)];
 
     let mut rgba = vec![0u8; S * S * 4];
+    let put = |rgba: &mut Vec<u8>, x: usize, y: usize, c: (u8, u8, u8), a: u8| {
+        if x < S && y < S {
+            let i = (y * S + x) * 4;
+            // The colour is composited over what is there, so the
+            // glow and the bars can be layered.
+            let old_a = rgba[i + 3] as f32 / 255.0;
+            let new_a = a as f32 / 255.0;
+            let out_a = new_a + old_a * (1.0 - new_a);
+            if out_a <= 0.0 {
+                return;
+            }
+            let channels = [c.0, c.1, c.2];
+            for k in 0..3 {
+                let src = channels[k] as f32 * new_a;
+                let dst = rgba[i + k] as f32 * old_a * (1.0 - new_a);
+                rgba[i + k] = ((src + dst) / out_a).round() as u8;
+            }
+            rgba[i + 3] = (out_a * 255.0).round() as u8;
+        }
+    };
+
     for y in 0..S {
         for x in 0..S {
             let fx = x as f32 + 0.5;
             let fy = y as f32 + 0.5;
-            // Rounded-rectangle signed distance for the tile.
+            // The rounded square's signed distance.
             let half = S as f32 / 2.0;
             let corner = 14.0;
             let qx = (fx - half).abs() - (half - corner);
@@ -2150,34 +2177,71 @@ fn app_icon() -> egui::IconData {
             let outside = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt();
             let d = outside + qx.max(qy).min(0.0) - corner;
             if d > 0.0 {
-                continue; // transparent outside the rounded square
+                continue; // transparent outside the tile
             }
+            put(&mut rgba, x, y, BG, 255);
 
-            // White tile.
-            let (mut r, mut g, mut b) = (255u8, 255u8, 255u8);
-            // A very light accent wash so the tile is not flat white.
-            let wash = 1.0 - (fy / S as f32).min(1.0);
-            r = (r as f32 - 8.0 * wash) as u8;
-            g = (g as f32 - 12.0 * wash) as u8;
-            b = (b as f32 - 4.0 * wash) as u8;
-
-            // The bars.
-            for (i, (x0, x1, y_top)) in BARS.iter().enumerate() {
-                if x >= *x0 && x < *x1 && y >= *y_top && y <= 50 {
-                    let (br, bg, bb) = COLORS[i];
-                    r = br;
-                    g = bg;
-                    b = bb;
-                }
+            // The violet glow in the top-left.
+            let gx = fx - 4.0;
+            let gy = fy + 6.0;
+            let glow = (1.0 - (gx * gx + gy * gy).sqrt() / 34.0).clamp(0.0, 1.0);
+            if glow > 0.0 {
+                put(&mut rgba, x, y, VIOLET, (glow * 44.0) as u8);
             }
-
-            let idx = (y * S + x) * 4;
-            rgba[idx] = r;
-            rgba[idx + 1] = g;
-            rgba[idx + 2] = b;
-            rgba[idx + 3] = 255;
+            // The violet edge.
+            if d > -1.4 {
+                put(&mut rgba, x, y, VIOLET, 120);
+            }
         }
     }
+
+    // The bars.
+    for (x0, w, h, c) in BARS.iter() {
+        for y in (50 - h)..50 {
+            for x in *x0..(x0 + w) {
+                put(&mut rgba, x, y, *c, 255);
+            }
+        }
+    }
+    // The baseline.
+    for y in 49..52 {
+        for x in 11..53 {
+            put(&mut rgba, x, y, FG, 220);
+        }
+    }
+    // The plot line: a thick line between the points, then the points
+    // themselves.
+    for i in 0..POINTS.len() - 1 {
+        let (x0, y0) = POINTS[i];
+        let (x1, y1) = POINTS[i + 1];
+        let steps = (x1 as i32 - x0 as i32).abs().max((y1 as i32 - y0 as i32).abs());
+        for s in 0..=steps {
+            let t = s as f32 / steps as f32;
+            let px = (x0 as f32 + (x1 as f32 - x0 as f32) * t).round() as usize;
+            let py = (y0 as f32 + (y1 as f32 - y0 as f32) * t).round() as usize;
+            for dy in -1i32..=1 {
+                for dx in -1i32..=1 {
+                    let nx = px as i32 + dx;
+                    let ny = py as i32 + dy;
+                    if nx >= 0 && ny >= 0 {
+                        put(&mut rgba, nx as usize, ny as usize, FG, 235);
+                    }
+                }
+            }
+        }
+    }
+    for (cx, cy) in POINTS.iter() {
+        for y in cy.saturating_sub(2)..=(cy + 2).min(S - 1) {
+            for x in cx.saturating_sub(2)..=(cx + 2).min(S - 1) {
+                let dx = x as i32 - *cx as i32;
+                let dy = y as i32 - *cy as i32;
+                if dx * dx + dy * dy <= 7 {
+                    put(&mut rgba, x, y, FG, 255);
+                }
+            }
+        }
+    }
+
     egui::IconData {
         rgba,
         width: S as u32,

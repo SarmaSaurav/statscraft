@@ -20,13 +20,14 @@ Remove-Item (Join-Path $start "Uninstall StatsCraft.lnk") -Force
 Remove-Item -Recurse -Force $dest
 "#;
 
-const SHORTCUT_PS: &str = r#"$dest = Join-Path $env:LOCALAPPDATA "Programs\StatsCraft"
+static SHORTCUT_PS: &str = r#"$dest = Join-Path $env:LOCALAPPDATA "Programs\StatsCraft"
 $start = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
 $wsh = New-Object -ComObject WScript.Shell
 $sc = $wsh.CreateShortcut((Join-Path $start "StatsCraft.lnk"))
 $sc.TargetPath = Join-Path $dest "statscraft.exe"
 $sc.WorkingDirectory = $dest
 $sc.Description = "StatsCraft - lightweight SPSS-like statistical workbench"
+$sc.IconLocation = Join-Path $dest "statscraft.exe,0"
 $sc.Save()
 $usc = $wsh.CreateShortcut((Join-Path $start "Uninstall StatsCraft.lnk"))
 $usc.TargetPath = "powershell.exe"
