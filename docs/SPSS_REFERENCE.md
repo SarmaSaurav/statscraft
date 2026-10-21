@@ -393,3 +393,112 @@ statscraft data.csv --script run.sps         # run a syntax file at start-up
 
 The second one is what the test suite and the screenshot tooling use.
 `samples/phase3_demo.sps` runs every Phase 3 feature in one go.
+
+## 9. Phase 4 — reliability, factors, discrimination, and the SPSS file format
+
+### 9.1 What Phase 4 added
+
+| Area | What it does |
+|---|---|
+| **Reliability** | `RELIABILITY` / `ALPHA` computes Cronbach's alpha, the standardised alpha, the item-total correlations, the inter-item correlations and the weak items. |
+| **Factor analysis** | `FACTOR` runs a principal component analysis: the eigenvalue table, the component matrix, the communalities and Bartlett's test of sphericity with the KMO measure. `/EXTRACTION=PC<n>` chooses how many components to keep. |
+| **ROC curves** | `ROC <var> BY <group> /POSITIVE(<group>)` computes the area under the curve, its standard error, the 95% confidence interval, the cut-off table and the curve itself. |
+| **Robust ANOVA** | `ONEWAY ... /STATISTICS=WELCH` adds Welch's test and the Brown-Forsythe test, which do not assume equal group variances. |
+| **Computed variables** | `COMPUTE <name> = <expression>` adds a variable to the dataset, with the arithmetic operators and the functions `MEAN`, `MIN`, `MAX`, `SUM`, `ABS`, `SQRT`, `LN`, `LOG10` and `ROUND`. |
+| **The `.sav` file** | The data can be written as an SPSS `.sav` file, with the variable labels, the value labels, the measures and the display widths carried across. |
+
+### 9.2 The two formulas that took the most care
+
+Both were wrong at first, and both were caught by looking at the output
+rather than at the code.
+
+- **The standardised alpha.** It was computed from the *sum* of the
+  off-diagonal correlations:
+
+  ```
+  alpha_std = k / (k - 1) * (1 - 1 / r_sum)
+  ```
+
+  which is not the formula. The correct one uses the *mean*
+  inter-item correlation:
+
+  ```
+  alpha_std = k * r_bar / (1 + (k - 1) * r_bar)
+  ```
+
+  The wrong version gave a standardised alpha of 1.096 on a scale whose
+  ordinary alpha was 0.790 — a value above 1, which is impossible. The
+  right one gives 0.790, the same as the ordinary alpha, which is what
+  SPSS reports for a scale whose items are interchangeable.
+
+- **The ordinary alpha on a degenerate scale.** When the items split
+  into two anti-correlated halves, the total score cancels out, the
+  total variance approaches zero, and the ratio `sum(s_i^2) / s_total^2`
+  explodes: the alpha came out as -40. That is the arithmetic being
+  right and the scale being meaningless. The alpha is now reported as
+  missing when the total score has no variance to speak of, and the
+  standardised alpha is reported as missing when the mean inter-item
+  correlation is not positive. SPSS makes the same distinction.
+
+### 9.3 The `.sav` file format
+
+The writer was rebuilt against the real file rather than from memory.
+`C:\Program Files\IBM\SPSS\Statistics\27\Samples\English\accidents.sav`
+is the reference. What it showed:
+
+- The file header is **176 bytes**: the `$FL2` magic, a 60-byte
+  product string, the layout code, the variable count, the compression
+  bias, the case count, the creation date and time, a 64-byte file
+  label, and 16 bytes of padding.
+- A **type 2** record describes a variable: the type code, whether it
+  has a label, the number of missing values, the print and write
+  formats, the name in 8 bytes, and then the label with its length
+  prefix.
+- A **type 3** record holds the value labels, and a **type 4** record
+  holds a variable's label.
+- A **type 999** record ends the dictionary: the type, a filler, and
+  the weighted case count in 8 bytes.
+- The data records follow, each with a type 100 marker.
+
+The hand-written writer got the header padding and the type 999 record
+wrong, so the file parsed but had no rows. Rather than keep patching
+the byte layout, the writer now uses the `SpssWriter` in
+`polars-readstat-rs`, which already implements the record layout, the
+compression and the metadata. The round-trip is covered by a test:
+write the table, read it back, and check the variables, the rows and
+the values match.
+
+### 9.4 A parser bug the phase found
+
+`/POSITIVE(case)` — the parenthesised form SPSS uses for a value that is
+a piece of data rather than a keyword — was not parsed at all. The
+parser saw a keyword with no `=`, so it took the whole `POSITIVE(case)`
+as the keyword's name and left `case` as a stray value. Two things
+followed from that: the ROC fell back to using the group variable's
+*name* as the positive group, which matched nothing, so the procedure
+silently produced no output; and the reliability scale's name came out
+as the default rather than the one that was asked for.
+
+The parser now reads the parenthesised form, and — because a value in
+parentheses is data, not a keyword — it keeps the value's case. A
+keyword list after an `=` is still upper-cased, because those are
+keywords.
+
+### 9.5 The Phase 4 script
+
+`samples/phase4_demo.sps` runs against `samples/scale_demo.csv`, a
+120-row dataset with two clusters of three items each, a two-level
+factor and a noisy binary outcome:
+
+```sps
+RELIABILITY i1 i2 i3 i4 i5 i6 /SCALE(Overall)
+FACTOR i1 i2 i3 i4 i5 i6 /EXTRACTION=PC2
+ONEWAY score BY group /STATISTICS=WELCH
+ROC score BY status /POSITIVE(case)
+COMPUTE centred = score - 50
+DESCRIPTIVES centred
+```
+
+The factor analysis recovers the two planted clusters: the first three
+items load on the first component at about -0.85 and the last three on
+the second at about -0.8.

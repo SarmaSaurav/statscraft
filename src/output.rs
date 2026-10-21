@@ -32,6 +32,8 @@ pub enum ChartKind {
     Scatter,
     /// A box plot of a numeric variable, with the quartiles marked.
     BoxPlot,
+    /// A line, used for the ROC curve and for the scree plot.
+    Line,
 }
 
 /// One series of a chart: a name and a set of points.
@@ -775,39 +777,78 @@ impl OutputTable {
     /// SPSS ANOVA table: Between/Within/Total rows with SS, df, MS, F, Sig.
     /// The full ANOVA output: descriptives per group, the ANOVA table,
     /// Levene's test and the post-hoc comparisons.
-    pub fn anova_with(a: &crate::stats::AnovaResult) -> Self {
-        let total_ss = a.ss_between + a.ss_within;
-        let total_df = a.df_between + a.df_within;
-
-        let mut headers = vec![
+    /// The descriptives of the groups, as SPSS shows them above the
+    /// ANOVA table.
+    pub fn anova_descriptives(a: &crate::stats::AnovaResult) -> Self {
+        let headers = vec![
             String::new(),
             "N".into(),
             "Mean".into(),
             "Std. Dev.".into(),
+            "Std. Error Mean".into(),
         ];
         let mut rows: Vec<Vec<String>> = Vec::new();
-
-        // ---- Descriptives per group ----
+        for g in &a.groups {
+            let se = if g.n > 0 {
+                g.std_dev / (g.n as f64).sqrt()
+            } else {
+                f64::NAN
+            };
+            rows.push(vec![
+                g.name.clone(),
+                g.n.to_string(),
+                format!("{:.4}", g.mean),
+                format!("{:.4}", g.std_dev),
+                format!("{:.4}", se),
+            ]);
+        }
         if !a.groups.is_empty() {
-            for g in &a.groups {
-                rows.push(vec![
-                    g.name.clone(),
-                    g.n.to_string(),
-                    format!("{:.4}", g.mean),
-                    format!("{:.4}", g.std_dev),
-                ]);
-            }
             let total_n: usize = a.groups.iter().map(|g| g.n).sum();
             let grand = a.groups.iter().map(|g| g.mean * g.n as f64).sum::<f64>()
                 / total_n.max(1) as f64;
+            // The pooled standard deviation of all the cases.
+            let pooled_var = a.groups.iter().map(|g| g.std_dev.powi(2) * (g.n as f64 - 1.0)).sum::<f64>()
+                / (total_n.max(1) as f64 - a.groups.len() as f64).max(1.0);
+            let pooled = pooled_var.max(0.0).sqrt();
+            let se = if total_n > 0 {
+                pooled / (total_n as f64).sqrt()
+            } else {
+                f64::NAN
+            };
             rows.push(vec![
                 "Total".into(),
                 total_n.to_string(),
                 format!("{:.4}", grand),
-                String::new(),
+                format!("{:.4}", pooled),
+                format!("{:.4}", se),
             ]);
-            rows.push(vec![String::new()]);
         }
+        Self {
+            title: format!("Descriptives — {} by {}", a.outcome, a.factor),
+            headers,
+            rows,
+            note: String::new(),
+            chart: None,
+        }
+    }
+
+    pub fn anova_with(a: &crate::stats::AnovaResult) -> Self {
+        let total_ss = a.ss_between + a.ss_within;
+        let total_df = a.df_between + a.df_within;
+
+        // The ANOVA table has its own columns - the sum of squares, the
+        // degrees of freedom, the mean square, the F and the
+        // significance - and the descriptives above it have a
+        // different set. So the descriptives go in their own table.
+        let mut headers = vec![
+            String::new(),
+            "Sum of Squares".into(),
+            "df".into(),
+            "Mean Square".into(),
+            "F".into(),
+            "Sig.".into(),
+        ];
+        let mut rows: Vec<Vec<String>> = Vec::new();
 
         // ---- The ANOVA table ----
         let anova_rows = vec![
@@ -1287,6 +1328,302 @@ impl OutputTable {
         let mut t = Self::regression_with(r);
         t.chart = chart;
         t
+    }
+
+    // ---- The procedures added in Phase 4 ----
+
+    /// The reliability analysis output: the "Reliability Statistics"
+    /// table, the item statistics and the scale statistics.
+    pub fn from_reliability(r: &crate::stats::ReliabilityResult) -> Self {
+        // The "Reliability Statistics" block.
+        let mut headers = vec![
+            "Cronbach's Alpha".into(),
+            "N of Items".into(),
+            "N".into(),
+        ];
+        if r.standardised_alpha.is_finite() {
+            headers.push("Standardised Alpha".into());
+        }
+        let mut rows = vec![vec![
+            format!("{:.3}", r.alpha),
+            r.n_items.to_string(),
+            r.n_cases.to_string(),
+            format!("{:.3}", r.standardised_alpha),
+        ]];
+
+        let mut note_lines = Vec::new();
+        if !r.weak_items.is_empty() {
+            note_lines.push(format!(
+                "a. The item(s) {} correlate less than 0.3 with the total score.",
+                r.weak_items.join(", ")
+            ));
+        }
+
+        Self {
+            title: format!("Reliability Statistics: {}", r.name),
+            headers,
+            rows,
+            note: note_lines.join("\n"),
+            chart: None,
+        }
+    }
+
+    /// The item statistics table of the reliability analysis.
+    pub fn reliability_items(r: &crate::stats::ReliabilityResult) -> Self {
+        let headers = vec![
+            "Item".into(),
+            "Item-Total Correlation".into(),
+            "Corrected Item-Total Correlation".into(),
+            "Alpha if Item Deleted".into(),
+        ];
+        let mut rows = Vec::new();
+        for (i, name) in r.item_names.iter().enumerate() {
+            let corr = r
+                .item_total_correlations
+                .get(i)
+                .map(|(_, c)| *c)
+                .unwrap_or(f64::NAN);
+            let corrected = r
+                .corrected_item_total
+                .get(i)
+                .map(|(_, c)| *c)
+                .unwrap_or(f64::NAN);
+            let alpha = r
+                .alpha_if_deleted
+                .get(i)
+                .map(|(_, a)| *a)
+                .unwrap_or(f64::NAN);
+            rows.push(vec![
+                name.clone(),
+                format!("{:.3}", corr),
+                format!("{:.3}", corrected),
+                format!("{:.3}", alpha),
+            ]);
+        }
+        Self {
+            title: format!("Item Statistics: {}", r.name),
+            headers,
+            rows,
+            note: String::new(),
+            chart: None,
+        }
+    }
+
+    /// The factor analysis output: the total variance explained, the
+    /// component matrix and the communalities.
+    pub fn from_factor(f: &crate::stats::FactorResult) -> Self {
+        // The "Total Variance Explained" table.
+        let mut headers = vec![
+            "Component".into(),
+            "Initial Eigenvalue Total".into(),
+            "% of Variance".into(),
+            "Cumulative %".into(),
+        ];
+        let mut rows = Vec::new();
+        for i in 0..f.eigenvalues.len() {
+            let is_retained = i < f.n_components;
+            let eigen = format!("{:.3}", f.eigenvalues[i]);
+            let eigen = if is_retained {
+                format!("{:.3}", f.retained_eigenvalues[i])
+            } else {
+                eigen
+            };
+            rows.push(vec![
+                (i + 1).to_string(),
+                eigen,
+                format!("{:.1}", f.variance_percent[i]),
+                format!("{:.1}", f.cumulative_percent[i]),
+            ]);
+        }
+
+        let mut note_lines = Vec::new();
+        if let Some((chi, p)) = f.bartlett {
+            note_lines.push(format!(
+                "a. Bartlett's test of sphericity: chi-square = {:.1}, df = {}, Sig. = {:.4}",
+                chi,
+                (f.n_items * (f.n_items - 1) / 2) as i64,
+                p
+            ));
+        }
+        note_lines.push(format!(
+            "b. The Kaiser-Meyer-Olkin measure of sampling adequacy is {:.3}.",
+            f.kmo
+        ));
+
+        Self {
+            title: "Factor Analysis".to_string(),
+            headers,
+            rows,
+            note: note_lines.join("\n"),
+            chart: None,
+        }
+    }
+
+    /// The "Component Matrix" table of the factor analysis.
+    pub fn factor_component_matrix(f: &crate::stats::FactorResult) -> Self {
+        let mut headers = vec!["Item".into()];
+        for c in 0..f.n_components {
+            headers.push(format!("Component {}", c + 1));
+        }
+        let mut rows = Vec::new();
+        for (i, name) in f.item_names.iter().enumerate() {
+            let mut row = vec![name.clone()];
+            for c in 0..f.n_components {
+                row.push(format!("{:.3}", f.loadings[i][c]));
+            }
+            rows.push(row);
+        }
+        Self {
+            title: "Component Matrix".to_string(),
+            headers,
+            rows,
+            note: "a. Extraction Method: Principal Component Analysis.".to_string(),
+            chart: None,
+        }
+    }
+
+    /// The communalities table of the factor analysis.
+    pub fn factor_communalities(f: &crate::stats::FactorResult) -> Self {
+        let mut rows = Vec::new();
+        for (i, name) in f.item_names.iter().enumerate() {
+            rows.push(vec![name.clone(), format!("{:.3}", f.communalities[i])]);
+        }
+        Self {
+            title: "Communalities".to_string(),
+            headers: vec!["Item".into(), "Communality".into()],
+            rows,
+            note: String::new(),
+            chart: None,
+        }
+    }
+
+    /// The Welch and Brown-Forsythe test output.
+    pub fn anova_variance_tests(t: &crate::stats::AnovaVarianceTests) -> Self {
+        let headers = vec![
+            "Test".into(),
+            "Statistic".into(),
+            "df1".into(),
+            "df2".into(),
+            "Sig.".into(),
+        ];
+        let rows = vec![
+            vec![
+                "Welch's Test".to_string(),
+                format!("{:.3}", t.welch.0),
+                format!("{:.0}", t.welch.1),
+                format!("{:.3}", t.welch.2),
+                format!("{:.4}", t.welch.3),
+            ],
+            vec![
+                "Brown-Forsythe Test".to_string(),
+                format!("{:.3}", t.brown_forsythe.0),
+                format!("{:.0}", t.brown_forsythe.1),
+                format!("{:.3}", t.brown_forsythe.2),
+                format!("{:.4}", t.brown_forsythe.3),
+            ],
+        ];
+        Self {
+            title: "Variance Tests".to_string(),
+            headers,
+            rows,
+            note: "a. Welch's test does not assume equal group variances; Brown-Forsythe's test is robust to outliers.".to_string(),
+            chart: None,
+        }
+    }
+
+    /// The ROC curve output.
+    /// The summary of an ROC curve: the area, its standard error and
+    /// the confidence interval.
+    pub fn roc_summary(r: &crate::stats::RocResult) -> Self {
+        let headers = vec![
+            "Area Under the Curve".into(),
+            "Std. Error".into(),
+            "95% CI Lower".into(),
+            "95% CI Upper".into(),
+            "Positive Group".into(),
+            "N Positive".into(),
+            "N Negative".into(),
+        ];
+        let rows = vec![vec![
+            format!("{:.3}", r.auc),
+            format!("{:.3}", r.auc_se),
+            format!("{:.3}", r.auc_ci.0),
+            format!("{:.3}", r.auc_ci.1),
+            r.positive_group.clone(),
+            r.n_positive.to_string(),
+            r.n_negative.to_string(),
+        ]];
+        // The curve itself: the false-positive rate against the true-
+        // positive rate, with the diagonal of the no-discrimination
+        // line as a second series.
+        let mut x = vec![0.0];
+        let mut y = vec![0.0];
+        for p in &r.points {
+            x.push(1.0 - p.specificity);
+            y.push(p.sensitivity);
+        }
+        x.push(1.0);
+        y.push(1.0);
+        let diagonal_x: Vec<f64> = vec![0.0, 1.0];
+        let diagonal_y: Vec<f64> = vec![0.0, 1.0];
+        let chart = Some(Chart {
+            kind: ChartKind::Line,
+            title: format!("ROC Curve: {}", r.outcome),
+            x_label: "1 - Specificity".to_string(),
+            y_label: "Sensitivity".to_string(),
+            series: vec![
+                ChartSeries {
+                    name: r.outcome.clone(),
+                    x,
+                    y,
+                    quartiles: None,
+                    x_labels: Vec::new(),
+                },
+                ChartSeries {
+                    name: "No discrimination".to_string(),
+                    x: diagonal_x,
+                    y: diagonal_y,
+                    quartiles: None,
+                    x_labels: Vec::new(),
+                },
+            ],
+        });
+
+        Self {
+            title: format!("ROC Curve: {} by {}", r.outcome, r.group_var),
+            headers,
+            rows,
+            note: "a. A higher test value counts as a positive result.".to_string(),
+            chart,
+        }
+    }
+
+    pub fn from_roc(r: &crate::stats::RocResult) -> Self {
+        let mut headers = vec![
+            "Cut-off".into(),
+            "Sensitivity".into(),
+            "Specificity".into(),
+            "Youden Index".into(),
+        ];
+        let mut rows = Vec::new();
+        for p in &r.points {
+            rows.push(vec![
+                format!("{:.2}", p.cutoff),
+                format!("{:.3}", p.sensitivity),
+                format!("{:.3}", p.specificity),
+                format!("{:.3}", p.youden),
+            ]);
+        }
+        Self {
+            title: "Area Under the Curve".to_string(),
+            headers,
+            rows,
+            note: format!(
+                "The positive group is '{}' (n = {}); the negative group has n = {}.",
+                r.positive_group, r.n_positive, r.n_negative
+            ),
+            chart: None,
+        }
     }
 }
 

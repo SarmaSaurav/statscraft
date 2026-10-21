@@ -45,6 +45,9 @@ pub enum Procedure {
     Wilcoxon,
     KruskalWallis,
     Friedman,
+    Reliability,
+    Factor,
+    Roc,
 }
 
 impl Procedure {
@@ -65,6 +68,9 @@ impl Procedure {
             Procedure::Wilcoxon => "Wilcoxon Signed-Rank Test",
             Procedure::KruskalWallis => "Kruskal-Wallis Test",
             Procedure::Friedman => "Friedman Test",
+            Procedure::Reliability => "Reliability Analysis",
+            Procedure::Factor => "Factor Analysis",
+            Procedure::Roc => "ROC Curve",
         }
     }
 
@@ -85,6 +91,9 @@ impl Procedure {
             Procedure::Wilcoxon => "NONPARAMETRIC /WILCOXON=",
             Procedure::KruskalWallis => "NONPARAMETRIC /K-W=",
             Procedure::Friedman => "NONPARAMETRIC /FRIEDMAN=",
+            Procedure::Reliability => "RELIABILITY",
+            Procedure::Factor => "FACTOR",
+            Procedure::Roc => "ROC",
         }
     }
 
@@ -99,6 +108,7 @@ impl Procedure {
                 | Procedure::Crosstabs
                 | Procedure::MannWhitney
                 | Procedure::KruskalWallis
+                | Procedure::Roc
         )
     }
 
@@ -129,6 +139,8 @@ pub enum SubDialog {
     RegressionStatistics,
     MeansOptions,
     ExploreOptions,
+    FactorOptions,
+    RocOptions,
 }
 
 /// The statistic choices offered by the `Statistics…` sub-dialog, keyed by
@@ -202,6 +214,8 @@ pub struct DialogState {
     /// The names of the target variables that are numeric. Descriptive
     /// statistics only apply to those.
     pub numeric_targets: Vec<String>,
+    /// The number of components to keep, for the factor analysis.
+    pub n_components: Option<usize>,
     pub options: StatOptions,
     pub sub: SubDialog,
     /// Set when the user pressed Paste — the generated syntax goes to the
@@ -221,6 +235,7 @@ impl DialogState {
             targets: Vec::new(),
             group_var: None,
             numeric_targets: Vec::new(),
+            n_components: None,
             options: StatOptions::default(),
             sub: SubDialog::None,
             pasted: None,
@@ -368,6 +383,27 @@ impl DialogState {
                     "NONPARAMETRIC /FRIEDMAN= {}",
                     self.targets.join(" ")
                 ));
+            }
+            Procedure::Reliability => {
+                if self.targets.len() < 2 {
+                    return None;
+                }
+                parts.push(format!("RELIABILITY {}", self.targets.join(" ")));
+            }
+            Procedure::Factor => {
+                if self.targets.len() < 3 {
+                    return None;
+                }
+                let n = self.n_components.unwrap_or(1).max(1);
+                parts.push(format!(
+                    "FACTOR {} /EXTRACTION=PC{}",
+                    self.targets.join(" "),
+                    n
+                ));
+            }
+            Procedure::Roc => {
+                let g = self.group_var.clone()?;
+                parts.push(format!("ROC {} BY {}", vars, g));
             }
         }
 
@@ -690,12 +726,19 @@ pub fn render(
                     Procedure::Explore => {
                         sub_button(ui, d, SubDialog::ExploreOptions, "Options…");
                     }
+                    Procedure::Factor => {
+                        sub_button(ui, d, SubDialog::FactorOptions, "Options…");
+                    }
+                    Procedure::Roc => {
+                        sub_button(ui, d, SubDialog::RocOptions, "Options…");
+                    }
                     // The nonparametric tests have no options of their own.
                     Procedure::PairedT
                     | Procedure::MannWhitney
                     | Procedure::Wilcoxon
                     | Procedure::KruskalWallis
-                    | Procedure::Friedman => {}
+                    | Procedure::Friedman
+                    | Procedure::Reliability => {}
                 }
             });
 
@@ -999,6 +1042,35 @@ fn render_sub_dialog(ui: &mut egui::Ui, d: &mut DialogState) {
                     ui.label(
                         egui::RichText::new("Coefficients, ANOVA table and R² are reported.")
                             .size(11.5),
+                    );
+                }
+                SubDialog::FactorOptions => {
+                    ui.label(egui::RichText::new("Extraction").font(theme::semibold(11.0)));
+                    ui.add_space(3.0);
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Number of components:").size(11.5));
+                        let mut n = d.n_components.unwrap_or(1) as i64;
+                        ui.add(
+                            egui::DragValue::new(&mut n)
+                                .range(1..=10)
+                                .speed(0.2),
+                        );
+                        d.n_components = Some(n.max(1) as usize);
+                    });
+                    ui.label(
+                        egui::RichText::new("Principal components, rotated with varimax.")
+                            .size(10.5)
+                            .color(theme::TEXT_FAINT),
+                    );
+                }
+                SubDialog::RocOptions => {
+                    ui.label(egui::RichText::new("Options").font(theme::semibold(11.0)));
+                    ui.add_space(3.0);
+                    ui.label(
+                        egui::RichText::new(
+                            "The area under the curve and the 95% confidence interval are always reported.",
+                        )
+                        .size(11.5),
                     );
                 }
                 SubDialog::MeansOptions => {

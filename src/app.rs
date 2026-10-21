@@ -202,6 +202,20 @@ impl StatsCraftApp {
         }
     }
 
+    /// Save the data as an SPSS .sav file.
+    pub fn save_data_sav(&mut self, path: &std::path::Path) {
+        let Some(t) = &self.table else {
+            self.status = "No data loaded.".to_string();
+            return;
+        };
+        match crate::data::write_sav(t, path) {
+            Ok(()) => {
+                self.status = format!("Saved {} as SPSS .sav.", path.display());
+            }
+            Err(e) => self.status = format!("Save failed: {}", e),
+        }
+    }
+
     pub fn export_output_to(&mut self, path: &std::path::Path) {
         if self.outputs.is_empty() {
             self.status = "No output to export.".to_string();
@@ -845,6 +859,13 @@ impl eframe::App for StatsCraftApp {
                             if crate::icon::menu_item(ui, crate::theme::Icon::Regression, "Linear…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Regression); }
                             if ui.button("Curve Estimation…").clicked() { ui.close_menu(); self.status = "Curve Estimation: not implemented yet.".to_string(); }
                         });
+                        ui.menu_button("Scale", |ui| {
+                            if crate::icon::menu_item(ui, crate::theme::Icon::Variables, "Reliability Analysis…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Reliability); }
+                            if crate::icon::menu_item(ui, crate::theme::Icon::Variables, "Factor Analysis…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Factor); }
+                        });
+                        ui.menu_button("Classify", |ui| {
+                            if crate::icon::menu_item(ui, crate::theme::Icon::Correlation, "ROC Curve…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Roc); }
+                        });
                         ui.menu_button("Nonparametric Tests", |ui| {
                             if crate::icon::menu_item(ui, crate::theme::Icon::TTest, "Mann-Whitney U…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::MannWhitney); }
                             if crate::icon::menu_item(ui, crate::theme::Icon::TTest, "Kruskal-Wallis H…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::KruskalWallis); }
@@ -908,13 +929,22 @@ impl eframe::App for StatsCraftApp {
                             self.load();
                         }
                     }
-                    if crate::icon::icon_button(ui, crate::theme::Icon::Save, "Save data as CSV")
-                        .clicked()
+                    if crate::icon::icon_button(
+                        ui,
+                        crate::theme::Icon::Save,
+                        "Save data (CSV or SPSS .sav)",
+                    )
+                    .clicked()
                     {
-                        if let Some(p) =
-                            rfd::FileDialog::new().add_filter("CSV", &["csv"]).save_file()
+                        if let Some(p) = rfd::FileDialog::new()
+                            .add_filter("Data", &["csv", "sav"])
+                            .save_file()
                         {
-                            self.export_data_csv_to(&p);
+                            if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("sav")) {
+                                self.save_data_sav(&p);
+                            } else {
+                                self.export_data_csv_to(&p);
+                            }
                         }
                     }
                     if crate::icon::icon_button(
@@ -1640,10 +1670,19 @@ fn render_output_chart(ui: &mut egui::Ui, chart: &crate::output::Chart) {
             grid,
         );
         let value = min_y + t * (y_max - min_y);
+        // The number of decimals follows the range, so an axis from 0
+        // to 1 reads "0.0, 0.2, ..." rather than "0, 0, 0, 1, 1, 1".
+        let decimals = if (y_max - min_y).abs() <= 2.5 {
+            2
+        } else if (y_max - min_y).abs() <= 20.0 {
+            1
+        } else {
+            0
+        };
         painter.text(
             egui::pos2(plot_rect.left() - 6.0, y),
             egui::Align2::RIGHT_CENTER,
-            format!("{:.0}", value),
+            format!("{:.*}", decimals, value),
             theme::body(10.5),
             theme::TEXT_FAINT,
         );
@@ -1700,6 +1739,18 @@ fn render_output_chart(ui: &mut egui::Ui, chart: &crate::output::Chart) {
                 for (&x, &y) in s.x.iter().zip(s.y.iter()) {
                     let p = to_px(x, y);
                     painter.circle_filled(p, 3.5, color);
+                }
+            }
+            ChartKind::Line => {
+                // The points are joined in order, so the curve is
+                // smooth. The stroke is drawn under the markers, so a
+                // marker sits on the line.
+                let pts: Vec<egui::Pos2> = s.x.iter().zip(s.y.iter()).map(|(&x, &y)| to_px(x, y)).collect();
+                for w in pts.windows(2) {
+                    painter.line_segment([w[0], w[1]], egui::Stroke::new(2.0, color));
+                }
+                for p in &pts {
+                    painter.circle_filled(*p, 2.5, color);
                 }
             }
             ChartKind::BoxPlot => {

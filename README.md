@@ -99,10 +99,14 @@ cd installer && cargo build --release   # Windows installer (embeds the app exe)
 
 ## Features
 - Load CSV and SPSS `.sav` (labels, value labels, measure, alignment,
-  decimals, user-missing)
+  decimals, user-missing), and **write** `.sav` back out with the labels,
+  the value labels, the measures and the display widths intact
 - Procedures: Descriptives, Frequencies, Correlations, Linear Regression,
   Independent-Samples T Test, Paired-Samples T Test, One-Way ANOVA,
-  Crosstabs with Pearson Chi-Square
+  Crosstabs with Pearson Chi-Square, **Reliability (Cronbach's alpha)**,
+  **Factor Analysis (principal components)**, **ROC curves**, **Means**,
+  **Explore**, and the **nonparametric** family (Mann-Whitney U,
+  Kruskal-Wallis H, Wilcoxon signed-rank, Friedman)
 - SPSS-like Data Editor (Data View / Variable View tabs, variable filter)
 - Variable View with the SPSS column set (Name…Role)
 - Multi-window documents: Data Editor (main window), Output Viewer and
@@ -112,7 +116,13 @@ cd installer && cargo build --release   # Windows installer (embeds the app exe)
 - Syntax runner:
   `LOAD`/`GET`, `CLEAR`, `DESCRIPTIVES`, `FREQUENCIES`, `CORRELATIONS`,
   `REGRESSION y WITH x`, `T-TEST y BY g`, `T-TEST PAIRED v1 v2`,
-  `ONEWAY y BY factor`, `CROSSTABS a BY b`, `SORT CASES BY v (A|D)`
+  `ONEWAY y BY factor`, `CROSSTABS a BY b`, `SORT CASES BY v (A|D)`,
+  `MEANS TABLES`, `EXPLORE`, `RELIABILITY`/`ALPHA`, `FACTOR`, `ROC`,
+  `COMPUTE`
+- Computed variables with `COMPUTE name = expression` — the arithmetic
+  operators plus `MEAN`, `MIN`, `MAX`, `SUM`, `ABS`, `SQRT`, `LN`, `LOG10`
+  and `ROUND`
+- Output Viewer charts: bar, histogram, scatter, box plot, ROC curve
 
 ## Validation
 Every procedure is covered by reference tests (`cargo test`), checked against
@@ -121,6 +131,9 @@ unit correlations and exact regression recovery, Pearson χ² on a hand-computed
 contingency table, One-Way ANOVA F with known SS/df, Welch's t with unequal
 variances, paired t on known differences, and user-missing exclusion through
 the analysis pipeline.
+
+The `.sav` writer is covered by a round-trip test: write the table, read it
+back, and check the variables, the rows and the values match.
 
 ## Reference behavior
 UI structure, menus, and analysis flow are cloned from IBM SPSS Statistics

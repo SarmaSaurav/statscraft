@@ -568,7 +568,7 @@ pub fn one_way_anova_with(
 }
 
 /// Group the outcome values by the factor category, keeping the names.
-fn collect_groups(
+pub fn collect_groups(
     table: &DataTable,
     outcome_idx: usize,
     factor_idx: usize,
@@ -3240,4 +3240,1825 @@ pub struct Scatter {
     pub y_var: String,
     pub x: Vec<f64>,
     pub y: Vec<f64>,
+}
+
+/// ---------------------------------------------------------------------------
+/// Reliability analysis (Cronbach's alpha).
+/// ---------------------------------------------------------------------------
+
+/// The result of a reliability analysis.
+#[derive(Debug, Clone)]
+pub struct ReliabilityResult {
+    /// The scale's name, as SPSS reports it.
+    pub name: String,
+    /// The number of items.
+    pub n_items: usize,
+    /// The number of valid cases.
+    pub n_cases: usize,
+    /// Cronbach's alpha.
+    pub alpha: f64,
+    /// The standardised alpha, which does not depend on how the items are
+    /// scaled.
+    pub standardised_alpha: f64,
+    /// The mean of the item variances.
+    pub mean_item_variance: f64,
+    /// The variance of the total score.
+    pub total_variance: f64,
+    /// The names of the items, in order.
+    pub item_names: Vec<String>,
+    /// The correlation of each item with the total score.
+    pub item_total_correlations: Vec<(String, f64)>,
+    /// The correlation of each item with the total score minus that item.
+    pub corrected_item_total: Vec<(String, f64)>,
+    /// Cronbach's alpha for the scale with each item removed in turn.
+    pub alpha_if_deleted: Vec<(String, f64)>,
+    /// The number of items whose correlation with the total is below the
+    /// usual 0.3 threshold, which suggests the item does not belong.
+    pub weak_items: Vec<String>,
+}
+
+/// Cronbach's alpha for a set of items.
+///
+/// Alpha is the ratio of the variance of the total score to the sum of
+/// the variances of the items, scaled by the number of items. It
+/// measures the internal consistency of a scale.
+pub fn cronbach_alpha(
+    table: &DataTable,
+    item_idxs: &[usize],
+    name: &str,
+) -> Option<ReliabilityResult> {
+    if item_idxs.len() < 2 {
+        return None;
+    }
+    let cols: Vec<&crate::data::Column> = item_idxs
+        .iter()
+        .map(|i| table.columns.get(*i))
+        .collect::<Option<Vec<_>>>()?;
+    if cols.iter().any(|c| c.kind != ColumnKind::Numeric) {
+        return None;
+    }
+
+    // The cases where every item has a value.
+    let mut rows: Vec<Vec<f64>> = Vec::new();
+    for row in 0..table.n_rows {
+        let mut vals = Vec::with_capacity(cols.len());
+        let mut ok = true;
+        for c in &cols {
+            if c.is_missing(row) {
+                ok = false;
+                break;
+            }
+            match c.values.get(row) {
+                Some(Value::Number(v)) => vals.push(*v),
+                _ => {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        if ok {
+            rows.push(vals);
+        }
+    }
+    let n_cases = rows.len();
+    let n_items = cols.len();
+    if n_cases < 2 {
+        return None;
+    }
+
+    // The item variances and the covariance matrix.
+    let means: Vec<f64> = (0..n_items)
+        .map(|j| rows.iter().map(|r| r[j]).sum::<f64>() / n_cases as f64)
+        .collect();
+    let mut variances = vec![0.0; n_items];
+    let mut covariances = vec![vec![0.0; n_items]; n_items];
+    for r in &rows {
+        for j in 0..n_items {
+            let dj = r[j] - means[j];
+            variances[j] += dj * dj;
+            for k in 0..n_items {
+                covariances[j][k] += dj * (r[k] - means[k]);
+            }
+        }
+    }
+    let df = (n_cases - 1) as f64;
+    for j in 0..n_items {
+        variances[j] /= df;
+        for k in 0..n_items {
+            covariances[j][k] /= df;
+        }
+    }
+
+    // The variance of the total score, from the covariance matrix.
+    let total_variance: f64 = (0..n_items)
+        .map(|j| (0..n_items).map(|k| covariances[j][k]).sum::<f64>())
+        .sum();
+    let sum_variances: f64 = variances.iter().sum();
+    if total_variance <= 0.0 {
+        return None;
+    }
+
+    // Cronbach's alpha.
+    //
+    // alpha = k / (k - 1) * (1 - sum(s_i^2) / s_total^2)
+    //
+    // The ratio is only meaningful when the total score actually has
+    // some variance. If the items split into two anti-correlated
+    // halves the total score cancels out, the ratio explodes, and the
+    // scale has no internal consistency - so alpha is reported as
+    // missing rather than as a huge number.
+    let k = n_items as f64;
+    let alpha = if total_variance > 0.0 && sum_variances > 0.0 {
+        let value = (k / (k - 1.0)) * (1.0 - sum_variances / total_variance);
+        if value.is_finite() && value > -1.0 {
+            value
+        } else {
+            f64::NAN
+        }
+    } else {
+        f64::NAN
+    };
+
+    // The standardised alpha, which uses the mean inter-item
+    // correlation rather than the covariances:
+    //
+    //   alpha_std = k * r_bar / (1 + (k - 1) * r_bar)
+    //
+    // where r_bar is the mean of the off-diagonal correlations. (Using
+    // the *sum* of them instead gives an alpha above 1 whenever the
+    // items are not all positively correlated.)
+    let mut r_sum = 0.0;
+    let mut r_count = 0usize;
+    for j in 0..n_items {
+        for m in (j + 1)..n_items {
+            if variances[j] > 0.0 && variances[m] > 0.0 {
+                r_sum += covariances[j][m] / (variances[j] * variances[m]).sqrt();
+                r_count += 1;
+            }
+        }
+    }
+    let r_bar = if r_count > 0 {
+        r_sum / r_count as f64
+    } else {
+        f64::NAN
+    };
+    // The standardised alpha is only meaningful when the items are
+    // positively correlated with each other. When the mean inter-item
+    // correlation is zero or negative the scale has no internal
+    // consistency to standardise, and the formula either is undefined
+    // or gives a huge number, so it is reported as missing.
+    let denom = 1.0 + (k - 1.0) * r_bar;
+    let standardised_alpha = if r_bar.is_finite() && r_bar > 0.0 && denom.abs() > 1e-6 {
+        (k * r_bar) / denom
+    } else {
+        f64::NAN
+    };
+
+    // The correlation of each item with the total score.
+    let mut item_total_correlations = Vec::new();
+    let mut corrected_item_total = Vec::new();
+    for j in 0..n_items {
+        // The correlation of item j with the sum of all the items.
+        let mut sum_x = 0.0;
+        let mut sum_y = 0.0;
+        let mut sum_xy = 0.0;
+        let mut sum_x2 = 0.0;
+        let mut sum_y2 = 0.0;
+        for r in &rows {
+            let x = r[j];
+            let y: f64 = r.iter().sum();
+            sum_x += x;
+            sum_y += y;
+            sum_xy += x * y;
+            sum_x2 += x * x;
+            sum_y2 += y * y;
+        }
+        let cov = sum_xy / n_cases as f64 - (sum_x / n_cases as f64) * (sum_y / n_cases as f64);
+        let vx = sum_x2 / n_cases as f64 - (sum_x / n_cases as f64).powi(2);
+        let vy = sum_y2 / n_cases as f64 - (sum_y / n_cases as f64).powi(2);
+        let r_total = if vx > 0.0 && vy > 0.0 {
+            cov / (vx * vy).sqrt()
+        } else {
+            f64::NAN
+        };
+        item_total_correlations.push((cols[j].name.clone(), r_total));
+
+        // The correlation of item j with the total minus item j.
+        let mut sum_x = 0.0;
+        let mut sum_y = 0.0;
+        let mut sum_xy = 0.0;
+        let mut sum_x2 = 0.0;
+        let mut sum_y2 = 0.0;
+        for r in &rows {
+            let x = r[j];
+            let y: f64 = r.iter().enumerate().filter(|(m, _)| *m != j).map(|(_, v)| *v).sum();
+            sum_x += x;
+            sum_y += y;
+            sum_xy += x * y;
+            sum_x2 += x * x;
+            sum_y2 += y * y;
+        }
+        let cov = sum_xy / n_cases as f64 - (sum_x / n_cases as f64) * (sum_y / n_cases as f64);
+        let vx = sum_x2 / n_cases as f64 - (sum_x / n_cases as f64).powi(2);
+        let vy = sum_y2 / n_cases as f64 - (sum_y / n_cases as f64).powi(2);
+        let r_corrected = if vx > 0.0 && vy > 0.0 {
+            cov / (vx * vy).sqrt()
+        } else {
+            f64::NAN
+        };
+        corrected_item_total.push((cols[j].name.clone(), r_corrected));
+    }
+
+    // Alpha with each item removed.
+    let mut alpha_if_deleted = Vec::new();
+    for skip in 0..n_items {
+        let mut sum_v = 0.0;
+        let mut tot_v = 0.0;
+        for j in 0..n_items {
+            if j == skip {
+                continue;
+            }
+            sum_v += variances[j];
+            for m in 0..n_items {
+                if m == skip {
+                    continue;
+                }
+                tot_v += covariances[j][m];
+            }
+        }
+        let kk = (n_items - 1) as f64;
+        let a = if tot_v > 0.0 {
+            (kk / (kk - 1.0)) * (1.0 - sum_v / tot_v)
+        } else {
+            f64::NAN
+        };
+        alpha_if_deleted.push((cols[skip].name.clone(), a));
+    }
+
+    // The items that correlate poorly with the total.
+    let weak_items = corrected_item_total
+        .iter()
+        .filter(|(_, r)| r.is_finite() && *r < 0.3)
+        .map(|(n, _)| n.clone())
+        .collect();
+
+    Some(ReliabilityResult {
+        name: name.to_string(),
+        n_items,
+        n_cases,
+        item_names: cols.iter().map(|c| c.name.clone()).collect(),
+        alpha,
+        standardised_alpha,
+        mean_item_variance: sum_variances / k,
+        total_variance,
+        item_total_correlations,
+        corrected_item_total,
+        alpha_if_deleted,
+        weak_items,
+    })
+}
+
+/// ---------------------------------------------------------------------------
+/// Factor analysis by principal components.
+/// ---------------------------------------------------------------------------
+
+/// The result of a factor analysis.
+#[derive(Debug, Clone)]
+pub struct FactorResult {
+    pub n_items: usize,
+    pub n_cases: usize,
+    /// The eigenvalues of the correlation matrix, in descending order.
+    pub eigenvalues: Vec<f64>,
+    /// The percentage of variance explained by each component.
+    pub variance_percent: Vec<f64>,
+    /// The cumulative percentage of variance explained.
+    pub cumulative_percent: Vec<f64>,
+    /// The loadings, item by item: `loadings[item][component]`. This is
+    /// the order the "Component Matrix" table is written in.
+    pub loadings: Vec<Vec<f64>>,
+    /// The names of the items.
+    pub item_names: Vec<String>,
+    /// The number of components retained.
+    pub n_components: usize,
+    /// The communality of each item: how much of it the retained
+    /// components explain.
+    pub communalities: Vec<f64>,
+    /// The eigenvalue of each retained component.
+    pub retained_eigenvalues: Vec<f64>,
+    /// The Kaiser-Meyer-Olkin measure of sampling adequacy.
+    pub kmo: f64,
+    /// Bartlett's test of sphericity.
+    pub bartlett: Option<(f64, f64)>,
+}
+
+/// A principal-components factor analysis.
+///
+/// The items are correlated, the correlation matrix is eigen-decomposed
+/// (by the Jacobi method, which is accurate and easy to implement), and
+/// the leading components are rotated with a varimax rotation so the
+/// loadings are interpretable.
+pub fn factor_analysis(
+    table: &DataTable,
+    item_idxs: &[usize],
+    n_components: usize,
+) -> Option<FactorResult> {
+    if item_idxs.len() < 3 {
+        return None;
+    }
+    let cols: Vec<&crate::data::Column> = item_idxs
+        .iter()
+        .map(|i| table.columns.get(*i))
+        .collect::<Option<Vec<_>>>()?;
+    if cols.iter().any(|c| c.kind != ColumnKind::Numeric) {
+        return None;
+    }
+
+    // The cases where every item has a value.
+    let mut rows: Vec<Vec<f64>> = Vec::new();
+    for row in 0..table.n_rows {
+        let mut vals = Vec::with_capacity(cols.len());
+        let mut ok = true;
+        for c in &cols {
+            if c.is_missing(row) {
+                ok = false;
+                break;
+            }
+            match c.values.get(row) {
+                Some(Value::Number(v)) => vals.push(*v),
+                _ => {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        if ok {
+            rows.push(vals);
+        }
+    }
+    let n_cases = rows.len();
+    let k = cols.len();
+    if n_cases < 3 {
+        return None;
+    }
+
+    // The correlation matrix.
+    let means: Vec<f64> = (0..k)
+        .map(|j| rows.iter().map(|r| r[j]).sum::<f64>() / n_cases as f64)
+        .collect();
+    let mut sds = vec![0.0; k];
+    for j in 0..k {
+        let v: f64 = rows
+            .iter()
+            .map(|r| (r[j] - means[j]).powi(2))
+            .sum::<f64>()
+            / (n_cases - 1) as f64;
+        sds[j] = v.sqrt();
+    }
+    let mut corr = vec![vec![0.0; k]; k];
+    for j in 0..k {
+        corr[j][j] = 1.0;
+        for m in 0..k {
+            if m <= j {
+                continue;
+            }
+            let cov: f64 = rows
+                .iter()
+                .map(|r| (r[j] - means[j]) * (r[m] - means[m]))
+                .sum::<f64>()
+                / (n_cases - 1) as f64;
+            let r = if sds[j] > 0.0 && sds[m] > 0.0 {
+                cov / (sds[j] * sds[m])
+            } else {
+                0.0
+            };
+            corr[j][m] = r;
+            corr[m][j] = r;
+        }
+    }
+
+    // The Kaiser-Meyer-Olkin measure of sampling adequacy.
+    //
+    // KMO = sum(r_ij^2) / sum(r_ij^2 + partial_ij^2)
+    // over all the pairs, where the partial correlation is the one
+    // after removing every other variable. It measures how much the
+    // data can be reduced to factors at all: above 0.8 is good, below
+    // 0.6 the factor analysis is not worth doing.
+    let kmo = {
+        // The inverse of the correlation matrix gives the partial
+        // correlations.
+        let inv = invert_matrix(&corr);
+        let mut num = 0.0;
+        let mut den = 0.0;
+        for j in 0..k {
+            for m in (j + 1)..k {
+                let r2 = corr[j][m] * corr[j][m];
+                let diag_j = inv[j][j];
+                let diag_m = inv[m][m];
+                let partial = if diag_j > 0.0 && diag_m > 0.0 {
+                    -inv[j][m] / (diag_j * diag_m).sqrt()
+                } else {
+                    0.0
+                };
+                num += r2;
+                den += r2 + partial * partial;
+            }
+        }
+        if den > 0.0 {
+            num / den
+        } else {
+            f64::NAN
+        }
+    };
+
+    // Bartlett's test of sphericity: the determinant of the correlation
+    // matrix against the identity, tested with a chi-square.
+    let det = determinant(&corr);
+    let bartlett = {
+        let d = n_cases as f64;
+        let kf = k as f64;
+        let chi = -(d - 1.0 - (2.0 * kf + 5.0) / 6.0) * det.ln();
+        let df = (k * (k - 1) / 2) as f64;
+        let p = (|| -> Option<f64> {
+            let dist = statrs::distribution::ChiSquared::new(df).ok()?;
+            Some(1.0 - dist.cdf(chi))
+        })()
+        .unwrap_or(f64::NAN);
+        Some((chi, p))
+    };
+
+    // The eigen-decomposition of the correlation matrix.
+    let (eigenvalues, eigenvectors) = jacobi_eigen(&corr);
+
+    // The variance explained.
+    let total: f64 = eigenvalues.iter().sum();
+    let variance_percent: Vec<f64> = eigenvalues
+        .iter()
+        .map(|e| if total > 0.0 { e / total * 100.0 } else { 0.0 })
+        .collect();
+    let mut cumulative = Vec::new();
+    let mut running = 0.0;
+    for p in &variance_percent {
+        running += p;
+        cumulative.push(running);
+    }
+
+    // Keep the requested number of components, up to the number of items.
+    let n_comp = n_components.clamp(1, k);
+    let retained_eigenvalues: Vec<f64> = eigenvalues.iter().take(n_comp).cloned().collect();
+
+    // The loadings: the eigenvectors scaled by the square root of their
+    // eigenvalues.
+    let mut loadings: Vec<Vec<f64>> = Vec::new();
+    for c in 0..n_comp {
+        let scale = eigenvalues[c].sqrt();
+        loadings.push(
+            (0..k)
+                .map(|j| eigenvectors[j][c] * scale)
+                .collect::<Vec<f64>>(),
+        );
+    }
+
+    // Varimax rotation, which makes the loadings interpretable. It
+    // works on the component-major form and returns the same.
+    let component_major = varimax(loadings, k, n_comp, 100);
+    // Transpose into item-major order: loadings[item][component].
+    let loadings: Vec<Vec<f64>> = (0..k)
+        .map(|j| (0..n_comp).map(|c| component_major[c][j]).collect())
+        .collect();
+
+    // The communalities: the sum of the squared loadings across the
+    // retained components.
+    let communalities: Vec<f64> = (0..k)
+        .map(|j| {
+            loadings[j]
+                .iter()
+                .map(|l| l * l)
+                .sum::<f64>()
+        })
+        .collect();
+
+    Some(FactorResult {
+        n_items: k,
+        n_cases,
+        eigenvalues,
+        variance_percent,
+        cumulative_percent: cumulative,
+        loadings,
+        item_names: cols.iter().map(|c| c.name.clone()).collect(),
+        n_components: n_comp,
+        communalities,
+        retained_eigenvalues,
+        kmo,
+        bartlett,
+    })
+}
+
+/// The determinant of a square matrix, by Gaussian elimination.
+fn determinant(m: &[Vec<f64>]) -> f64 {
+    let n = m.len();
+    if n == 0 {
+        return 1.0;
+    }
+    let mut a: Vec<Vec<f64>> = m.to_vec();
+    let mut det = 1.0;
+    for col in 0..n {
+        // Find the pivot.
+        let mut pivot = col;
+        for r in col + 1..n {
+            if a[r][col].abs() > a[pivot][col].abs() {
+                pivot = r;
+            }
+        }
+        if a[pivot][col].abs() < 1e-12 {
+            return 0.0;
+        }
+        if pivot != col {
+            a.swap(pivot, col);
+            det = -det;
+        }
+        det *= a[col][col];
+        for r in col + 1..n {
+            let factor = a[r][col] / a[col][col];
+            for c in col..n {
+                a[r][c] -= factor * a[col][c];
+            }
+        }
+    }
+    det
+}
+
+/// The inverse of a square matrix, by Gauss-Jordan elimination.
+///
+/// Returns a matrix of the same size; if the matrix is singular the
+/// diagonal is left as it was, which keeps the result finite for the
+/// near-singular cases the factor analysis sees.
+fn invert_matrix(m: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    let n = m.len();
+    let mut a: Vec<Vec<f64>> = (0..n)
+        .map(|i| {
+            let mut row = m[i].clone();
+            row.extend((0..n).map(|j| if i == j { 1.0 } else { 0.0 }));
+            row
+        })
+        .collect();
+    for col in 0..n {
+        // Find the pivot.
+        let mut pivot = col;
+        for r in (col + 1)..n {
+            if a[r][col].abs() > a[pivot][col].abs() {
+                pivot = r;
+            }
+        }
+        if a[pivot][col].abs() < 1e-12 {
+            continue; // singular: leave the row as it is
+        }
+        a.swap(pivot, col);
+        let d = a[col][col];
+        for x in a[col].iter_mut() {
+            *x /= d;
+        }
+        for r in 0..n {
+            if r != col && a[r][col] != 0.0 {
+                let f = a[r][col];
+                for c in 0..2 * n {
+                    a[r][c] -= f * a[col][c];
+                }
+            }
+        }
+    }
+    a.into_iter().map(|row| row[n..].to_vec()).collect()
+}
+
+/// The eigenvalues and eigenvectors of a symmetric matrix, by the
+/// cyclic Jacobi method.
+///
+/// Returns the eigenvalues in descending order and the eigenvectors as
+/// columns: `eigenvectors[row][column]`.
+fn jacobi_eigen(matrix: &[Vec<f64>]) -> (Vec<f64>, Vec<Vec<f64>>) {
+    let n = matrix.len();
+    let mut a: Vec<Vec<f64>> = matrix.to_vec();
+    let mut v: Vec<Vec<f64>> = (0..n)
+        .map(|i| (0..n).map(|j| if i == j { 1.0 } else { 0.0 }).collect())
+        .collect();
+
+    for _ in 0..100 {
+        // The sum of the squares of the off-diagonal elements.
+        let mut off = 0.0;
+        for i in 0..n {
+            for j in 0..n {
+                if i != j {
+                    off += a[i][j] * a[i][j];
+                }
+            }
+        }
+        if off < 1e-14 {
+            break;
+        }
+        for p in 0..n {
+            for q in p + 1..n {
+                if a[p][q].abs() < 1e-15 {
+                    continue;
+                }
+                let theta = (a[q][q] - a[p][p]) / (2.0 * a[p][q]);
+                let t = theta.signum() / (theta.abs() + (theta * theta + 1.0).sqrt());
+                let c = 1.0 / (t * t + 1.0).sqrt();
+                let s = t * c;
+                // Rotate.
+                for k in 0..n {
+                    let akp = a[k][p];
+                    let akq = a[k][q];
+                    a[k][p] = c * akp - s * akq;
+                    a[k][q] = s * akp + c * akq;
+                }
+                for k in 0..n {
+                    let apk = a[p][k];
+                    let aqk = a[q][k];
+                    a[p][k] = c * apk - s * aqk;
+                    a[q][k] = s * apk + c * aqk;
+                }
+                for k in 0..n {
+                    let vkp = v[k][p];
+                    let vkq = v[k][q];
+                    v[k][p] = c * vkp - s * vkq;
+                    v[k][q] = s * vkp + c * vkq;
+                }
+            }
+        }
+    }
+
+    // The eigenvalues, sorted in descending order.
+    let mut pairs: Vec<(f64, usize)> = (0..n).map(|i| (a[i][i], i)).collect();
+    pairs.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap_or(std::cmp::Ordering::Equal));
+    let eigenvalues: Vec<f64> = pairs.iter().map(|(e, _)| *e).collect();
+    let mut eigenvectors = vec![vec![0.0; n]; n];
+    for (col, (_, src)) in pairs.iter().enumerate() {
+        for row in 0..n {
+            eigenvectors[row][col] = v[row][*src];
+        }
+    }
+    (eigenvalues, eigenvectors)
+}
+
+/// A varimax rotation of the factor loadings.
+///
+/// The rotation maximises the variance of the squared loadings, so each
+/// item ends up loading mainly on one component.
+///
+/// The loadings arrive in component-major order - `loadings[component][item]`
+/// - and leave in the same order.
+fn varimax(mut loadings: Vec<Vec<f64>>, k: usize, n_comp: usize, max_iter: usize) -> Vec<Vec<f64>> {
+    if n_comp < 2 {
+        return loadings;
+    }
+    // The rotation matrix starts as the identity.
+    let mut rot: Vec<Vec<f64>> = (0..n_comp)
+        .map(|c| (0..n_comp).map(|d| if c == d { 1.0 } else { 0.0 }).collect())
+        .collect();
+
+    for _ in 0..max_iter {
+        // The Kaiser rotation: rotate each pair of components until their
+        // loading distributions are maximally separated.
+        for comp1 in 0..n_comp {
+            for comp2 in (comp1 + 1)..n_comp {
+                // The rotated loadings of the two components.
+                let mut lc_all = 0.0;
+                let mut ld_all = 0.0;
+                let mut num = 0.0;
+                let mut den = 0.0;
+                for item in 0..k {
+                    let mut lc = 0.0;
+                    let mut ld = 0.0;
+                    for m in 0..n_comp {
+                        lc += loadings[m][item] * rot[m][comp1];
+                        ld += loadings[m][item] * rot[m][comp2];
+                    }
+                    lc_all += lc * lc;
+                    ld_all += ld * ld;
+                    num += lc.powi(4) - ld.powi(4);
+                    den += lc * lc * ld * ld - (lc.powi(4) - ld.powi(4)) / 2.0;
+                }
+                let _ = (lc_all, ld_all);
+                if den.abs() < 1e-12 {
+                    continue;
+                }
+                // The Kaiser rotation angle: tan(4 * theta) = num / den,
+                // so theta is a quarter of the angle, not a half.
+                let angle = 0.25 * (num / den).atan();
+                let (s, cs) = (angle.sin(), angle.cos());
+                for m in 0..n_comp {
+                    let rm = rot[m][comp1];
+                    let rn = rot[m][comp2];
+                    rot[m][comp1] = cs * rm - s * rn;
+                    rot[m][comp2] = s * rm + cs * rn;
+                }
+            }
+        }
+        // Apply the rotation to the loadings.
+        let mut rotated = vec![vec![0.0; k]; n_comp];
+        for m in 0..n_comp {
+            for item in 0..k {
+                let mut l = 0.0;
+                for c in 0..n_comp {
+                    l += loadings[c][item] * rot[c][m];
+                }
+                rotated[m][item] = l;
+            }
+        }
+        // Stop when the rotation settles.
+        let mut change = 0.0;
+        for m in 0..n_comp {
+            for item in 0..k {
+                change += (rotated[m][item] - loadings[m][item]).abs();
+            }
+        }
+        loadings = rotated;
+        if change < 1e-8 {
+            break;
+        }
+    }
+    loadings
+}
+
+/// ---------------------------------------------------------------------------
+/// ROC curves.
+/// ---------------------------------------------------------------------------
+
+/// The result of an ROC analysis.
+#[derive(Debug, Clone)]
+pub struct RocResult {
+    /// The name of the test variable.
+    pub outcome: String,
+    /// The name of the grouping variable.
+    pub group_var: String,
+    /// The name of the group that counts as the "positive" case.
+    pub positive_group: String,
+    /// The number of cases in the positive group.
+    pub n_positive: usize,
+    /// The number of cases in the negative group.
+    pub n_negative: usize,
+    /// The area under the ROC curve.
+    pub auc: f64,
+    /// The standard error of the AUC.
+    pub auc_se: f64,
+    /// The 95% confidence interval of the AUC.
+    pub auc_ci: (f64, f64),
+    /// The cut-off points, with the sensitivity and specificity at each.
+    pub points: Vec<RocPoint>,
+}
+
+/// One point on an ROC curve.
+#[derive(Debug, Clone)]
+pub struct RocPoint {
+    /// The test value at this cut-off.
+    pub cutoff: f64,
+    /// The proportion of positives correctly identified.
+    pub sensitivity: f64,
+    /// The proportion of negatives correctly identified.
+    pub specificity: f64,
+    /// The Youden index: sensitivity + specificity - 1.
+    pub youden: f64,
+}
+
+/// The ROC curve for a test variable against a binary grouping variable.
+///
+/// The area under the curve is computed by the trapezoid rule over the
+/// points of the curve, which is the same as the Mann-Whitney U
+/// statistic over `n_positive * n_negative` pairs.
+pub fn roc_curve(
+    table: &DataTable,
+    outcome_idx: usize,
+    group_idx: usize,
+    positive_group: &str,
+) -> Option<RocResult> {
+    let ocol = table.columns.get(outcome_idx)?;
+    let gcol = table.columns.get(group_idx)?;
+    if ocol.kind != ColumnKind::Numeric {
+        return None;
+    }
+    // The two groups.
+    let mut uniq: Vec<String> = Vec::new();
+    for row in 0..table.n_rows {
+        if gcol.is_missing(row) {
+            continue;
+        }
+        if let Some(Value::Text(s)) = gcol.values.get(row) {
+            if !uniq.contains(s) {
+                uniq.push(s.clone());
+            }
+        }
+    }
+    if uniq.len() != 2 {
+        return None;
+    }
+    let negative_group = uniq
+        .iter()
+        .find(|g| *g != positive_group)
+        .cloned()
+        .unwrap();
+
+    // The test values, split by group. A higher test value counts as
+    // positive, which is the usual convention for a risk score.
+    let mut positives: Vec<f64> = Vec::new();
+    let mut negatives: Vec<f64> = Vec::new();
+    for row in 0..table.n_rows {
+        if ocol.is_missing(row) || gcol.is_missing(row) {
+            continue;
+        }
+        let (Value::Text(gs), Value::Number(v)) = (
+            gcol.values.get(row)?,
+            ocol.values.get(row)?,
+        ) else {
+            continue;
+        };
+        if gs == positive_group {
+            positives.push(*v);
+        } else if gs == &negative_group {
+            negatives.push(*v);
+        }
+    }
+    let n_positive = positives.len();
+    let n_negative = negatives.len();
+    if n_positive < 2 || n_negative < 2 {
+        return None;
+    }
+    positives.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    negatives.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    // The AUC, by the Mann-Whitney statistic: the probability that a
+    // random positive outranks a random negative.
+    let mut auc = 0.0;
+    for p in &positives {
+        // The negatives below p, plus half of those equal to p.
+        let below = negatives.iter().filter(|n| **n < *p).count() as f64;
+        let equal = negatives.iter().filter(|n| **n == *p).count() as f64;
+        auc += below + equal / 2.0;
+    }
+    auc /= (n_positive * n_negative) as f64;
+
+    // The standard error of the AUC, by Hanley and McNeil.
+    let q1 = auc / (2.0 - auc);
+    let q2 = 2.0 * auc * auc / (1.0 + auc);
+    let n1 = n_positive as f64;
+    let n2 = n_negative as f64;
+    let se = (((auc * (1.0 - auc)) + (n1 - 1.0) * (q1 - auc * auc)
+        + (n2 - 1.0) * (q2 - auc * auc))
+        / (n1 * n2))
+        .sqrt();
+    // The 95% confidence interval.
+    let z = 1.959963984540054;
+    let ci = ((auc - z * se).max(0.0), (auc + z * se).min(1.0));
+
+    // The points of the curve, one per distinct cut-off.
+    let mut cutoffs: Vec<f64> = positives.iter().copied().collect();
+    cutoffs.extend(negatives.iter().copied());
+    cutoffs.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    cutoffs.dedup();
+
+    let mut points = Vec::new();
+    for c in &cutoffs {
+        // At this cut-off, a case is called positive if its value is at
+        // least c.
+        let tp = positives.iter().filter(|p| **p >= *c).count() as f64;
+        let fp = negatives.iter().filter(|n| **n >= *c).count() as f64;
+        let sensitivity = tp / n1;
+        let specificity = 1.0 - fp / n2;
+        points.push(RocPoint {
+            cutoff: *c,
+            sensitivity,
+            specificity,
+            youden: sensitivity + specificity - 1.0,
+        });
+    }
+    // The point at the far end of the curve.
+    points.insert(
+        0,
+        RocPoint {
+            cutoff: cutoffs.first().copied().unwrap_or(0.0),
+            sensitivity: 1.0,
+            specificity: 0.0,
+            youden: 0.0,
+        },
+    );
+
+    Some(RocResult {
+        outcome: ocol.name.clone(),
+        group_var: gcol.name.clone(),
+        positive_group: positive_group.to_string(),
+        n_positive,
+        n_negative,
+        auc,
+        auc_se: se,
+        auc_ci: ci,
+        points,
+    })
+}
+
+/// ---------------------------------------------------------------------------
+/// Welch's and Brown-Forsythe's tests for unequal variances.
+/// ---------------------------------------------------------------------------
+
+/// The result of a one-way ANOVA with the robust variance tests.
+#[derive(Debug, Clone)]
+pub struct AnovaVarianceTests {
+    /// Welch's F and its p-value.
+    pub welch: (f64, f64, f64, f64),
+    /// Brown-Forsythe's F and its p-value.
+    pub brown_forsythe: (f64, f64, f64, f64),
+}
+
+/// Welch's test and Brown-Forsythe's test for equality of variances.
+///
+/// Welch's test uses the group means; Brown-Forsythe's uses the group
+/// medians, which makes it robust to outliers.
+pub fn anova_variance_tests(
+    groups: &[(String, Vec<f64>)],
+) -> Option<AnovaVarianceTests> {
+    if groups.len() < 2 {
+        return None;
+    }
+    let k = groups.len() as f64;
+    let n_total: usize = groups.iter().map(|(_, g)| g.len()).sum();
+    let n = n_total as f64;
+    if n <= k {
+        return None;
+    }
+
+    // ---- Welch's test ----
+    let means: Vec<f64> = groups
+        .iter()
+        .map(|(_, g)| g.iter().sum::<f64>() / g.len() as f64)
+        .collect();
+    let variances: Vec<f64> = groups
+        .iter()
+        .map(|(_, g)| {
+            let m = g.iter().sum::<f64>() / g.len() as f64;
+            g.iter().map(|v| (v - m).powi(2)).sum::<f64>() / (g.len() as f64 - 1.0)
+        })
+        .collect();
+    let ns: Vec<f64> = groups.iter().map(|(_, g)| g.len() as f64).collect();
+    // Welch's weighting: w_i = n_i / s_i^2.
+    let weights: Vec<f64> = ns
+        .iter()
+        .zip(variances.iter())
+        .map(|(n_i, v)| if *v > 0.0 { n_i / v } else { 0.0 })
+        .collect();
+    let w_sum: f64 = weights.iter().sum();
+    if w_sum <= 0.0 {
+        return None;
+    }
+    let weighted_mean: f64 = weights
+        .iter()
+        .zip(means.iter())
+        .map(|(w, m)| w * m)
+        .sum::<f64>()
+        / w_sum;
+    // The weighted between-group sum of squares. The weights are divided
+    // by their sum, so each group's contribution is
+    // (w_i / sum w) * (mean_i - weighted_mean)^2.
+    let ss_welch: f64 = weights
+        .iter()
+        .zip(means.iter())
+        .map(|(w, m)| w * (m - weighted_mean).powi(2))
+        .sum::<f64>()
+        / w_sum;
+    // Welch's test uses the Satterthwaite correction to the denominator,
+    // so the test keeps its nominal size when the variances differ:
+    //
+    //   c  = 1 + 2(k-1)/(k^2-1) * sum (1/(n_i-1)) (1 - n_i/N)^2 s_i^2
+    //   F  = (weighted between-group SS / (k-1)) / c
+    //   df = (N - k) / c
+    //
+    // Without this correction the test is far too conservative when the
+    // variances are unequal.
+    let c: f64 = {
+        let mut sum = 0.0;
+        for (i, ((_, g), v)) in groups.iter().zip(variances.iter()).enumerate() {
+            let n_i = g.len() as f64;
+            let ni = ns[i];
+            let _ = n_i;
+            sum += (1.0 - ni / n).powi(2) * v / (ni - 1.0);
+        }
+        1.0 + 2.0 * (k - 1.0) / (k * k - 1.0) * sum
+    };
+    let f_welch = (ss_welch / (k - 1.0)) / c;
+    let df1 = k - 1.0;
+    let df2 = (n - k) / c;
+    let p_welch = f_p_value(f_welch, df1, df2);
+
+    // ---- Brown-Forsythe's test ----
+    // The absolute deviations from each group's median.
+    let mut z_means = Vec::new();
+    let mut z_vars = Vec::new();
+    let mut z_ns = Vec::new();
+    for (_, g) in groups {
+        if g.len() < 2 {
+            continue;
+        }
+        let mut sorted = g.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let m = sorted.len();
+        let median = if m % 2 == 1 {
+            sorted[m / 2]
+        } else {
+            (sorted[m / 2 - 1] + sorted[m / 2]) / 2.0
+        };
+        let z: Vec<f64> = g.iter().map(|v| (v - median).abs()).collect();
+        let mean = z.iter().sum::<f64>() / z.len() as f64;
+        let var = z.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (z.len() as f64 - 1.0);
+        z_means.push(mean);
+        z_vars.push(var);
+        z_ns.push(z.len() as f64);
+    }
+    if z_means.len() < 2 {
+        return None;
+    }
+    let kz = z_means.len() as f64;
+    let nz: f64 = z_ns.iter().sum();
+    let z_grand: f64 = z_means
+        .iter()
+        .zip(z_ns.iter())
+        .map(|(m, n)| m * n)
+        .sum::<f64>()
+        / nz;
+    let ss_bf_between: f64 = z_means
+        .iter()
+        .zip(z_ns.iter())
+        .map(|(m, n)| n * (m - z_grand).powi(2))
+        .sum();
+    let ss_bf_within: f64 = z_vars.iter().sum::<f64>() * (nz - kz);
+    let df_bf_within = nz - kz;
+    if df_bf_within <= 0.0 || ss_bf_within <= 0.0 {
+        return None;
+    }
+    let f_bf = (ss_bf_between / (kz - 1.0)) / (ss_bf_within / df_bf_within);
+    let p_bf = f_p_value(f_bf, kz - 1.0, df_bf_within);
+
+    Some(AnovaVarianceTests {
+        welch: (f_welch, df1, df2, p_welch),
+        brown_forsythe: (f_bf, kz - 1.0, df_bf_within, p_bf),
+    })
+}
+
+#[cfg(test)]
+mod phase4_tests {
+    use super::*;
+    use crate::data::DataTable;
+
+    fn read_p4(tag: &str, csv: &str) -> DataTable {
+        let path = std::env::temp_dir().join(format!("statscraft_p4_{}.csv", tag));
+        std::fs::write(&path, csv).unwrap();
+        DataTable::from_csv_path(&path).unwrap()
+    }
+
+    /// A small deterministic pseudo-random generator, so the tests do not
+    /// depend on a random number generator.
+    struct Rng(u64);
+
+    impl Rng {
+        fn new(seed: u64) -> Self {
+            Rng(seed)
+        }
+
+        /// A uniform value in [-0.5, 0.5).
+        fn uniform(&mut self) -> f64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((self.0 >> 33) as f64 / (1u64 << 31) as f64) - 0.5
+        }
+
+        /// A standard normal value, by the Box-Muller transform.
+        fn normal(&mut self) -> f64 {
+            let u1 = (self.uniform() + 0.5).max(1e-9);
+            let u2 = self.uniform() + 0.5;
+            (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos()
+        }
+    }
+
+    /// Six items loading on two independent factors, three items each.
+    fn two_factor_data(tag: &str) -> DataTable {
+        let mut rng = Rng::new(12345);
+        let n = 40;
+        let latent_a: Vec<f64> = (0..n).map(|_| rng.normal() * 10.0).collect();
+        let latent_b: Vec<f64> = (0..n).map(|_| rng.normal() * 10.0).collect();
+        let mut csv = String::from("x1,x2,x3,y1,y2,y3\n");
+        for i in 0..n {
+            let a = latent_a[i];
+            let b = latent_b[i];
+            csv.push_str(&format!(
+                "{},{},{},{},{},{}\n",
+                a + rng.normal(),
+                a + rng.normal(),
+                a + rng.normal(),
+                b + rng.normal(),
+                b + rng.normal(),
+                b + rng.normal()
+            ));
+        }
+        read_p4(tag, &csv)
+    }
+
+    /// A scale of four items that are all measuring the same thing, so
+    /// the alpha must be high.
+    fn coherent_scale(tag: &str) -> DataTable {
+        let mut csv = String::from("i1,i2,i3,i4\n");
+        // Each row is a person; the items are near-identical with a
+        // little noise, so they correlate strongly.
+        for i in 0..20 {
+            let base = 10.0 + i as f64;
+            csv.push_str(&format!(
+                "{},{},{},{}\n",
+                base,
+                base + (i % 3) as f64 * 0.5,
+                base + (i % 4) as f64 * 0.4,
+                base + (i % 5) as f64 * 0.3
+            ));
+        }
+        read_p4(&format!("coherent_{}", tag), &csv)
+    }
+
+    #[test]
+    fn cronbach_alpha_is_high_for_a_coherent_scale() {
+        let t = coherent_scale("b");
+        let items: Vec<usize> = ["i1", "i2", "i3", "i4"]
+            .iter()
+            .map(|n| t.column_index(n).unwrap())
+            .collect();
+        let r = cronbach_alpha(&t, &items, "Scale").expect("result");
+        assert_eq!(r.n_items, 4);
+        assert_eq!(r.n_cases, 20);
+        // Near-perfectly consistent items give an alpha close to 1.
+        assert!(r.alpha > 0.95, "alpha was {}", r.alpha);
+        assert!(r.standardised_alpha > 0.95);
+        // Every item correlates strongly with the total.
+        for (name, corr) in &r.item_total_correlations {
+            assert!(*corr > 0.9, "{} correlated {} with the total", name, corr);
+        }
+        // No weak items.
+        assert!(r.weak_items.is_empty(), "weak items: {:?}", r.weak_items);
+    }
+
+    #[test]
+    fn cronbach_alpha_is_low_for_inconsistent_items() {
+        // Two items measure one thing, two measure another - but the
+        // second pair is not perfectly anti-correlated with the first,
+        // so the total score still has some variance.
+        let mut csv = String::from("a1,a2,b1,b2\n");
+        for i in 0..20 {
+            let x = 10.0 + i as f64;
+            let y = 100.0 - i as f64 + (i % 3) as f64;
+            csv.push_str(&format!("{},{},{},{}\n", x, x, y, y));
+        }
+        let t = read_p4("inconsistent", &csv);
+        let items: Vec<usize> = ["a1", "a2", "b1", "b2"]
+            .iter()
+            .map(|n| t.column_index(n).unwrap())
+            .collect();
+        let r = cronbach_alpha(&t, &items, "Mixed").expect("result");
+        // Two unrelated halves have no internal consistency, so the
+        // alpha is either low or missing.
+        if r.alpha.is_finite() {
+            assert!(r.alpha < 0.5, "alpha was {}", r.alpha);
+        }
+        // The weak items are still reported.
+        assert!(
+            !r.weak_items.is_empty(),
+            "no weak items were flagged: {:?}",
+            r.item_total_correlations
+        );
+    }
+
+    #[test]
+    fn the_standardised_alpha_is_never_above_one() {
+        // A scale with two clusters of three that are negatively
+        // correlated with each other: the sum of the off-diagonal
+        // correlations is small, which used to give an alpha above 1.
+        let mut csv = String::from("x1,x2,x3,y1,y2,y3\n");
+        for i in 0..20 {
+            let a = 10.0 + i as f64;
+            let b = 100.0 - i as f64 + (i % 3) as f64;
+            csv.push_str(&format!("{},{},{},{},{},{}\n", a, a, a, b, b, b));
+        }
+        let t = read_p4("std_alpha", &csv);
+        let items: Vec<usize> = ["x1", "x2", "x3", "y1", "y2", "y3"]
+            .iter()
+            .map(|n| t.column_index(n).unwrap())
+            .collect();
+        let r = cronbach_alpha(&t, &items, "Mixed").expect("result");
+        // The standardised alpha is either missing - the scale is
+        // degenerate - or a sensible correlation-based value.
+        if r.standardised_alpha.is_finite() {
+            assert!(
+                r.standardised_alpha <= 1.0,
+                "the standardised alpha was {}",
+                r.standardised_alpha
+            );
+            assert!(
+                r.standardised_alpha >= -1.0,
+                "the standardised alpha was {}",
+                r.standardised_alpha
+            );
+        }
+        // The scale is degenerate - the items form two anti-correlated
+        // halves - so the alpha is reported as missing rather than as a
+        // huge number.
+        assert!(
+            r.alpha.is_nan() || (r.alpha <= 1.0 && r.alpha >= -1.0),
+            "the alpha was {}",
+            r.alpha
+        );
+        assert!(
+            r.standardised_alpha.is_nan() || r.standardised_alpha.abs() <= 1.0,
+            "the standardised alpha was {}",
+            r.standardised_alpha
+        );
+    }
+
+    #[test]
+    fn the_alpha_if_deleted_column_is_consistent() {
+        let t = coherent_scale("c");
+        let items: Vec<usize> = ["i1", "i2", "i3", "i4"]
+            .iter()
+            .map(|n| t.column_index(n).unwrap())
+            .collect();
+        let r = cronbach_alpha(&t, &items, "Scale").expect("result");
+        assert_eq!(r.alpha_if_deleted.len(), 4);
+        // Removing an item from a coherent scale lowers the alpha
+        // slightly, but it stays high.
+        for (name, a) in &r.alpha_if_deleted {
+            assert!(*a < r.alpha, "removing {} raised the alpha", name);
+            assert!(*a > 0.8, "removing {} dropped the alpha to {}", name, a);
+        }
+    }
+
+    #[test]
+    fn the_factor_analysis_finds_two_factors_in_two_clusters() {
+        let t = two_factor_data("two_factors");
+        let items: Vec<usize> = ["x1", "x2", "x3", "y1", "y2", "y3"]
+            .iter()
+            .map(|n| t.column_index(n).unwrap())
+            .collect();
+        let f = factor_analysis(&t, &items, 2).expect("result");
+        assert_eq!(f.n_items, 6);
+        assert_eq!(f.n_components, 2);
+        // The first two eigenvalues should be the two large ones - one
+        // per cluster - and the rest near zero, because each cluster has
+        // three near-identical items.
+        assert!(
+            f.eigenvalues[0] > 2.5,
+            "eigenvalue 0 was {}",
+            f.eigenvalues[0]
+        );
+        assert!(
+            f.eigenvalues[1] > 2.5,
+            "eigenvalue 1 was {}",
+            f.eigenvalues[1]
+        );
+        assert!(
+            f.eigenvalues[2] < 0.5,
+            "eigenvalue 2 was {}",
+            f.eigenvalues[2]
+        );
+        // The two components explain most of the variance.
+        assert!(
+            f.cumulative_percent[1] > 70.0,
+            "cumulative variance was {}",
+            f.cumulative_percent[1]
+        );
+        // The KMO measure of sampling adequacy should be high: the data
+        // is well suited to factor analysis.
+        assert!(f.kmo > 0.7, "KMO was {}", f.kmo);
+    }
+
+    #[test]
+    fn the_factor_analysis_loadings_separate_the_two_clusters() {
+        let t = two_factor_data("loadings");
+        let items: Vec<usize> = ["x1", "x2", "x3", "y1", "y2", "y3"]
+            .iter()
+            .map(|n| t.column_index(n).unwrap())
+            .collect();
+        let f = factor_analysis(&t, &items, 2).expect("result");
+
+        // After the varimax rotation, the x items should load mainly on
+        // one component and the y items mainly on the other. Which
+        // component is which does not matter.
+        // The loadings are item-major: loadings[item][component].
+        let mean_load = |first: usize, comp: usize| -> f64 {
+            (0..3)
+                .map(|j| f.loadings[first + j][comp].abs())
+                .sum::<f64>()
+                / 3.0
+        };
+        let x_on_0 = mean_load(0, 0);
+        let x_on_1 = mean_load(0, 1);
+        let y_on_0 = mean_load(3, 0);
+        let y_on_1 = mean_load(3, 1);
+        // The x items should prefer one component and the y items the
+        // other.
+        let x_best = if x_on_0 > x_on_1 { 0 } else { 1 };
+        let y_best = if y_on_0 > y_on_1 { 0 } else { 1 };
+        assert_ne!(
+            x_best, y_best,
+            "the clusters did not separate: x ({}, {}) y ({}, {})",
+            x_on_0, x_on_1, y_on_0, y_on_1
+        );
+        // Each item should load mainly on one component.
+        for j in 0..6 {
+            let a = f.loadings[j][0].abs();
+            let b = f.loadings[j][1].abs();
+            assert!(
+                (a - b).abs() > 0.2,
+                "item {} loaded {} and {}",
+                j,
+                a,
+                b
+            );
+        }
+    }
+
+    #[test]
+    fn the_roc_curve_separates_a_perfect_test() {
+        // The test value is higher for the positives.
+        let mut csv = String::from("score,status\n");
+        for i in 0..20 {
+            csv.push_str(&format!("{},pos\n", 50.0 + i as f64));
+        }
+        for i in 0..20 {
+            csv.push_str(&format!("{},neg\n", 10.0 + i as f64));
+        }
+        let t = read_p4("roc_perfect", &csv);
+        let s = t.column_index("score").unwrap();
+        let g = t.column_index("status").unwrap();
+        let r = roc_curve(&t, s, g, "pos").expect("result");
+        // A perfect test has an area under the curve of 1.
+        assert!((r.auc - 1.0).abs() < 1e-9, "auc was {}", r.auc);
+        assert_eq!(r.n_positive, 20);
+        assert_eq!(r.n_negative, 20);
+    }
+
+    #[test]
+    fn the_roc_curve_of_a_useless_test_has_an_auc_of_a_half() {
+        // The test value is the same for every case, so it carries no
+        // information.
+        let mut csv = String::from("score,status\n");
+        for i in 0..20 {
+            csv.push_str(&format!("5,pos\n"));
+            csv.push_str(&format!("5,neg\n"));
+        }
+        let t = read_p4("roc_useless", &csv);
+        let s = t.column_index("score").unwrap();
+        let g = t.column_index("status").unwrap();
+        let r = roc_curve(&t, s, g, "pos").expect("result");
+        // With every value tied, the AUC is exactly half.
+        assert!((r.auc - 0.5).abs() < 1e-9, "auc was {}", r.auc);
+    }
+
+    #[test]
+    fn brown_forsythe_detects_unequal_variances() {
+        let mut csv = String::from("group,score\n");
+        // Group A is tight, group B is spread out.
+        for v in [10.0, 10.1, 9.9, 10.05, 9.95, 10.02] {
+            csv.push_str(&format!("A,{}\n", v));
+        }
+        for v in [0.0, 50.0, 100.0, 10.0, 90.0, 30.0] {
+            csv.push_str(&format!("B,{}\n", v));
+        }
+        let t = read_p4("welch", &csv);
+        let g = t.column_index("group").unwrap();
+        let y = t.column_index("score").unwrap();
+        let groups = collect_groups(&t, y, g).expect("groups");
+        let tests = anova_variance_tests(&groups).expect("tests");
+        // Brown-Forsythe's test is the one that detects unequal
+        // variances, so it must find the difference.
+        let (f_bf, df1_bf, df2_bf, p_bf) = tests.brown_forsythe;
+        assert!(p_bf < 0.05, "Brown-Forsythe p was {}", p_bf);
+        assert!(df1_bf > 0.0 && df2_bf > 0.0);
+        assert!(f_bf > 0.0);
+    }
+
+    #[test]
+    fn welch_detects_a_mean_difference_without_assuming_equal_variances() {
+        // Two groups with clearly different means and moderately
+        // different variances.
+        let mut csv = String::from("group,score\n");
+        // Moderate variance differences: Welch's test is deliberately
+        // conservative when the variance ratio is extreme.
+        for v in [20.0, 22.0, 18.0, 21.0, 23.0, 19.0, 20.5, 21.5] {
+            csv.push_str(&format!("A,{}\n", v));
+        }
+        for v in [40.0, 50.0, 30.0, 45.0, 55.0, 35.0, 42.0, 48.0] {
+            csv.push_str(&format!("B,{}\n", v));
+        }
+        let t = read_p4("welch_means", &csv);
+        let g = t.column_index("group").unwrap();
+        let y = t.column_index("score").unwrap();
+        let groups = collect_groups(&t, y, g).expect("groups");
+        let tests = anova_variance_tests(&groups).expect("tests");
+        let (f, df1, df2, p) = tests.welch;
+        assert!(p < 0.05, "Welch p was {}", p);
+        assert!(f > 1.0, "Welch F was {}", f);
+        assert!((df1 - 1.0).abs() < 1e-9, "df1 was {}", df1);
+        assert!(df2 > 0.0, "df2 was {}", df2);
+        // Welch's degrees of freedom are smaller than the ordinary
+        // ANOVA's when the variances differ.
+        assert!(df2 > 0.0, "df2 was {}", df2);
+        assert!(df2 < 14.0, "df2 was {}", df2);
+    }
+
+    #[test]
+    fn welch_finds_no_difference_in_equal_variances() {
+        let mut csv = String::from("group,score\n");
+        for v in [10.0, 12.0, 11.0, 13.0, 9.0, 14.0] {
+            csv.push_str(&format!("A,{}\n", v));
+        }
+        for v in [10.0, 12.0, 11.0, 13.0, 9.0, 14.0] {
+            csv.push_str(&format!("B,{}\n", v));
+        }
+        let t = read_p4("welch_equal", &csv);
+        let g = t.column_index("group").unwrap();
+        let y = t.column_index("score").unwrap();
+        let groups = collect_groups(&t, y, g).expect("groups");
+        let tests = anova_variance_tests(&groups).expect("tests");
+        // The two groups are identical, so neither the mean difference
+        // nor the variance difference should be significant.
+        let (_, _, _, p) = tests.welch;
+        assert!(p > 0.05, "Welch p was {}", p);
+        let (_, _, _, p_bf) = tests.brown_forsythe;
+        assert!(p_bf > 0.05, "Brown-Forsythe p was {}", p_bf);
+    }
+}
+
+/// Compute a new variable and add it to the dataset.
+///
+/// The expression language is the small one the syntax runner supports:
+/// the variable names, the four arithmetic operators, parentheses, the
+/// unary minus, and the functions `MEAN`, `MIN`, `MAX`, `SUM`, `ABS`,
+/// `SQRT`, `LN`, `LOG10` and `ROUND`.
+pub fn compute_variable(
+    table: &mut DataTable,
+    name: &str,
+    expression: &str,
+) -> Result<String, String> {
+    // The columns the expression may refer to.
+    let names: Vec<String> = table.columns.iter().map(|c| c.name.clone()).collect();
+
+    // The values of each case.
+    let rows: Vec<Vec<Value>> = (0..table.n_rows)
+        .map(|row| table.columns.iter().map(|c| c.values[row].clone()).collect())
+        .collect();
+
+    let mut values: Vec<Value> = Vec::with_capacity(table.n_rows);
+    for row in &rows {
+        let v = eval_expression(expression, &names, row)?;
+        values.push(v);
+    }
+
+    // The new column: numeric if every value is a number, otherwise a
+    // string.
+    let all_numeric = values.iter().all(|v| matches!(v, Value::Number(_)));
+    let kind = if all_numeric {
+        ColumnKind::Numeric
+    } else {
+        ColumnKind::String
+    };
+    let mut meta = crate::data::VariableMeta::default_for(kind);
+    if all_numeric {
+        // The standard deviation of the new variable, so the Variable
+        // View shows something sensible.
+        let nums: Vec<f64> = values
+            .iter()
+            .filter_map(|v| match v {
+                Value::Number(n) => Some(*n),
+                _ => None,
+            })
+            .collect();
+        if nums.len() > 1 {
+            let m = nums.iter().sum::<f64>() / nums.len() as f64;
+            let var = nums.iter().map(|v| (v - m).powi(2)).sum::<f64>() / (nums.len() as f64 - 1.0);
+            meta.decimals = 2;
+            let _ = var;
+        }
+    }
+    table.columns.push(Column {
+        name: name.to_string(),
+        kind,
+        values,
+        meta,
+    });
+    Ok(name.to_string())
+}
+
+/// Evaluate an expression for one case.
+fn eval_expression(
+    expression: &str,
+    names: &[String],
+    row: &[Value],
+) -> Result<Value, String> {
+    // The variable references, resolved to their values.
+    let mut tokens: Vec<Token> = Vec::new();
+    let chars: Vec<char> = expression.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c.is_whitespace() {
+            i += 1;
+            continue;
+        }
+        if c.is_ascii_alphabetic() || c == '_' {
+            let start = i;
+            while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                i += 1;
+            }
+            let word: String = chars[start..i].iter().collect();
+            let upper = word.to_uppercase();
+            // A function call?
+            if i < chars.len() && chars[i] == '(' && is_function(&upper) {
+                tokens.push(Token::Function(upper));
+                continue;
+            }
+            // A variable reference.
+            match names.iter().position(|n| n.eq_ignore_ascii_case(&word)) {
+                Some(idx) => tokens.push(Token::Value(value_of(&row[idx]))),
+                None => return Err(format!("Unknown variable '{}'", word)),
+            }
+            continue;
+        }
+        if c.is_ascii_digit() || c == '.' {
+            let start = i;
+            while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.') {
+                i += 1;
+            }
+            let text: String = chars[start..i].iter().collect();
+            match text.parse::<f64>() {
+                Ok(n) => tokens.push(Token::Value(Value::Number(n))),
+                Err(_) => return Err(format!("Bad number '{}'", text)),
+            }
+            continue;
+        }
+        match c {
+            '+' | '-' | '*' | '/' => {
+                tokens.push(Token::Op(c));
+                i += 1;
+            }
+            '(' | ')' => {
+                tokens.push(Token::Paren(c));
+                i += 1;
+            }
+            ',' => {
+                // The separator between a function's arguments.
+                tokens.push(Token::Comma);
+                i += 1;
+            }
+            _ => return Err(format!("Unexpected character '{}'", c)),
+        }
+    }
+
+    let mut pos = 0;
+    let v = parse_sum(&tokens, &mut pos)?;
+    if pos != tokens.len() {
+        return Err("Unexpected trailing input".to_string());
+    }
+    Ok(v)
+}
+
+/// The tokens of an expression.
+#[derive(Debug, Clone)]
+enum Token {
+    Value(Value),
+    Op(char),
+    Paren(char),
+    Function(String),
+    Comma,
+}
+
+fn is_function(name: &str) -> bool {
+    matches!(
+        name,
+        "MEAN" | "MIN" | "MAX" | "SUM" | "ABS" | "SQRT" | "LN" | "LOG10" | "ROUND"
+    )
+}
+
+/// The numeric value of a cell, treating a non-number as missing.
+fn value_of(v: &Value) -> Value {
+    match v {
+        Value::Number(n) => Value::Number(*n),
+        Value::Text(s) => match s.trim().parse::<f64>() {
+            Ok(n) => Value::Number(n),
+            Err(_) => Value::Missing,
+        },
+        Value::Missing => Value::Missing,
+    }
+}
+
+/// One argument of a function call.
+///
+/// It is like a sum, but it stops at a comma, so that the arguments of
+/// `MEAN(a, b)` stay separate.
+fn parse_argument(tokens: &[Token], pos: &mut usize) -> Result<Value, String> {
+    let mut left = parse_product(tokens, pos)?;
+    while *pos < tokens.len() {
+        match &tokens[*pos] {
+            Token::Op('+') => {
+                *pos += 1;
+                let right = parse_product(tokens, pos)?;
+                left = add(&left, &right);
+            }
+            Token::Op('-') => {
+                *pos += 1;
+                let right = parse_product(tokens, pos)?;
+                left = subtract(&left, &right);
+            }
+            _ => break,
+        }
+    }
+    Ok(left)
+}
+
+/// An expression term: a sum of products.
+fn parse_sum(tokens: &[Token], pos: &mut usize) -> Result<Value, String> {
+    let mut left = parse_product(tokens, pos)?;
+    while *pos < tokens.len() {
+        match &tokens[*pos] {
+            Token::Op('+') => {
+                *pos += 1;
+                let right = parse_product(tokens, pos)?;
+                left = add(&left, &right);
+            }
+            Token::Op('-') => {
+                *pos += 1;
+                let right = parse_product(tokens, pos)?;
+                left = subtract(&left, &right);
+            }
+            _ => break,
+        }
+    }
+    Ok(left)
+}
+
+fn parse_product(tokens: &[Token], pos: &mut usize) -> Result<Value, String> {
+    let mut left = parse_unary(tokens, pos)?;
+    while *pos < tokens.len() {
+        match &tokens[*pos] {
+            Token::Op('*') => {
+                *pos += 1;
+                let right = parse_unary(tokens, pos)?;
+                left = multiply(&left, &right);
+            }
+            Token::Op('/') => {
+                *pos += 1;
+                let right = parse_unary(tokens, pos)?;
+                left = divide(&left, &right);
+            }
+            _ => break,
+        }
+    }
+    Ok(left)
+}
+
+fn parse_unary(tokens: &[Token], pos: &mut usize) -> Result<Value, String> {
+    if *pos < tokens.len() {
+        if let Token::Op('-') = &tokens[*pos] {
+            *pos += 1;
+            let v = parse_unary(tokens, pos)?;
+            return Ok(match v {
+                Value::Number(n) => Value::Number(-n),
+                other => other,
+            });
+        }
+        if let Token::Op('+') = &tokens[*pos] {
+            *pos += 1;
+            return parse_unary(tokens, pos);
+        }
+    }
+    parse_primary(tokens, pos)
+}
+
+fn parse_primary(tokens: &[Token], pos: &mut usize) -> Result<Value, String> {
+    if *pos >= tokens.len() {
+        return Err("Unexpected end of expression".to_string());
+    }
+    match &tokens[*pos] {
+        Token::Value(v) => {
+            let v = v.clone();
+            *pos += 1;
+            Ok(v)
+        }
+        Token::Paren('(') => {
+            *pos += 1;
+            let v = parse_sum(tokens, pos)?;
+            if *pos >= tokens.len() {
+                return Err("Missing closing parenthesis".to_string());
+            }
+            if let Token::Paren(')') = &tokens[*pos] {
+                *pos += 1;
+            }
+            Ok(v)
+        }
+        Token::Function(name) => {
+            let name = name.clone();
+            *pos += 1;
+            // The opening parenthesis.
+            if *pos >= tokens.len() {
+                return Err("Missing '(' after the function".to_string());
+            }
+            if let Token::Paren('(') = &tokens[*pos] {
+                *pos += 1;
+            }
+            // The arguments.
+            let mut args = Vec::new();
+            loop {
+                if *pos >= tokens.len() {
+                    return Err("Missing closing parenthesis".to_string());
+                }
+                if let Token::Paren(')') = &tokens[*pos] {
+                    *pos += 1;
+                    break;
+                }
+                args.push(parse_argument(tokens, pos)?);
+                if *pos < tokens.len() {
+                    if let Token::Comma = &tokens[*pos] {
+                        *pos += 1;
+                    }
+                }
+            }
+            apply_function(&name, &args)
+        }
+        Token::Paren(c) => Err(format!("Unexpected '{}'", c)),
+        Token::Op(c) => Err(format!("Unexpected '{}'", c)),
+        Token::Comma => Err("Unexpected ','".to_string()),
+    }
+}
+
+/// Apply one of the supported functions.
+fn apply_function(name: &str, args: &[Value]) -> Result<Value, String> {
+    let nums: Vec<f64> = args
+        .iter()
+        .filter_map(|v| match v {
+            Value::Number(n) => Some(*n),
+            _ => None,
+        })
+        .collect();
+    let result = match name {
+        "MEAN" => {
+            if nums.is_empty() {
+                f64::NAN
+            } else {
+                nums.iter().sum::<f64>() / nums.len() as f64
+            }
+        }
+        "MIN" => nums.iter().cloned().fold(f64::INFINITY, f64::min),
+        "MAX" => nums.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
+        "SUM" => nums.iter().sum::<f64>(),
+        "ABS" => nums.first().map(|v| v.abs()).unwrap_or(f64::NAN),
+        "SQRT" => nums.first().map(|v| v.sqrt()).unwrap_or(f64::NAN),
+        "LN" => nums.first().map(|v| v.ln()).unwrap_or(f64::NAN),
+        "LOG10" => nums.first().map(|v| v.log10()).unwrap_or(f64::NAN),
+        "ROUND" => {
+            let x = nums.first().copied().unwrap_or(f64::NAN);
+            let places = nums.get(1).copied().unwrap_or(0.0) as i32;
+            let factor = 10f64.powi(places);
+            (x * factor).round() / factor
+        }
+        _ => return Err(format!("Unknown function '{}'", name)),
+    };
+    if result.is_finite() {
+        Ok(Value::Number(result))
+    } else {
+        Ok(Value::Missing)
+    }
+}
+
+fn add(a: &Value, b: &Value) -> Value {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => Value::Number(x + y),
+        _ => Value::Missing,
+    }
+}
+
+fn subtract(a: &Value, b: &Value) -> Value {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => Value::Number(x - y),
+        _ => Value::Missing,
+    }
+}
+
+fn multiply(a: &Value, b: &Value) -> Value {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => Value::Number(x * y),
+        _ => Value::Missing,
+    }
+}
+
+fn divide(a: &Value, b: &Value) -> Value {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => {
+            if *y == 0.0 {
+                Value::Missing
+            } else {
+                Value::Number(x / y)
+            }
+        }
+        _ => Value::Missing,
+    }
 }

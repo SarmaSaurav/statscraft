@@ -177,7 +177,14 @@ impl DataTable {
         let mut rows: Vec<Vec<String>> = Vec::new();
         for rec in rdr.records() {
             let rec = rec.map_err(|e| format!("read row: {}", e))?;
-            rows.push(rec.iter().map(|s| s.to_string()).collect());
+            // A file written with CRLF line endings leaves a carriage
+            // return at the end of the last field, which would become
+            // part of the value.
+            rows.push(
+                rec.iter()
+                    .map(|s| s.trim_end_matches('\r').to_string())
+                    .collect(),
+            );
         }
 
         let n_cols = headers.len();
@@ -626,4 +633,155 @@ mod tests {
         let _ = labeled;
         let _ = measures;
     }
+
+    #[test]
+    fn the_sav_writer_round_trips_through_the_reader() {
+        let csv = std::env::temp_dir().join("sc_sav_rt.csv");
+        std::fs::write(
+            &csv,
+            "id,name,age,score\n1,Alice,25,88.5\n2,Bob,30,92.0\n3,Carol,41,77.25\n",
+        )
+        .unwrap();
+        let t = DataTable::from_csv_path(&csv).unwrap();
+        assert_eq!(t.n_rows, 3);
+        assert_eq!(t.columns.len(), 4);
+
+        let sav = std::env::temp_dir().join("sc_sav_rt.sav");
+        write_sav(&t, &sav).expect("write");
+        assert!(sav.exists());
+
+        // Read it back with the same reader the app uses.
+        let back = match DataTable::from_sav_path(&sav) {
+            Ok(t) => t,
+            Err(e) => panic!("read back: {}", e),
+        };
+        assert_eq!(back.n_rows, 3, "rows: {:?}", back.n_rows);
+        assert_eq!(back.columns.len(), 4, "columns: {}", back.columns.len());
+
+        // The numeric values must survive exactly.
+        let score = back.column_index("score").expect("the score column");
+        match back.columns[score].values[0] {
+            Value::Number(v) => assert!((v - 88.5).abs() < 1e-9, "score was {}", v),
+            _ => panic!("the score column is not numeric"),
+        }
+        let age = back.column_index("age").expect("the age column");
+        match back.columns[age].values[2] {
+            Value::Number(v) => assert!((v - 41.0).abs() < 1e-9, "age was {}", v),
+            _ => panic!("the age column is not numeric"),
+        }
+        let _ = std::fs::remove_file(&sav);
+    }
+}
+
+/// ---------------------------------------------------------------------------
+/// Writing SPSS .sav files.
+/// ---------------------------------------------------------------------------
+
+
+
+
+/// Write the table to an SPSS .sav file.
+///
+/// The `.sav` writer in `polars-readstat-rs` handles the record layout,
+/// the compression and the metadata, so the table is converted to a
+/// Polars frame and handed to it. The variable labels, the value labels,
+/// the measures and the display widths are carried across, so a file
+/// written here opens in SPSS with the same metadata it had here.
+pub fn write_sav(table: &DataTable, path: &std::path::Path) -> Result<(), String> {
+    use polars::prelude::*;
+    use polars_readstat_rs::{
+        SpssValueLabelKey, SpssValueLabelMap, SpssValueLabels, SpssVariableDisplayWidths,
+        SpssVariableLabels, SpssVariableMeasures, SpssWriteColumn, SpssWriteSchema, SpssWriter,
+    };
+
+    // The schema: the columns of the frame.
+    let mut schema_columns: Vec<SpssWriteColumn> = Vec::new();
+    for col in &table.columns {
+        let dtype = match col.kind {
+            ColumnKind::Numeric => DataType::Float64,
+            ColumnKind::String => DataType::String,
+        };
+        schema_columns.push(SpssWriteColumn {
+            name: col.name.clone(),
+            dtype,
+            string_width_bytes: if col.kind == ColumnKind::String {
+                Some(8)
+            } else {
+                None
+            },
+        });
+    }
+
+    // The data, as a column of series.
+    let mut series: Vec<Series> = Vec::new();
+    for col in &table.columns {
+        let name = col.name.clone().into();
+        let s = match col.kind {
+            ColumnKind::Numeric => {
+                let values: Vec<Option<f64>> = (0..table.n_rows)
+                    .map(|row| match col.values.get(row) {
+                        Some(Value::Number(n)) => Some(*n),
+                        _ => None,
+                    })
+                    .collect();
+                Series::new(name, &values)
+            }
+            ColumnKind::String => {
+                let values: Vec<Option<String>> = (0..table.n_rows)
+                    .map(|row| match col.values.get(row) {
+                        Some(Value::Text(s)) => Some(s.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                Series::new(name, &values)
+            }
+        };
+        series.push(s);
+    }
+    // Polars 0.53 builds a frame from a height and a list of columns.
+    let columns: Vec<Column> = series.into_iter().map(Column::from).collect();
+    let df = DataFrame::new(table.n_rows, columns).map_err(|e| format!("frame: {}", e))?;
+
+    // The metadata: the variable labels, the value labels and the
+    // measures. The maps are keyed by the variable's name.
+    let mut variable_labels = SpssVariableLabels::default();
+    let mut value_labels = SpssValueLabels::default();
+    let mut measures = SpssVariableMeasures::default();
+    let mut widths = SpssVariableDisplayWidths::default();
+    for col in table.columns.iter() {
+        if !col.meta.label.is_empty() {
+            variable_labels.insert(col.name.clone(), col.meta.label.clone());
+        }
+        if !col.meta.value_labels.is_empty() {
+            let mut map = SpssValueLabelMap::new();
+            for (value, label) in &col.meta.value_labels {
+                map.insert(SpssValueLabelKey::from(*value), label.clone());
+            }
+            value_labels.insert(col.name.clone(), map);
+        }
+        measures.insert(
+            col.name.clone(),
+            match col.meta.measure {
+                crate::data::Measure::Nominal => polars_readstat_rs::spss::Measure::Nominal,
+                crate::data::Measure::Ordinal => polars_readstat_rs::spss::Measure::Ordinal,
+                crate::data::Measure::Scale => polars_readstat_rs::spss::Measure::Scale,
+            },
+        );
+        widths.insert(col.name.clone(), col.meta.columns_width.max(1) as i32);
+    }
+
+    let schema = SpssWriteSchema {
+        columns: schema_columns,
+        row_count: Some(table.n_rows),
+        value_labels: Some(value_labels),
+        variable_labels: Some(variable_labels),
+    };
+
+    let writer = SpssWriter::new(path)
+        .with_schema(schema)
+        .with_variable_measures(measures)
+        .with_variable_display_widths(widths);
+    writer
+        .write_df(&df)
+        .map_err(|e| format!("write {}: {}", path.display(), e))
 }

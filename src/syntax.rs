@@ -61,13 +61,30 @@ impl Command {
             if let Some(rest) = t.strip_prefix('/') {
                 // "/STATISTICS=MEAN STDDEV" — the keywords after the '='
                 // are separate tokens until the next "/".
-                let (name, inline) = match rest.split_once('=') {
-                    Some((n, v)) => (n.to_string(), Some(v.to_string())),
-                    None => (rest.to_string(), None),
+                // "/STATISTICS=MEAN STDDEV" gives an inline value, and
+                // "/POSITIVE(case)" gives a value in parentheses. Both
+                // are one keyword with its value.
+                // The value of the keyword. A value in parentheses is a
+                // piece of data - a group name, a scale name - so its
+                // case is kept. A value after an '=' is a list of
+                // keywords, so it is upper-cased.
+                let (name, inline, is_data) = match rest.split_once('=') {
+                    Some((n, v)) => (n.to_string(), Some(v.to_string()), false),
+                    None => match rest.split_once('(') {
+                        Some((n, v)) => {
+                            let v = v.trim_end_matches(')').to_string();
+                            (n.to_string(), Some(v), true)
+                        }
+                        None => (rest.to_string(), None, true),
+                    },
                 };
                 let mut words = Vec::new();
                 if let Some(v) = inline {
-                    words.extend(v.split_whitespace().map(|s| s.to_uppercase()));
+                    if is_data {
+                        words.extend(v.split_whitespace().map(|s| s.to_string()));
+                    } else {
+                        words.extend(v.split_whitespace().map(|s| s.to_uppercase()));
+                    }
                 }
                 i += 1;
                 while i < tokens.len() && !tokens[i].starts_with('/') {
@@ -398,8 +415,24 @@ fn execute_line(app: &mut StatsCraftApp, line: &str) {
                 let with_levene = stat_words
                     .iter()
                     .any(|k| k.eq_ignore_ascii_case("HOMOGENEITY") || k.eq_ignore_ascii_case("ALL"));
+                // /STATISTICS=WELCH adds Welch's test, which does not
+                // assume the group variances are equal.
+                let with_welch = stat_words
+                    .iter()
+                    .any(|k| k.eq_ignore_ascii_case("WELCH") || k.eq_ignore_ascii_case("ROBUST"));
                 match stats::one_way_anova_with(t, yi, fi, &posthoc, with_levene) {
                     Some(a) => {
+                        // The group descriptives go in their own table,
+                        // as SPSS shows them.
+                        app.outputs.push(OutputTable::anova_descriptives(&a));
+                        if with_welch {
+                            // The group data, for the variance tests.
+                            if let Some(groups) = stats::collect_groups(t, yi, fi) {
+                                if let Some(tests) = stats::anova_variance_tests(&groups) {
+                                    app.outputs.push(OutputTable::anova_variance_tests(&tests));
+                                }
+                            }
+                        }
                         app.outputs.push(OutputTable::anova_with(&a));
                         app.status = format!("ONEWAY executed: F={:.3} p={:.4}", a.f, a.p);
                         app.show_output_window = true;
@@ -666,6 +699,167 @@ fn execute_line(app: &mut StatsCraftApp, line: &str) {
                         app.status =
                             "FRIEDMAN failed (need 3 or more related variables).".to_string();
                     }
+                }
+            }
+        }
+        "RELIABILITY" | "ALPHA" => {
+            // RELIABILITY SCALE <items> [SCALE(name)]
+            let cmd = Command::parse(line);
+            // The scale name, if one was given.
+            let scale_name = cmd
+                .sub("SCALE")
+                .and_then(|kw| kw.first().cloned())
+                .unwrap_or_else(|| "SCALE".to_string());
+            let items: Vec<String> = cmd
+                .args
+                .iter()
+                .filter(|t| !t.eq_ignore_ascii_case("TABLES"))
+                .cloned()
+                .collect();
+            if items.is_empty() {
+                app.status = "RELIABILITY: expected at least two items.".to_string();
+                return;
+            }
+            if let Some(t) = &app.table {
+                let idxs: Vec<usize> = items
+                    .iter()
+                    .filter_map(|n| t.column_index(n))
+                    .collect();
+                if idxs.len() != items.len() {
+                    app.status = "RELIABILITY: unknown variable name.".to_string();
+                    return;
+                }
+                match stats::cronbach_alpha(t, &idxs, &scale_name) {
+                    Some(r) => {
+                        app.outputs.push(OutputTable::from_reliability(&r));
+                        app.outputs.push(OutputTable::reliability_items(&r));
+                        app.status = format!(
+                            "RELIABILITY executed for {} items: Cronbach's alpha = {:.3}",
+                            r.n_items, r.alpha
+                        );
+                        app.show_output_window = true;
+                    }
+                    None => {
+                        app.status = "RELIABILITY failed (need 2+ numeric items).".to_string();
+                    }
+                }
+            }
+        }
+        "FACTOR" | "FACTORS" => {
+            // FACTOR <items> [/EXTRACTION=PC] [/ROTATION=VARIMAX]
+            let cmd = Command::parse(line);
+            let items: Vec<String> = cmd
+                .args
+                .iter()
+                .filter(|t| !t.eq_ignore_ascii_case("VARIABLES"))
+                .cloned()
+                .collect();
+            if items.is_empty() {
+                app.status = "FACTOR: expected at least three items.".to_string();
+                return;
+            }
+            // The number of components to keep.
+            let n_comp = cmd
+                .sub("EXTRACTION")
+                .and_then(|kw| {
+                    kw.iter()
+                        .find_map(|k| k.trim_start_matches("PC").parse::<usize>().ok())
+                })
+                .unwrap_or(1);
+            if let Some(t) = &app.table {
+                let idxs: Vec<usize> = items
+                    .iter()
+                    .filter_map(|n| t.column_index(n))
+                    .collect();
+                if idxs.len() != items.len() {
+                    app.status = "FACTOR: unknown variable name.".to_string();
+                    return;
+                }
+                match stats::factor_analysis(t, &idxs, n_comp) {
+                    Some(f) => {
+                        app.outputs.push(OutputTable::from_factor(&f));
+                        app.outputs.push(OutputTable::factor_component_matrix(&f));
+                        app.outputs.push(OutputTable::factor_communalities(&f));
+                        app.status = format!(
+                            "FACTOR executed for {} items, {} component(s) retained.",
+                            f.n_items, f.n_components
+                        );
+                        app.show_output_window = true;
+                    }
+                    None => {
+                        app.status = "FACTOR failed (need 3+ numeric items).".to_string();
+                    }
+                }
+            }
+        }
+        "ROC" | "ROC-CURVE" => {
+            // ROC <testvar> BY <groupvar> [POSITIVE(<group>)]
+            let cmd = Command::parse(line);
+            let rest: Vec<String> = cmd.args.clone();
+            let Some(bi) = rest.iter().position(|t| t.eq_ignore_ascii_case("BY")) else {
+                app.status = "ROC: expected 'ROC var BY group'.".to_string();
+                return;
+            };
+            let Some(group) = rest.get(bi + 1).cloned() else {
+                app.status = "ROC: expected 'ROC var BY group'.".to_string();
+                return;
+            };
+            if rest[0].is_empty() {
+                app.status = "ROC: expected a test variable.".to_string();
+                return;
+            }
+            // The group that counts as positive.
+            let positive = cmd
+                .sub("POSITIVE")
+                .and_then(|kw| kw.first().cloned())
+                .unwrap_or_else(|| group.clone());
+            if let Some(t) = &app.table {
+                let (Some(yi), Some(gi)) = (t.column_index(&rest[0]), t.column_index(&group))
+                else {
+                    app.status = "ROC: unknown variable name.".to_string();
+                    return;
+                };
+                match stats::roc_curve(t, yi, gi, &positive) {
+                    Some(r) => {
+                        app.outputs.push(OutputTable::roc_summary(&r));
+                        app.outputs.push(OutputTable::from_roc(&r));
+                        app.status = format!(
+                            "ROC executed: area under the curve = {:.3}",
+                            r.auc
+                        );
+                        app.show_output_window = true;
+                    }
+                    None => {
+                        app.status =
+                            "ROC failed (the grouping variable needs exactly two groups).".to_string();
+                    }
+                }
+            }
+        }
+        "COMPUTE" => {
+            // COMPUTE <newvar> = <expression>
+            let cmd = Command::parse(line);
+            let Some(eq) = cmd.args.iter().position(|a| a == "=") else {
+                app.status = "COMPUTE: expected 'COMPUTE name = expression'.".to_string();
+                return;
+            };
+            if eq == 0 || eq + 1 >= cmd.args.len() {
+                app.status = "COMPUTE: expected 'COMPUTE name = expression'.".to_string();
+                return;
+            }
+            let name = cmd.args[0].clone();
+            // The expression: the words after the '='.
+            let expression = cmd.args[eq + 1..].join(" ");
+            let Some(t) = &mut app.table else {
+                app.status = "COMPUTE: no data loaded.".to_string();
+                return;
+            };
+            match stats::compute_variable(t, &name, &expression) {
+                Ok(n) => {
+                    app.status = format!("COMPUTE created the variable {}.", n);
+                }
+                Err(e) => {
+                    app.status = format!("COMPUTE failed: {}", e);
                 }
             }
         }
@@ -1001,6 +1195,72 @@ NONPARAMETRIC /FRIEDMAN= score age response_time
     }
 
     #[test]
+    fn a_parenthesised_subcommand_value_is_parsed() {
+        // "/POSITIVE(case)" is one keyword with one value.
+        let cmd = Command::parse("ROC score BY status /POSITIVE(case)");
+        assert_eq!(
+            cmd.sub("POSITIVE"),
+            Some(&["case".to_string()][..]),
+            "the subcommand was {:?}",
+            cmd.subcommands
+        );
+        // A keyword with no value still works.
+        let cmd = Command::parse("FREQUENCIES x /STATISTICS=MEAN");
+        assert_eq!(cmd.sub("STATISTICS"), Some(&["MEAN".to_string()][..]));
+    }
+
+    #[test]
+    fn compute_creates_a_new_variable() {
+        let dir = std::env::temp_dir();
+        let csv = dir.join("statscraft_compute.csv");
+        std::fs::write(&csv, "x,y\n1,10\n2,20\n3,30\n4,40\n").unwrap();
+        let mut app = StatsCraftApp::default();
+        app.path_input = csv.display().to_string();
+        app.load();
+
+        run(&mut app, "COMPUTE z = x + y");
+        assert!(
+            !app.status.starts_with("COMPUTE failed"),
+            "COMPUTE failed: {}",
+            app.status
+        );
+        let zi = app.table.as_ref().unwrap().column_index("z").expect("z");
+        let t = app.table.as_ref().unwrap();
+        match t.columns[zi].values[0] {
+            Value::Number(v) => assert!((v - 11.0).abs() < 1e-9, "z was {}", v),
+            _ => panic!("z is not numeric"),
+        }
+        match t.columns[zi].values[3] {
+            Value::Number(v) => assert!((v - 44.0).abs() < 1e-9, "z was {}", v),
+            _ => panic!("z is not numeric"),
+        }
+    }
+
+    #[test]
+    fn compute_handles_functions_and_parentheses() {
+        let dir = std::env::temp_dir();
+        let csv = dir.join("statscraft_compute2.csv");
+        std::fs::write(&csv, "a,b\n2,4\n4,8\n6,12\n").unwrap();
+        let mut app = StatsCraftApp::default();
+        app.path_input = csv.display().to_string();
+        app.load();
+
+        // MEAN(2, 4) = 3, and 3 * 2 = 6.
+        run(&mut app, "COMPUTE m = MEAN(a, b) * 2");
+        let mi = app.table.as_ref().unwrap().column_index("m").expect("m");
+        let t = app.table.as_ref().unwrap();
+        match t.columns[mi].values[0] {
+            Value::Number(v) => assert!((v - 6.0).abs() < 1e-9, "m was {}", v),
+            _ => panic!("m is not numeric"),
+        }
+        // The second case: MEAN(4, 8) = 6, and 6 * 2 = 12.
+        match t.columns[mi].values[1] {
+            Value::Number(v) => assert!((v - 12.0).abs() < 1e-9, "m was {}", v),
+            _ => panic!("m is not numeric"),
+        }
+    }
+
+    #[test]
     fn the_statistics_subcommand_changes_the_output_table() {
         let dir = std::env::temp_dir();
         let csv = dir.join("statscraft_stats_test.csv");
@@ -1159,10 +1419,14 @@ NONPARAMETRIC /FRIEDMAN= score age response_time
                 path.display()
             ),
         );
-        assert_eq!(app.outputs.len(), 3, "three outputs");
+        // The ANOVA now produces the group descriptives as their own
+        // table, so there are four outputs.
+        assert_eq!(app.outputs.len(), 4, "four outputs");
         assert!(app.outputs[0].title.contains("Crosstabulation"));
-        assert!(app.outputs[1].title.contains("ANOVA"));
-        assert!(app.outputs[2].title.contains("Paired"));
+        // The group descriptives come first, then the ANOVA table.
+        assert!(app.outputs[1].title.contains("Descriptives"));
+        assert!(app.outputs[2].title.contains("ANOVA"));
+        assert!(app.outputs[3].title.contains("Paired"));
         let _ = std::fs::remove_file(path);
     }
 }

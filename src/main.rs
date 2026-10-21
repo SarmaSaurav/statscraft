@@ -66,6 +66,9 @@ fn parse_procedure(name: &str) -> Option<Procedure> {
         "wilcoxon" => Some(Procedure::Wilcoxon),
         "kruskal_wallis" | "kruskalwallis" | "kruskal" => Some(Procedure::KruskalWallis),
         "friedman" => Some(Procedure::Friedman),
+        "reliability" | "alpha" => Some(Procedure::Reliability),
+        "factor" => Some(Procedure::Factor),
+        "roc" => Some(Procedure::Roc),
         _ => None,
     }
 }
@@ -86,5 +89,8 @@ fn known_procedures() -> Vec<&'static str> {
         "wilcoxon",
         "kruskal_wallis",
         "friedman",
+        "reliability",
+        "factor",
+        "roc",
     ]
 }
