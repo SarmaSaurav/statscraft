@@ -2,6 +2,20 @@
 
 Lightweight SPSS-like statistical workbench written in Rust (native desktop app).
 
+## Interface
+
+The UI is a modern take on the SPSS workbench, not a pixel copy of it:
+
+- **Typography** — the bundled **Inter** family (Regular / Medium / SemiBold /
+  Bold), embedded in the binary so the app looks the same on every machine.
+- **Icons** — a 28-glyph **SVG line-icon set** drawn with VectorCraft and
+  embedded in the binary. Toolbar buttons, menu entries, tabs and the app
+  icon all use it. Regenerate with `python tools/build_icons.py`.
+- **Palette** — a single accent blue with a teal "ready" state, defined once
+  in `src/theme.rs`.
+- **Chrome** — rounded cards, soft shadows, zebra-striped grid, pill-shaped
+  document tabs, hairline borders, and a proper primary button for *Run Syntax*.
+
 ## Install (Windows)
 Run `StateCraftSetup.exe` — a single native installer (no archives, no prompts):
 installs to `%LOCALAPPDATA%\Programs\StateCraft` (no admin) and creates

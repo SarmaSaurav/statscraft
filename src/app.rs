@@ -397,12 +397,20 @@ impl eframe::App for StateCraftApp {
                     .with_inner_size([780.0, 560.0]),
                 |vctx, _class| {
                     egui::CentralPanel::default()
-                        .frame(egui::Frame::none().fill(egui::Color32::WHITE).inner_margin(egui::Margin::same(8.0)))
+                        .frame(
+                            egui::Frame::none()
+                                .fill(crate::theme::SURFACE)
+                                .inner_margin(egui::Margin::same(12.0)),
+                        )
                         .show(vctx, |ui| {
                             egui::TopBottomPanel::top("ov_title")
-                                .frame(egui::Frame::none().inner_margin(egui::Margin::same(3.0)))
+                                .frame(
+                                    egui::Frame::none()
+                                        .fill(crate::theme::SURFACE_ALT)
+                                        .inner_margin(egui::Margin::symmetric(12.0, 8.0)),
+                                )
                                 .show_inside(ui, |ui| {
-                                    ui.heading(egui::RichText::new("Output1").strong());
+                                    ui.add(egui::Label::new(egui::RichText::new("Output1").font(crate::theme::semibold(18.0))));
                                     ui.separator();
                                 });
                             if self.outputs.is_empty() {
@@ -414,7 +422,7 @@ impl eframe::App for StateCraftApp {
                                 .show(ui, |ui| {
                                     for t in &self.outputs {
                                         ui.add_space(6.0);
-                                        ui.heading(egui::RichText::new(&t.title).strong());
+                                        ui.add(egui::Label::new(egui::RichText::new(&t.title).font(crate::theme::semibold(16.0))));
                                         ui.add_space(4.0);
                                         render_output_table(ui, t);
                                     }
@@ -436,12 +444,20 @@ impl eframe::App for StateCraftApp {
                     .with_inner_size([640.0, 440.0]),
                 |vctx, _class| {
                     egui::CentralPanel::default()
-                        .frame(egui::Frame::none().fill(egui::Color32::WHITE).inner_margin(egui::Margin::same(8.0)))
+                        .frame(
+                            egui::Frame::none()
+                                .fill(crate::theme::SURFACE)
+                                .inner_margin(egui::Margin::same(12.0)),
+                        )
                         .show(vctx, |ui| {
                             egui::TopBottomPanel::top("sx_title")
-                                .frame(egui::Frame::none().inner_margin(egui::Margin::same(3.0)))
+                                .frame(
+                                    egui::Frame::none()
+                                        .fill(crate::theme::SURFACE_ALT)
+                                        .inner_margin(egui::Margin::symmetric(12.0, 8.0)),
+                                )
                                 .show_inside(ui, |ui| {
-                                    ui.heading(egui::RichText::new("Syntax1").strong());
+                                    ui.add(egui::Label::new(egui::RichText::new("Syntax1").font(crate::theme::semibold(18.0))));
                                     ui.separator();
                                 });
                             egui::ScrollArea::vertical().show(ui, |ui| {
@@ -453,7 +469,17 @@ impl eframe::App for StateCraftApp {
                                 );
                             });
                             ui.add_space(6.0);
-                            if ui.button("Run").clicked() {
+                            let run = ui.add(
+                                egui::Button::new(
+                                    egui::RichText::new("Run Syntax")
+                                        .font(crate::theme::medium(13.0))
+                                        .color(crate::theme::TEXT_ON_ACCENT),
+                                )
+                                .fill(crate::theme::ACCENT)
+                                .rounding(crate::theme::RADIUS_SM)
+                                .min_size(egui::vec2(110.0, 30.0)),
+                            );
+                            if run.clicked() {
                                 let script = self.syntax_text.clone();
                                 crate::syntax::run(self, &script);
                             }
@@ -466,293 +492,437 @@ impl eframe::App for StateCraftApp {
             );
         }
 
-        ctx.style_mut(|s| {
-            s.visuals = egui::Visuals::light();
-            s.visuals.panel_fill = egui::Color32::WHITE;
-            s.visuals.window_fill = egui::Color32::WHITE;
-        });
-        let title = format!("{} - StateCraft Data Editor", self.dataset_label());
+        // The theme is installed once in `run`; re-assert it here so a
+        // viewport that inherits the default egui look still gets StateCraft.
+        crate::theme::apply_style(ctx, false);
+        let title = format!("{} — StateCraft", self.dataset_label());
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
-        egui::TopBottomPanel::top("menu").show(ctx, |ui| {
-            egui::menu::bar(ui, |ui| {
-                // ---------------- File ----------------
-                ui.menu_button("File", |ui| {
-                    if ui.button("New").clicked() { ui.close_menu(); self.status = "New document: not implemented yet.".to_string(); }
-                    ui.separator();
-                    if ui.button("Open Data...").clicked() { ui.close_menu();
-                        if let Some(p) = rfd::FileDialog::new().add_filter("Data", &["csv", "sav"]).pick_file() {
+        egui::TopBottomPanel::top("menu")
+            .frame(
+                egui::Frame::none()
+                    .fill(crate::theme::SURFACE)
+                    .inner_margin(egui::Margin {
+                        left: 8.0,
+                        right: 8.0,
+                        top: 3.0,
+                        bottom: 3.0,
+                    }),
+            )
+            .show(ctx, |ui| {
+                egui::menu::bar(ui, |ui| {
+                    // ---------------- File ----------------
+                    ui.menu_button("File", |ui| {
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Open, "Open Data…").clicked() {
+                            ui.close_menu();
+                            if let Some(p) = rfd::FileDialog::new()
+                                .add_filter("Data", &["csv", "sav"])
+                                .pick_file()
+                            {
+                                self.path_input = p.display().to_string();
+                                self.load();
+                            }
+                        }
+                        ui.menu_button("Import Data", |ui| {
+                            if ui.button("CSV Data…").clicked() {
+                                ui.close_menu();
+                                if let Some(p) = rfd::FileDialog::new()
+                                    .add_filter("CSV", &["csv"])
+                                    .pick_file()
+                                {
+                                    self.path_input = p.display().to_string();
+                                    self.load();
+                                }
+                            }
+                            if ui.button("SPSS Statistics (.sav)…").clicked() {
+                                ui.close_menu();
+                                if let Some(p) = rfd::FileDialog::new()
+                                    .add_filter("SPSS", &["sav"])
+                                    .pick_file()
+                                {
+                                    self.path_input = p.display().to_string();
+                                    self.load();
+                                }
+                            }
+                        });
+                        ui.separator();
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Save, "Save Data As…").clicked() {
+                            ui.close_menu();
+                            if let Some(p) =
+                                rfd::FileDialog::new().add_filter("CSV", &["csv"]).save_file()
+                            {
+                                self.export_data_csv_to(&p);
+                            }
+                        }
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Export, "Export Output…").clicked() {
+                            ui.close_menu();
+                            if let Some(p) =
+                                rfd::FileDialog::new().add_filter("Markdown", &["md"]).save_file()
+                            {
+                                self.export_output_to(&p);
+                            }
+                        }
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Print, "Export Output (HTML)…").clicked() {
+                            ui.close_menu();
+                            if let Some(p) = rfd::FileDialog::new()
+                                .add_filter("HTML", &["html", "htm"])
+                                .save_file()
+                            {
+                                self.export_output_html_to(&p);
+                            }
+                        }
+                        ui.separator();
+                        if ui.button("Exit").clicked() {
+                            ui.close_menu();
+                            std::process::exit(0);
+                        }
+                    });
+                    // ---------------- Edit ----------------
+                    ui.menu_button("Edit", |ui| {
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Undo, "Undo").clicked() {
+                            ui.close_menu();
+                            self.status = "Undo: not implemented yet.".to_string();
+                        }
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Redo, "Redo").clicked() {
+                            ui.close_menu();
+                            self.status = "Redo: not implemented yet.".to_string();
+                        }
+                        ui.separator();
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Cut, "Cut").clicked() {
+                            ui.close_menu();
+                            self.status = "Cut: not implemented yet.".to_string();
+                        }
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Copy, "Copy").clicked() {
+                            ui.close_menu();
+                            self.status = "Copy: not implemented yet.".to_string();
+                        }
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Paste, "Paste").clicked() {
+                            ui.close_menu();
+                            self.status = "Paste: not implemented yet.".to_string();
+                        }
+                    });
+                    // ---------------- View ----------------
+                    ui.menu_button("View", |ui| {
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Variables, "Variable View").clicked() {
+                            ui.close_menu();
+                            self.view = View::Variables;
+                        }
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Output, "Output Viewer").clicked() {
+                            ui.close_menu();
+                            self.show_output_window = true;
+                        }
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Syntax, "Syntax Editor").clicked() {
+                            ui.close_menu();
+                            self.show_syntax_window = true;
+                        }
+                        ui.separator();
+                        if ui.checkbox(&mut self.grid_lines, "Grid Lines").clicked() {
+                            ui.close_menu();
+                        }
+                        if ui.checkbox(&mut self.show_status, "Status Bar").clicked() {
+                            ui.close_menu();
+                        }
+                    });
+                    // ---------------- Data ----------------
+                    ui.menu_button("Data", |ui| {
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Settings, "Define Variable Properties…").clicked() {
+                            ui.close_menu();
+                            self.view = View::Variables;
+                        }
+                        ui.separator();
+                        ui.menu_button("Sort Cases", |ui| {
+                            if self.table.is_none() {
+                                ui.label("No data loaded.");
+                            } else {
+                                let names: Vec<String> = self.table.as_ref().unwrap().columns.iter().map(|c| c.name.clone()).collect();
+                                for name in names.iter() {
+                                    ui.menu_button(name, |ui| {
+                                        if ui.button("Ascending").clicked() { ui.close_menu(); let cmd = format!("SORT CASES BY {} (A)", name); self.paste_and_run(cmd); }
+                                        if ui.button("Descending").clicked() { ui.close_menu(); let cmd = format!("SORT CASES BY {} (D)", name); self.paste_and_run(cmd); }
+                                    });
+                                }
+                            }
+                        });
+                        ui.separator();
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Filter, "Select Cases…").clicked() {
+                            ui.close_menu();
+                            self.status = "Select Cases: not implemented yet.".to_string();
+                        }
+                        if crate::icon::menu_item(ui, crate::theme::Icon::ValueLabels, "Value Labels…").clicked() {
+                            ui.close_menu();
+                            self.status = "Value Labels: not implemented yet.".to_string();
+                        }
+                    });
+                    // ---------------- Transform ----------------
+                    ui.menu_button("Transform", |ui| {
+                        if ui.button("Compute Variable…").clicked() { ui.close_menu(); self.status = "Compute Variable: not implemented yet.".to_string(); }
+                        if ui.button("Recode into Same Variables…").clicked() { ui.close_menu(); self.status = "Recode into Same Variables: not implemented yet.".to_string(); }
+                        if ui.button("Recode into Different Variables…").clicked() { ui.close_menu(); self.status = "Recode into Different Variables: not implemented yet.".to_string(); }
+                        if ui.button("Count Values within Cases…").clicked() { ui.close_menu(); self.status = "Count Values within Cases: not implemented yet.".to_string(); }
+                        if ui.button("Rank Cases…").clicked() { ui.close_menu(); self.status = "Rank Cases: not implemented yet.".to_string(); }
+                        if ui.button("Automatic Recode…").clicked() { ui.close_menu(); self.status = "Automatic Recode: not implemented yet.".to_string(); }
+                    });
+                    // ---------------- Analyze ----------------
+                    ui.menu_button("Analyze", |ui| {
+                        ui.menu_button("Descriptive Statistics", |ui| {
+                            if crate::icon::menu_item(ui, crate::theme::Icon::Histogram, "Frequencies…").clicked() { ui.close_menu(); self.analyze_frequencies(); }
+                            if crate::icon::menu_item(ui, crate::theme::Icon::Describe, "Descriptives…").clicked() { ui.close_menu(); self.analyze_descriptives(); }
+                            if ui.button("Explore…").clicked() { ui.close_menu(); self.status = "Explore: not implemented yet.".to_string(); }
+                            if crate::icon::menu_item(ui, crate::theme::Icon::Crosstabs, "Crosstabs…").clicked() { ui.close_menu(); self.analyze_crosstabs(); }
+                        });
+                        ui.menu_button("Compare Means", |ui| {
+                            if ui.button("Means…").clicked() { ui.close_menu(); self.status = "Means: not implemented yet.".to_string(); }
+                            if crate::icon::menu_item(ui, crate::theme::Icon::TTest, "Independent-Samples T Test…").clicked() { ui.close_menu(); self.analyze_ttest(); }
+                            if crate::icon::menu_item(ui, crate::theme::Icon::TTest, "Paired-Samples T Test…").clicked() { ui.close_menu(); self.analyze_paired_t(); }
+                            if crate::icon::menu_item(ui, crate::theme::Icon::Anova, "One-Way ANOVA…").clicked() { ui.close_menu(); self.analyze_anova(); }
+                        });
+                        ui.menu_button("Correlate", |ui| {
+                            if crate::icon::menu_item(ui, crate::theme::Icon::Correlation, "Bivariate…").clicked() { ui.close_menu(); self.analyze_correlations(); }
+                        });
+                        ui.menu_button("Regression", |ui| {
+                            if crate::icon::menu_item(ui, crate::theme::Icon::Regression, "Linear…").clicked() { ui.close_menu(); self.analyze_regression(); }
+                            if ui.button("Curve Estimation…").clicked() { ui.close_menu(); self.status = "Curve Estimation: not implemented yet.".to_string(); }
+                        });
+                        ui.separator();
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Output, "Reports").clicked() { ui.close_menu(); self.status = "Reports: not implemented yet.".to_string(); }
+                    });
+                    // ---------------- Graphs ----------------
+                    ui.menu_button("Graphs", |ui| {
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Chart, "Chart Builder…").clicked() { ui.close_menu(); self.view = View::Charts; }
+                    });
+                    // ---------------- Utilities ----------------
+                    ui.menu_button("Utilities", |ui| {
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Syntax, "Run Syntax…").clicked() { ui.close_menu(); self.show_syntax_window = true; }
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Variables, "Variable Information…").clicked() { ui.close_menu(); self.view = View::Variables; }
+                    });
+                    // ---------------- Window ----------------
+                    ui.menu_button("Window", |ui| {
+                        if ui.button("Data Editor").clicked() { ui.close_menu(); self.view = View::Data; }
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Output, "Output1").clicked() { ui.close_menu(); self.show_output_window = true; }
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Syntax, "Syntax1").clicked() { ui.close_menu(); self.show_syntax_window = true; }
+                        ui.separator();
+                        if ui.button("Reset Windows").clicked() { ui.close_menu(); self.show_output_window = false; self.show_syntax_window = false; self.view = View::Data; }
+                    });
+                    // ---------------- Help ----------------
+                    ui.menu_button("Help", |ui| {
+                        if ui.button("About StateCraft").clicked() { ui.close_menu(); self.status = "StateCraft — lightweight SPSS-like workbench (Rust).".to_string(); }
+                    });
+                });
+            });
+
+        egui::TopBottomPanel::top("toolbar")
+            .frame(
+                egui::Frame::none()
+                    .fill(crate::theme::SURFACE)
+                    .inner_margin(egui::Margin {
+                        left: 8.0,
+                        right: 8.0,
+                        top: 4.0,
+                        bottom: 6.0,
+                    }),
+            )
+            .show(ctx, |ui| {
+                // ---- Modern icon toolbar ----
+                ui.horizontal(|ui| {
+                    if crate::icon::icon_button(
+                        ui,
+                        crate::theme::Icon::Open,
+                        "Open data file (CSV / SPSS .sav)",
+                    )
+                    .clicked()
+                    {
+                        if let Some(p) = rfd::FileDialog::new()
+                            .add_filter("Data", &["csv", "sav"])
+                            .pick_file()
+                        {
                             self.path_input = p.display().to_string();
                             self.load();
                         }
                     }
-                    ui.menu_button("Import Data", |ui| {
-                        if ui.button("CSV Data...").clicked() { ui.close_menu();
-                            if let Some(p) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).pick_file() {
-                                self.path_input = p.display().to_string(); self.load();
-                            }
-                        }
-                        if ui.button("SPSS Statistics (.sav)...").clicked() { ui.close_menu();
-                            if let Some(p) = rfd::FileDialog::new().add_filter("SPSS", &["sav"]).pick_file() {
-                                self.path_input = p.display().to_string(); self.load();
-                            }
-                        }
-                    });
-                    ui.separator();
-                    if ui.button("Save Data As...").clicked() { ui.close_menu();
-                        if let Some(p) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).save_file() {
+                    if crate::icon::icon_button(ui, crate::theme::Icon::Save, "Save data as CSV")
+                        .clicked()
+                    {
+                        if let Some(p) =
+                            rfd::FileDialog::new().add_filter("CSV", &["csv"]).save_file()
+                        {
                             self.export_data_csv_to(&p);
                         }
                     }
-                    if ui.button("Export Output (Markdown)...").clicked() { ui.close_menu();
-                        if let Some(p) = rfd::FileDialog::new().add_filter("Markdown", &["md"]).save_file() {
+                    if crate::icon::icon_button(
+                        ui,
+                        crate::theme::Icon::Export,
+                        "Export output (Markdown / HTML)",
+                    )
+                    .clicked()
+                    {
+                        if let Some(p) =
+                            rfd::FileDialog::new().add_filter("Markdown", &["md"]).save_file()
+                        {
                             self.export_output_to(&p);
                         }
                     }
-                    if ui.button("Export Output (HTML)...").clicked() { ui.close_menu();
-                        if let Some(p) = rfd::FileDialog::new().add_filter("HTML", &["html", "htm"]).save_file() {
-                            self.export_output_html_to(&p);
-                        }
+                    crate::icon::separator(ui);
+                    if crate::icon::icon_button(ui, crate::theme::Icon::Undo, "Undo").clicked() {
+                        self.status = "Undo: not implemented yet.".to_string();
                     }
-                    ui.separator();
-                    if ui.button("Exit").clicked() { ui.close_menu(); std::process::exit(0); }
-                });
-                // ---------------- Edit ----------------
-                ui.menu_button("Edit", |ui| {
-                    if ui.button("Undo").clicked() { ui.close_menu(); self.status = "Undo: not implemented yet.".to_string(); }
-                    if ui.button("Redo").clicked() { ui.close_menu(); self.status = "Redo: not implemented yet.".to_string(); }
-                    ui.separator();
-                    if ui.button("Clear Output").clicked() { ui.close_menu(); self.outputs.clear(); self.status = "Output cleared.".to_string(); }
-                });
-                // ---------------- View ----------------
-                ui.menu_button("View", |ui| {
-                    if ui.button("Data View").clicked() { ui.close_menu(); self.view = View::Data; }
-                    if ui.button("Variable View").clicked() { ui.close_menu(); self.view = View::Variables; }
-                    ui.separator();
-                    if ui.checkbox(&mut self.grid_lines, "Grid Lines").clicked() { ui.close_menu(); }
-                    if ui.checkbox(&mut self.show_status, "Status Bar").clicked() { ui.close_menu(); }
-                    ui.separator();
-                    if ui.button("Value Labels").clicked() { ui.close_menu(); self.status = "Value Labels: not implemented yet.".to_string(); }
-                });
-                // ---------------- Data ----------------
-                ui.menu_button("Data", |ui| {
-                    if ui.button("Define Variable Properties...").clicked() { ui.close_menu(); self.view = View::Variables; }
-                    ui.separator();
-                    ui.menu_button("Sort Cases", |ui| {
-                        if self.table.is_none() {
-                            ui.label("No data loaded.");
-                        } else {
-                            let names: Vec<String> = self.table.as_ref().unwrap().columns.iter().map(|c| c.name.clone()).collect();
-                            for name in names.iter() {
-                                ui.menu_button(name, |ui| {
-                                    if ui.button("Ascending").clicked() { ui.close_menu(); let cmd = format!("SORT CASES BY {} (A)", name); self.paste_and_run(cmd); }
-                                    if ui.button("Descending").clicked() { ui.close_menu(); let cmd = format!("SORT CASES BY {} (D)", name); self.paste_and_run(cmd); }
-                                });
-                            }
-                        }
-                    });
-                    if ui.button("Sort Variables...").clicked() { ui.close_menu(); self.status = "Sort Variables: not implemented yet.".to_string(); }
-                    ui.separator();
-                    if ui.button("Split File...").clicked() { ui.close_menu(); self.status = "Split File: not implemented yet.".to_string(); }
-                    if ui.button("Select Cases...").clicked() { ui.close_menu(); self.status = "Select Cases: not implemented yet.".to_string(); }
-                    if ui.button("Weight Cases...").clicked() { ui.close_menu(); self.status = "Weight Cases: not implemented yet.".to_string(); }
-                });
-                // ---------------- Transform ----------------
-                ui.menu_button("Transform", |ui| {
-                    if ui.button("Compute Variable...").clicked() { ui.close_menu(); self.status = "Compute Variable: not implemented yet.".to_string(); }
-                    if ui.button("Recode into Same Variables...").clicked() { ui.close_menu(); self.status = "Recode into Same Variables: not implemented yet.".to_string(); }
-                    if ui.button("Recode into Different Variables...").clicked() { ui.close_menu(); self.status = "Recode into Different Variables: not implemented yet.".to_string(); }
-                    if ui.button("Count Values within Cases...").clicked() { ui.close_menu(); self.status = "Count Values within Cases: not implemented yet.".to_string(); }
-                    if ui.button("Rank Cases...").clicked() { ui.close_menu(); self.status = "Rank Cases: not implemented yet.".to_string(); }
-                    if ui.button("Automatic Recode...").clicked() { ui.close_menu(); self.status = "Automatic Recode: not implemented yet.".to_string(); }
-                });
-                // ---------------- Analyze ----------------
-                ui.menu_button("Analyze", |ui| {
-                    ui.menu_button("Descriptive Statistics", |ui| {
-                        if ui.button("Frequencies...").clicked() { ui.close_menu(); self.analyze_frequencies(); }
-                        if ui.button("Descriptives...").clicked() { ui.close_menu(); self.analyze_descriptives(); }
-                        if ui.button("Explore...").clicked() { ui.close_menu(); self.status = "Explore: not implemented yet.".to_string(); }
-                        if ui.button("Crosstabs...").clicked() { ui.close_menu(); self.analyze_crosstabs(); }
-                    });
-                    ui.menu_button("Compare Means", |ui| {
-                        if ui.button("Means...").clicked() { ui.close_menu(); self.status = "Means: not implemented yet.".to_string(); }
-                        if ui.button("Independent-Samples T Test...").clicked() { ui.close_menu(); self.analyze_ttest(); }
-                        if ui.button("Paired-Samples T Test...").clicked() { ui.close_menu(); self.analyze_paired_t(); }
-                        if ui.button("One-Way ANOVA...").clicked() { ui.close_menu(); self.analyze_anova(); }
-                    });
-                    ui.menu_button("Correlate", |ui| {
-                        if ui.button("Bivariate...").clicked() { ui.close_menu(); self.analyze_correlations(); }
-                    });
-                    ui.menu_button("Regression", |ui| {
-                        if ui.button("Linear...").clicked() { ui.close_menu(); self.analyze_regression(); }
-                        if ui.button("Curve Estimation...").clicked() { ui.close_menu(); self.status = "Curve Estimation: not implemented yet.".to_string(); }
-                    });
-                    ui.separator();
-                    if ui.button("Reports").clicked() { ui.close_menu(); self.status = "Reports: not implemented yet.".to_string(); }
-                });
-                // ---------------- Graphs ----------------
-                ui.menu_button("Graphs", |ui| {
-                    if ui.button("Chart Builder...").clicked() { ui.close_menu(); self.view = View::Charts; }
-                });
-                // ---------------- Utilities ----------------
-                ui.menu_button("Utilities", |ui| {
-                    if ui.button("Data File Comments").clicked() { ui.close_menu(); self.status = "Data File Comments: not implemented yet.".to_string(); }
-                    if ui.button("Variable Information...").clicked() { ui.close_menu(); self.view = View::Variables; }
-                    ui.separator();
-                    if ui.button("Run Syntax").clicked() { ui.close_menu(); self.view = View::Syntax; }
-                });
-                // ---------------- Extensions ----------------
-                ui.menu_button("Extensions", |ui| {
-                    if ui.button("Extension Hub...").clicked() { ui.close_menu(); self.status = "Extension Hub: not available in this build.".to_string(); }
-                    if ui.button("Custom Dialog Builder...").clicked() { ui.close_menu(); self.status = "Custom Dialog Builder: not available in this build.".to_string(); }
-                });
-                // ---------------- Window ----------------
-                ui.menu_button("Window", |ui| {
-                    if ui.button("Data Editor").clicked() { ui.close_menu(); self.view = View::Data; }
-                    if ui.button("Show Output1").clicked() { ui.close_menu(); self.show_output_window = true; }
-                    if ui.button("Show Syntax1").clicked() { ui.close_menu(); self.show_syntax_window = true; }
-                    if ui.button("Reset Windows").clicked() { ui.close_menu(); self.show_output_window = false; self.show_syntax_window = false; self.view = View::Data; }
-                });
-                // ---------------- Help ----------------
-                ui.menu_button("Help", |ui| {
-                    if ui.button("About StateCraft").clicked() { ui.close_menu(); self.status = "StateCraft - lightweight SPSS-like workbench (Rust).".to_string(); }
-                });
-            });
-        });
-
-        egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
-            // ---- SPSS-style icon toolbar ----
-            ui.horizontal(|ui| {
-                if icon_button(ui, Icon::Open, "Open data file (CSV / SPSS .sav)")
+                    if crate::icon::icon_button(ui, crate::theme::Icon::Redo, "Redo").clicked() {
+                        self.status = "Redo: not implemented yet.".to_string();
+                    }
+                    crate::icon::separator(ui);
+                    if crate::icon::icon_button(
+                        ui,
+                        crate::theme::Icon::InsertVariable,
+                        "Insert Variable",
+                    )
                     .clicked()
-                {
-                    if let Some(p) = rfd::FileDialog::new()
-                        .add_filter("Data", &["csv", "sav"])
-                        .pick_file()
                     {
-                        self.path_input = p.display().to_string();
-                        self.load();
+                        self.status = "Insert Variable: not implemented yet.".to_string();
                     }
-                }
-                if icon_button(ui, Icon::Save, "Save data as CSV").clicked() {
-                    if let Some(p) =
-                        rfd::FileDialog::new().add_filter("CSV", &["csv"]).save_file()
+                    if crate::icon::icon_button(ui, crate::theme::Icon::InsertCase, "Insert Cases")
+                        .clicked()
                     {
-                        self.export_data_csv_to(&p);
+                        self.status = "Insert Cases: not implemented yet.".to_string();
                     }
-                }
-                if icon_button(ui, Icon::Print, "Export output (Markdown)").clicked() {
-                    if let Some(p) =
-                        rfd::FileDialog::new().add_filter("Markdown", &["md"]).save_file()
+                    if crate::icon::icon_button(
+                        ui,
+                        crate::theme::Icon::ValueLabels,
+                        "Value Labels",
+                    )
+                    .clicked()
                     {
-                        self.export_output_to(&p);
+                        self.status = "Value Labels: not implemented yet.".to_string();
                     }
-                }
-                ui.separator();
-                if icon_button(ui, Icon::Undo, "Undo").clicked() {
-                    self.status = "Undo: not implemented yet.".to_string();
-                }
-                if icon_button(ui, Icon::Redo, "Redo").clicked() {
-                    self.status = "Redo: not implemented yet.".to_string();
-                }
-                ui.separator();
-                if icon_button(ui, Icon::InsVar, "Insert Variable").clicked() {
-                    self.status = "Insert Variable: not implemented yet.".to_string();
-                }
-                if icon_button(ui, Icon::InsCase, "Insert Cases").clicked() {
-                    self.status = "Insert Cases: not implemented yet.".to_string();
-                }
-                if icon_button(ui, Icon::Labels, "Value Labels").clicked() {
-                    self.status = "Value Labels: not implemented yet.".to_string();
-                }
-                ui.separator();
-                if icon_button(ui, Icon::Find, "Go to Variable (Variable View)").clicked() {
-                    self.view = View::Variables;
-                }
-                if icon_button(ui, Icon::Chart, "Chart Builder").clicked() {
-                    self.view = View::Charts;
-                }
+                    crate::icon::separator(ui);
+                    if crate::icon::icon_button(
+                        ui,
+                        crate::theme::Icon::Find,
+                        "Go to Variable (Variable View)",
+                    )
+                    .clicked()
+                    {
+                        self.view = View::Variables;
+                    }
+                    if crate::icon::icon_button(ui, crate::theme::Icon::Chart, "Chart Builder")
+                        .clicked()
+                    {
+                        self.view = View::Charts;
+                    }
+                    crate::icon::separator(ui);
+                    if crate::icon::icon_button(ui, crate::theme::Icon::Output, "Output Viewer")
+                        .clicked()
+                    {
+                        self.show_output_window = true;
+                    }
+                    if crate::icon::icon_button(ui, crate::theme::Icon::Syntax, "Syntax Editor")
+                        .clicked()
+                    {
+                        self.show_syntax_window = true;
+                    }
+
+                    // Push the variable filter to the right of the toolbar.
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let f = self.var_filter.to_lowercase();
+                        let total = self.table.as_ref().map(|t| t.columns.len()).unwrap_or(0);
+                        let visible = self
+                            .table
+                            .as_ref()
+                            .map(|t| {
+                                t.columns
+                                    .iter()
+                                    .filter(|c| f.is_empty() || c.name.to_lowercase().contains(&f))
+                                    .count()
+                            })
+                            .unwrap_or(0);
+                        ui.label(
+                            egui::RichText::new(format!("{} of {} variables", visible, total))
+                                .color(crate::theme::TEXT_MUTED),
+                        );
+                        let filter_w = 220.0;
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.var_filter)
+                                .hint_text("Filter variables…")
+                                .desired_width(filter_w)
+                                .frame(true),
+                        );
+                    });
+                });
             });
-            ui.add_space(2.0);
-            // ---- SPSS "Visible: X of Y Variables" filter row ----
-            ui.horizontal(|ui| {
-                let label_w = 150.0;
-                let box_w = (ui.available_width() - label_w).max(100.0);
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.var_filter)
-                        .desired_width(box_w)
-                        .frame(true),
-                );
-                let f = self.var_filter.to_lowercase();
-                let total = self.table.as_ref().map(|t| t.columns.len()).unwrap_or(0);
-                let visible = self
-                    .table
-                    .as_ref()
-                    .map(|t| {
-                        t.columns
-                            .iter()
-                            .filter(|c| f.is_empty() || c.name.to_lowercase().contains(&f))
-                            .count()
-                    })
-                    .unwrap_or(0);
-                ui.label(format!("Visible: {} of {} Variables", visible, total));
-            });
-        });
 
         // ---- SPSS bottom-left document tabs (Data View / Variable View) ----
+        // ---- Document tabs (Data View / Variable View) ----
         egui::TopBottomPanel::bottom("tabs")
             .frame(
                 egui::Frame::none()
-                    .fill(egui::Color32::from_rgb(0xF2, 0xF2, 0xF2))
+                    .fill(crate::theme::SURFACE_ALT)
                     .inner_margin(egui::Margin {
-                        left: 6.0,
-                        right: 6.0,
-                        top: 4.0,
+                        left: 8.0,
+                        right: 8.0,
+                        top: 5.0,
                         bottom: 0.0,
                     }),
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    for (label, v) in
-                        [("Data View", View::Data), ("Variable View", View::Variables)]
-                    {
-                        let sel = self.view == v || (v == View::Data && self.view != View::Variables && self.view != View::Output && self.view != View::Charts && self.view != View::Syntax);
-                        let font = if sel {
-                            egui::FontId::proportional(13.0)
-                        } else {
-                            egui::FontId::proportional(13.0)
-                        };
+                    for (label, v, icon) in [
+                        ("Data View", View::Data, crate::theme::Icon::Variables),
+                        (
+                            "Variable View",
+                            View::Variables,
+                            crate::theme::Icon::Settings,
+                        ),
+                    ] {
+                        let sel = self.view == v
+                            || (v == View::Data
+                                && self.view != View::Variables
+                                && self.view != View::Output
+                                && self.view != View::Charts
+                                && self.view != View::Syntax);
                         let color = if sel {
-                            egui::Color32::from_gray(25)
+                            crate::theme::ACCENT
                         } else {
-                            egui::Color32::from_gray(80)
+                            crate::theme::TEXT_MUTED
                         };
-                        let galley = ui.painter().layout_no_wrap(
-                            label.to_string(),
-                            font,
+
+                        let galley = ui
+                            .painter()
+                            .layout_no_wrap(label.to_string(), crate::theme::medium(12.5), color);
+                        let icon_w = 16.0;
+                        let size = egui::vec2(galley.size().x + icon_w + 22.0, 28.0);
+                        let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+
+                        // Selected tab: a filled pill; unselected: transparent.
+                        let p = ui.painter();
+                        if sel {
+                            p.rect_filled(rect, crate::theme::RADIUS_SM, crate::theme::ACCENT_SOFT);
+                            p.rect_stroke(
+                                rect,
+                                crate::theme::RADIUS_SM,
+                                egui::Stroke::new(1.0, crate::theme::ACCENT.gamma_multiply(0.35)),
+                            );
+                        } else if resp.hovered() {
+                            p.rect_filled(rect, crate::theme::RADIUS_SM, crate::theme::SURFACE);
+                        }
+
+                        let ctx = ui.ctx().clone();
+                        crate::icon::paint_icon(
+                            p,
+                            &ctx,
+                            icon,
+                            egui::Rect::from_center_size(
+                                egui::pos2(rect.left() + 8.0 + icon_w / 2.0, rect.center().y),
+                                egui::vec2(icon_w, icon_w),
+                            ),
                             color,
                         );
-                        let size = egui::vec2(galley.size().x + 26.0, 24.0);
-                        let (rect, resp) =
-                            ui.allocate_exact_size(size, egui::Sense::click());
-                        // tab body: selected = document white, unselected = gray strip
-                        let fill = if sel {
-                            egui::Color32::WHITE
-                        } else {
-                            egui::Color32::from_rgb(0xDD, 0xDD, 0xDD)
-                        };
-                        ui.painter().rect_filled(rect, 0.0, fill);
-                        // borders: top/left/right always, bottom only when unselected
-                        let stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(0xB0, 0xB0, 0xB0));
-                        let p = ui.painter();
-                        p.line_segment([rect.left_top(), rect.right_top()], stroke);
-                        p.line_segment([rect.left_top(), rect.left_bottom()], stroke);
-                        p.line_segment([rect.right_top(), rect.right_bottom()], stroke);
-                        if !sel {
-                            p.line_segment([rect.left_bottom(), rect.right_bottom()], stroke);
-                        }
-                        let pos = rect.center() - galley.size() / 2.0;
-                        p.galley(pos, galley, color);
+                        p.galley(
+                            egui::pos2(
+                                rect.left() + 18.0 + icon_w,
+                                rect.center().y - galley.size().y / 2.0,
+                            ),
+                            galley,
+                            color,
+                        );
+
                         if resp.clicked() {
                             self.view = v;
                         }
@@ -760,30 +930,46 @@ impl eframe::App for StateCraftApp {
                 });
             });
 
-        // ---- SPSS status bar: gray strip, ready + Unicode on the right ----
+        // ---- Status bar ----
         if self.show_status {
-            egui::TopBottomPanel::bottom("statusbar").show(ctx, |ui| {
-                egui::Frame::none()
-                    .fill(egui::Color32::from_rgb(0xEA, 0xEA, 0xEA))
-                    .inner_margin(egui::Margin {
-                        left: 8.0,
-                        right: 8.0,
-                        top: 3.0,
-                        bottom: 3.0,
-                    })
-                    .show(ui, |ui| {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label("Unicode: ON");
-                            ui.separator();
-                            ui.label(
-                                egui::RichText::new("✔")
-                                    .color(egui::Color32::from_rgb(0x1E, 0x9E, 0x3A)),
-                            );
-                            ui.label("StateCraft Statistics Processor is ready");
-                            ui.label(&self.status);
-                        });
+            egui::TopBottomPanel::bottom("statusbar")
+                .frame(
+                    egui::Frame::none()
+                        .fill(crate::theme::SURFACE_ALT)
+                        .inner_margin(egui::Margin {
+                            left: 12.0,
+                            right: 12.0,
+                            top: 5.0,
+                            bottom: 5.0,
+                        }),
+                )
+                .show(ctx, |ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            egui::RichText::new("Unicode: ON")
+                                .color(crate::theme::TEXT_FAINT)
+                                .size(11.0),
+                        );
+                        ui.add_space(10.0);
+                        let ready = !self.status.starts_with("Error");
+                        let (label, col) = if ready {
+                            ("StateCraft Statistics Processor is ready", crate::theme::TEAL)
+                        } else {
+                            ("StateCraft Statistics Processor has an error", crate::theme::AMBER)
+                        };
+                        ui.label(
+                            egui::RichText::new(label)
+                                .color(col)
+                                .size(11.5),
+                        );
+                        ui.add_space(14.0);
+                        ui.label(
+                            egui::RichText::new(&self.status)
+                                .color(crate::theme::TEXT_MUTED)
+                                .size(11.5),
+                        );
                     });
-            });
+                });
         }
 
         egui::CentralPanel::default().show(ctx, |ui| match self.view {
@@ -874,7 +1060,19 @@ impl eframe::App for StateCraftApp {
                                 .desired_width(f32::INFINITY),
                         );
                     });
-                    if ui.button("Run").clicked() {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("Run Syntax")
+                                    .font(crate::theme::medium(13.0))
+                                    .color(crate::theme::TEXT_ON_ACCENT),
+                            )
+                            .fill(crate::theme::ACCENT)
+                            .rounding(crate::theme::RADIUS_SM)
+                            .min_size(egui::vec2(110.0, 30.0)),
+                        )
+                        .clicked()
+                    {
                         crate::syntax::run(self, &self.syntax_text.clone());
                     }
                 });
@@ -885,151 +1083,19 @@ impl eframe::App for StateCraftApp {
 
 /// Small vector-drawn SPSS-like toolbar icons (no emoji/glyph font dependency).
 
-/// SPSS-like vector-drawn toolbar icons (no emoji/glyph font dependency).
-#[derive(Clone, Copy, PartialEq)]
-enum Icon {
-    Open,
-    Save,
-    Print,
-    Undo,
-    Redo,
-    InsVar,
-    InsCase,
-    Labels,
-    Find,
-    Chart,
-}
-
-/// Flat SPSS-style toolbar button: invisible chrome, subtle tint on hover.
-fn icon_button(ui: &mut egui::Ui, icon: Icon, tip: &str) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(30.0, 26.0), egui::Sense::click());
-    let p = ui.painter();
-    if resp.hovered() || resp.is_pointer_button_down_on() {
-        p.rect_filled(rect.shrink(1.5), 2.0, egui::Color32::from_rgb(0xDC, 0xE6, 0xF2));
-    }
-    let col = if resp.hovered() {
-        egui::Color32::from_rgb(0x2E, 0x6D, 0xC8)
-    } else {
-        egui::Color32::from_rgb(0x40, 0x40, 0x40)
-    };
-    let st = egui::Stroke::new(1.4, col);
-    let fill = egui::Color32::from_rgb(0xC9, 0xD6, 0xEA);
-    let m = rect.center();
-    let r = |x0: f32, y0: f32, x1: f32, y1: f32| egui::Rect::from_min_max(
-        egui::pos2(m.x + x0, m.y + y0),
-        egui::pos2(m.x + x1, m.y + y1),
-    );
-    let seg = |a: egui::Pos2, b: egui::Pos2| p.line_segment([a, b], st);
-    match icon {
-        Icon::Open => {
-            // folder: back flap + body
-            p.rect_filled(r(-10.0, -4.0, 9.0, 6.0), 1.0, fill);
-            p.add(egui::Shape::convex_polygon(
-                vec![
-                    egui::pos2(m.x - 10.0, m.y - 4.0),
-                    egui::pos2(m.x - 7.0, m.y - 7.5),
-                    egui::pos2(m.x + 1.0, m.y - 7.5),
-                    egui::pos2(m.x + 4.0, m.y - 4.0),
-                ],
-                col,
-                egui::Stroke::NONE,
-            ));
-        }
-        Icon::Save => {
-            // floppy disk
-            p.rect_stroke(r(-8.5, -8.0, 8.5, 7.0), 1.0, st);
-            p.rect_filled(r(2.0, -8.0, 8.5, -2.0), 0.0, col);
-            p.rect_stroke(r(-4.5, 0.5, 4.5, 7.0), 0.0, st);
-        }
-        Icon::Print => {
-            p.rect_filled(r(-5.0, -8.0, 5.0, -3.0), 0.0, fill); // paper
-            p.rect_stroke(r(-9.0, -3.0, 9.0, 5.0), 0.0, st); // body
-            p.rect_stroke(r(-5.0, 2.0, 5.0, 7.5), 0.0, st); // output
-        }
-        Icon::Undo | Icon::Redo => {
-            let sign = if icon == Icon::Undo { 1.0 } else { -1.0 };
-            let cx = m.x + 1.0 * sign;
-            let cy = m.y;
-            // arc above the bar
-            let mut pts = Vec::new();
-            for k in 0..=8 {
-                let t = std::f32::consts::PI * (k as f32) / 8.0;
-                pts.push(egui::pos2(cx - 6.5 * t.cos() * sign, cy - 5.0 * t.sin() + 2.0));
-            }
-            p.add(egui::Shape::line(pts, st));
-            // arrowhead at the left end
-            let tip = egui::pos2(cx - 6.5 * sign, cy + 2.0);
-            seg(
-                tip,
-                egui::pos2(tip.x + 4.0 * sign, tip.y - 1.0),
-            );
-            seg(
-                tip,
-                egui::pos2(tip.x + 3.5 * sign, tip.y + 3.5),
-            );
-        }
-        Icon::InsVar => {
-            // two existing columns + highlighted inserted column
-            p.rect_stroke(r(-10.0, -6.0, -4.5, 6.0), 0.0, st);
-            p.rect_stroke(r(4.5, -6.0, 10.0, 6.0), 0.0, st);
-            p.rect_filled(r(-2.5, -6.0, 2.5, 6.0), 0.0, fill);
-        }
-        Icon::InsCase => {
-            p.rect_stroke(r(-7.0, -8.0, 7.0, -3.0), 0.0, st);
-            p.rect_stroke(r(-7.0, 3.0, 7.0, 8.0), 0.0, st);
-            p.rect_filled(r(-7.0, -1.0, 7.0, 1.0), 0.0, fill);
-        }
-        Icon::Labels => {
-            // value-label tag
-            p.add(egui::Shape::convex_polygon(
-                vec![
-                    egui::pos2(m.x - 8.0, m.y - 4.0),
-                    egui::pos2(m.x + 1.0, m.y - 4.0),
-                    egui::pos2(m.x + 8.0, m.y),
-                    egui::pos2(m.x + 1.0, m.y + 4.0),
-                    egui::pos2(m.x - 8.0, m.y + 4.0),
-                ],
-                fill,
-                st,
-            ));
-            p.circle_filled(egui::pos2(m.x - 4.0, m.y), 1.6, col);
-        }
-        Icon::Find => {
-            p.circle_stroke(egui::pos2(m.x - 1.5, m.y - 1.5), 5.0, st);
-            seg(
-                egui::pos2(m.x + 2.0, m.y + 2.0),
-                egui::pos2(m.x + 7.5, m.y + 7.5),
-            );
-        }
-        Icon::Chart => {
-            // axes
-            seg(
-                egui::pos2(m.x - 9.0, m.y - 8.0),
-                egui::pos2(m.x - 9.0, m.y + 8.0),
-            );
-            seg(
-                egui::pos2(m.x - 9.0, m.y + 8.0),
-                egui::pos2(m.x + 10.0, m.y + 8.0),
-            );
-            p.rect_filled(r(-6.0, 0.0, -2.0, 8.0), 0.0, fill);
-            p.rect_filled(r(-0.5, -4.0, 3.5, 8.0), 0.0, fill);
-            p.rect_filled(r(5.0, -7.0, 9.0, 8.0), 0.0, fill);
-        }
-    }
-    resp.on_hover_text(tip)
-}
-
 const SPSS_ROW_H: f32 = 19.0;
 const SPSS_ROWNUM_W: f32 = 48.0;
 const SPSS_COL_W: f32 = 82.0;
 const SPSS_GAP: f32 = 2.5;
 const SPSS_MIN_COLS: usize = 20;
 
-/// SPSS Data Editor look: light-gray cell blocks separated by white gaps,
-/// a white row-number gutter, and `var` placeholder headers beyond real columns.
-/// Row 0 of the virtual list is the header band.
-/// Interactive: click selects a cell (like the SPSS active cell),
-/// double-click edits it in place, Delete clears the selected cell.
+/// The Data Editor grid.
+///
+/// Modern take on the SPSS grid: white cells on a light canvas, a soft
+/// header band, subtle zebra striping, rounded selection and a hairline
+/// border around the whole table. Row 0 of the virtual list is the header
+/// band. Clicking selects a cell (the SPSS active cell), double-clicking
+/// edits it in place, Delete clears the selected cell.
 fn spss_grid(
     ui: &mut egui::Ui,
     mut table: Option<&mut DataTable>,
@@ -1038,47 +1104,56 @@ fn spss_grid(
     editing_cell: &mut Option<(usize, usize)>,
     edit_buf: &mut String,
 ) {
+    use crate::theme;
+
     let n_data_rows = table.as_deref().map(|t| t.n_rows.min(999_999)).unwrap_or(0);
     let n_real = vis_cols.len();
-    let total_cols = n_real.max(SPSS_MIN_COLS);
+    let total_cols = n_real.max(theme::MIN_COLS);
     let total_rows = 1 + n_data_rows.max(40);
-    let content_w = SPSS_ROWNUM_W + SPSS_GAP + (total_cols as f32) * (SPSS_COL_W + SPSS_GAP);
+    let content_w =
+        theme::ROWNUM_W + theme::GAP + (total_cols as f32) * (theme::COL_W + theme::GAP);
 
-    let header_fill = egui::Color32::from_rgb(0xF3, 0xF3, 0xF3);
-    let header_sel_fill = egui::Color32::from_rgb(0xDC, 0xE8, 0xF7);
-    let cell_fill = egui::Color32::from_rgb(0xF6, 0xF6, 0xF6);
-    let sel_fill = egui::Color32::from_rgb(0xE4, 0xED, 0xFC);
-    let sel_stroke = egui::Stroke::new(1.4, egui::Color32::from_rgb(0x2E, 0x6D, 0xC8));
-    let header_text = egui::Color32::from_rgb(0x33, 0x33, 0x33);
-    let placeholder_text = egui::Color32::from_rgb(0x9B, 0x9B, 0x9B);
-    let value_text = egui::Color32::from_rgb(0x1E, 0x1E, 0x1E);
-    let rownum_text = egui::Color32::from_rgb(0x66, 0x66, 0x66);
-    let rownum_sel_text = egui::Color32::from_rgb(0x2E, 0x6D, 0xC8);
+    let header_fill = theme::HEADER;
+    let header_sel_fill = theme::ACCENT_SOFT;
+    let cell_fill = theme::CELL;
+    let cell_alt_fill = theme::CELL_ALT;
+    let sel_fill = theme::SELECTED;
+    let sel_stroke = egui::Stroke::new(1.5, theme::ACCENT);
+    let header_text = theme::TEXT;
+    let placeholder_text = theme::TEXT_FAINT;
+    let value_text = theme::TEXT;
+    let rownum_text = theme::TEXT_FAINT;
+    let rownum_sel_text = theme::ACCENT;
 
-    let font = egui::FontId::proportional(12.5);
+    let font = theme::body(12.5);
+    let header_font = theme::medium(12.5);
 
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
-        .show_rows(ui, SPSS_ROW_H + SPSS_GAP, total_rows, |ui, rows| {
+        .show_rows(ui, theme::ROW_H + theme::GAP, total_rows, |ui, rows| {
             for row in rows {
-                let (rect, resp) =
-                    ui.allocate_exact_size(egui::vec2(content_w, SPSS_ROW_H), egui::Sense::click());
+                let (rect, resp) = ui.allocate_exact_size(
+                    egui::vec2(content_w, theme::ROW_H),
+                    egui::Sense::click(),
+                );
                 let p = ui.painter();
                 let mid_y = rect.center().y;
-                let cell_x = |j: usize| rect.left() + SPSS_ROWNUM_W + SPSS_GAP + (j as f32) * (SPSS_COL_W + SPSS_GAP);
+                let cell_x = |j: usize| {
+                    rect.left() + theme::ROWNUM_W + theme::GAP
+                        + (j as f32) * (theme::COL_W + theme::GAP)
+                };
                 let cell_rect = |j: usize, inset: f32| {
                     egui::Rect::from_min_max(
                         egui::pos2(cell_x(j), rect.top() + inset),
-                        egui::pos2(cell_x(j) + SPSS_COL_W, rect.bottom() - inset),
+                        egui::pos2(cell_x(j) + theme::COL_W, rect.bottom() - inset),
                     )
                 };
-                // which data column is under the mouse (if any)?
                 let hit_col = |pos: egui::Pos2| -> Option<usize> {
-                    if pos.x < rect.left() + SPSS_ROWNUM_W + SPSS_GAP {
+                    if pos.x < rect.left() + theme::ROWNUM_W + theme::GAP {
                         return None;
                     }
-                    let fx = pos.x - rect.left() - SPSS_ROWNUM_W - SPSS_GAP;
-                    let j = (fx / (SPSS_COL_W + SPSS_GAP)).floor() as isize;
+                    let fx = pos.x - rect.left() - theme::ROWNUM_W - theme::GAP;
+                    let j = (fx / (theme::COL_W + theme::GAP)).floor() as isize;
                     if j >= 0 && (j as usize) < n_real {
                         Some(j as usize)
                     } else {
@@ -1087,15 +1162,18 @@ fn spss_grid(
                 };
 
                 if row == 0 {
-                    // header band
+                    // ---- header band ----
                     let sel_j = sel_cell
                         .as_ref()
                         .and_then(|(ci, _)| vis_cols.iter().position(|&c| c == *ci));
                     for j in 0..total_cols {
                         let r = cell_rect(j, 0.0);
                         let sel_here = sel_j == Some(j);
-                        p.rect_filled(r, 0.0, if sel_here { header_sel_fill } else { header_fill });
-                        let (txt, color) = match table.as_deref().and_then(|t| vis_cols.get(j).map(|&ci| &t.columns[ci].name)) {
+                        p.rect_filled(r, theme::RADIUS_SM, if sel_here { header_sel_fill } else { header_fill });
+                        let (txt, color) = match table
+                            .as_deref()
+                            .and_then(|t| vis_cols.get(j).map(|&ci| &t.columns[ci].name))
+                        {
                             Some(name) => (name.as_str(), header_text),
                             None => ("var", placeholder_text),
                         };
@@ -1103,19 +1181,27 @@ fn spss_grid(
                             r.center(),
                             egui::Align2::CENTER_CENTER,
                             txt,
-                            font.clone(),
+                            header_font.clone(),
                             color,
                         );
                     }
+                    // hairline under the header band
+                    p.line_segment(
+                        [
+                            egui::pos2(rect.left(), rect.bottom()),
+                            egui::pos2(rect.right(), rect.bottom()),
+                        ],
+                        egui::Stroke::new(1.0, theme::BORDER),
+                    );
                 } else {
-                    // data row
+                    // ---- data row ----
                     let di = row - 1;
                     let row_sel = sel_cell
                         .as_ref()
                         .map(|(_, r)| *r == di)
                         .unwrap_or(false);
                     p.text(
-                        egui::pos2(rect.left() + 7.0, mid_y),
+                        egui::pos2(rect.left() + 10.0, mid_y),
                         egui::Align2::LEFT_CENTER,
                         format!("{}", di + 1),
                         font.clone(),
@@ -1123,37 +1209,40 @@ fn spss_grid(
                     );
                     if let Some(t) = table.as_deref() {
                         for j in 0..total_cols {
-                            let r = cell_rect(j, 1.0);
-                            // real cell (with its data) or empty placeholder block under a `var` header
+                            let r = cell_rect(j, 0.5);
                             if j < n_real {
                                 let ci = vis_cols[j];
                                 let selected = sel_cell.as_ref() == Some(&(ci, di));
-                                p.rect_filled(
-                                    r,
-                                    0.0,
-                                    if selected { sel_fill } else { cell_fill },
-                                );
+                                // Zebra striping keeps long tables readable.
+                                let base = if di % 2 == 0 { cell_fill } else { cell_alt_fill };
+                                p.rect_filled(r, theme::RADIUS_SM, if selected { sel_fill } else { base });
                                 if selected {
-                                    p.rect_stroke(r, 0.0, sel_stroke);
+                                    p.rect_stroke(r, theme::RADIUS_SM, sel_stroke);
                                 }
                                 let c = &t.columns[ci];
                                 let (anchor, px) = match c.meta.align {
-                                    crate::data::VarAlign::Right => (egui::Align2::RIGHT_CENTER, r.right() - 6.0),
-                                    crate::data::VarAlign::Center => (egui::Align2::CENTER_CENTER, r.center().x),
-                                    crate::data::VarAlign::Left => (egui::Align2::LEFT_CENTER, r.left() + 6.0),
+                                    crate::data::VarAlign::Right => {
+                                        (egui::Align2::RIGHT_CENTER, r.right() - 8.0)
+                                    }
+                                    crate::data::VarAlign::Center => {
+                                        (egui::Align2::CENTER_CENTER, r.center().x)
+                                    }
+                                    crate::data::VarAlign::Left => {
+                                        (egui::Align2::LEFT_CENTER, r.left() + 8.0)
+                                    }
                                 };
                                 let txt = t.cell_text(ci, di);
                                 if !txt.is_empty() {
                                     p.text(egui::pos2(px, mid_y), anchor, txt, font.clone(), value_text);
                                 }
                             } else {
-                                p.rect_filled(r, 0.0, cell_fill);
+                                p.rect_filled(r, theme::RADIUS_SM, theme::SURFACE_ALT);
                             }
                         }
                     } else {
-                        // no data yet: SPSS still shows the empty gray cell grid
+                        // No data yet: still draw the empty cell grid.
                         for j in 0..total_cols {
-                            p.rect_filled(cell_rect(j, 1.0), 0.0, cell_fill);
+                            p.rect_filled(cell_rect(j, 0.5), theme::RADIUS_SM, cell_alt_fill);
                         }
                     }
                 }
@@ -1187,13 +1276,13 @@ fn spss_grid(
                     }
                 }
 
-                // in-cell edit box overlay
+                // ---- in-cell edit box overlay ----
                 if let Some((eci, edi)) = *editing_cell {
                     if row > 0 && edi == di_of_row(row) {
                         if let Some(j) = vis_cols.iter().position(|&c| c == eci) {
-                            let r = cell_rect(j, 1.0);
-                            p.rect_filled(r, 0.0, egui::Color32::WHITE);
-                            p.rect_stroke(r, 0.0, sel_stroke);
+                            let r = cell_rect(j, 0.5);
+                            p.rect_filled(r, theme::RADIUS_SM, theme::CELL);
+                            p.rect_stroke(r, theme::RADIUS_SM, sel_stroke);
                             let mut child = ui.child_ui(
                                 r.shrink(1.0),
                                 egui::Layout::top_down(egui::Align::LEFT),
@@ -1201,14 +1290,12 @@ fn spss_grid(
                             );
                             let tresp = child.add(
                                 egui::TextEdit::singleline(edit_buf)
-                                    .desired_width(SPSS_COL_W - 8.0)
+                                    .desired_width(theme::COL_W - 10.0)
                                     .frame(false),
                             );
                             child.memory_mut(|m| m.request_focus(tresp.id));
-                            let enter = child
-                                .input(|i| i.key_pressed(egui::Key::Enter));
-                            let esc = child
-                                .input(|i| i.key_pressed(egui::Key::Escape));
+                            let enter = child.input(|i| i.key_pressed(egui::Key::Enter));
+                            let esc = child.input(|i| i.key_pressed(egui::Key::Escape));
                             if esc {
                                 *editing_cell = None;
                             } else if enter || tresp.lost_focus() {
@@ -1293,8 +1380,10 @@ mod tests {
 /// SPSS pivot-table look: bordered cells, shaded header band, right-aligned
 /// numerics, footnote note beneath the table.
 fn render_output_table(ui: &mut egui::Ui, t: &OutputTable) {
-    let header_fill = egui::Color32::from_rgb(0xEA, 0xF0, 0xF8);
-    let edge = egui::Color32::from_rgb(0x99, 0x99, 0x99);
+    use crate::theme;
+    let header_fill = theme::HEADER;
+    let edge = theme::BORDER;
+    let stub_fill = theme::SURFACE_ALT;
     egui::Grid::new(&t.title)
         .striped(false)
         .spacing([0.0, 0.0])
@@ -1303,10 +1392,14 @@ fn render_output_table(ui: &mut egui::Ui, t: &OutputTable) {
                 egui::Frame::none()
                     .fill(header_fill)
                     .stroke(egui::Stroke::new(0.5, edge))
-                    .inner_margin(egui::Margin::symmetric(8.0, 3.0))
+                    .inner_margin(egui::Margin::symmetric(10.0, 5.0))
                     .show(ui, |ui| {
-                        ui.set_min_width(ui.available_width().min(90.0));
-                        ui.strong(egui::RichText::new(h).size(12.0));
+                        ui.set_min_width(ui.available_width().min(96.0));
+                        ui.label(
+                            egui::RichText::new(h)
+                                .font(crate::theme::semibold(12.0))
+                                .color(theme::TEXT),
+                        );
                     });
             }
             ui.end_row();
@@ -1314,11 +1407,11 @@ fn render_output_table(ui: &mut egui::Ui, t: &OutputTable) {
                 for (k, cell) in row.iter().enumerate() {
                     let is_num = k > 0 && cell.parse::<f64>().is_ok();
                     egui::Frame::none()
-                        .fill(egui::Color32::WHITE)
+                        .fill(if k == 0 { stub_fill } else { theme::CELL })
                         .stroke(egui::Stroke::new(0.5, edge))
-                        .inner_margin(egui::Margin::symmetric(8.0, 2.0))
+                        .inner_margin(egui::Margin::symmetric(10.0, 4.0))
                         .show(ui, |ui| {
-                            ui.set_min_width(ui.available_width().min(90.0));
+                            ui.set_min_width(ui.available_width().min(96.0));
                             ui.with_layout(
                                 if is_num {
                                     egui::Layout::right_to_left(egui::Align::Center)
@@ -1326,7 +1419,13 @@ fn render_output_table(ui: &mut egui::Ui, t: &OutputTable) {
                                     egui::Layout::left_to_right(egui::Align::Center)
                                 },
                                 |ui| {
-                                    ui.label(egui::RichText::new(cell).size(12.0));
+                                    let rt = egui::RichText::new(cell).size(12.5);
+                                    let rt = if k == 0 {
+                                        rt.font(crate::theme::medium(12.5)).color(theme::TEXT)
+                                    } else {
+                                        rt.color(theme::TEXT)
+                                    };
+                                    ui.label(rt);
                                 },
                             );
                         });
@@ -1406,9 +1505,10 @@ fn render_charts(ui: &mut egui::Ui, table: &DataTable) {
 
 fn render_variables(ui: &mut egui::Ui, table: &mut DataTable) {
     use crate::data::{Measure, VarAlign, ColumnKind};
-    let header_fill = egui::Color32::from_rgb(0xE9, 0xE9, 0xE9);
-    let cell_fill = egui::Color32::from_rgb(0xF7, 0xF7, 0xF7);
-    let header_text = egui::Color32::from_rgb(0x5E, 0x5E, 0x5E);
+    use crate::theme;
+    let header_fill = theme::HEADER;
+    let cell_fill = theme::CELL;
+    let header_text = theme::TEXT;
 
     let mut block = |ui: &mut egui::Ui,
                      w: f32,
@@ -1441,7 +1541,9 @@ fn render_variables(ui: &mut egui::Ui, table: &mut DataTable) {
                               "Missing", "Columns", "Align", "Measure", "Role"] {
                         block(ui, 92.0, header_fill, &mut |inner: &mut egui::Ui| {
                             inner.label(
-                                egui::RichText::new(h).size(12.0).color(header_text),
+                                egui::RichText::new(h)
+                                    .font(crate::theme::medium(12.0))
+                                    .color(header_text),
                             );
                         });
                     }
@@ -1577,51 +1679,63 @@ fn render_variables(ui: &mut egui::Ui, table: &mut DataTable) {
 
 /// StateCraft application icon: ascending white bars on a navy rounded square.
 /// Generated at runtime so the build stays asset-free.
+/// The app icon: a rounded square in the brand accent with three ascending
+/// bars in the StatCraft palette, matching the toolbar's `chart` icon.
 fn app_icon() -> egui::IconData {
     const S: usize = 64;
+    // Bar geometry: three ascending bars, baseline at y = 50.
+    const BARS: [(usize, usize, usize); 3] = [
+        // (x_start, x_end, y_top)
+        (12, 22, 34),
+        (27, 37, 24),
+        (42, 52, 12),
+    ];
+    // Brand colours: accent blue, mid blue, teal.
+    const COLORS: [(u8, u8, u8); 3] = [
+        (0x2F, 0x6F, 0xED),
+        (0x4A, 0x9A, 0xF5),
+        (0x0F, 0xA8, 0x7E),
+    ];
+
     let mut rgba = vec![0u8; S * S * 4];
     for y in 0..S {
         for x in 0..S {
             let fx = x as f32 + 0.5;
             let fy = y as f32 + 0.5;
-            // rounded-rectangle signed distance
+            // Rounded-rectangle signed distance for the tile.
             let half = S as f32 / 2.0;
-            let corner = 12.0;
-            let inset = 2.0;
-            let qx = (fx - half).abs() - (half - inset - corner);
-            let qy = (fy - half).abs() - (half - inset - corner);
+            let corner = 14.0;
+            let qx = (fx - half).abs() - (half - corner);
+            let qy = (fy - half).abs() - (half - corner);
             let outside = (qx.max(0.0).powi(2) + qy.max(0.0).powi(2)).sqrt();
             let d = outside + qx.max(qy).min(0.0) - corner;
             if d > 0.0 {
                 continue; // transparent outside the rounded square
             }
-            // navy background with a subtle vertical gradient
-            let t = fy / S as f32;
-            let (mut r, mut g, mut b) = (
-                (26.0 + 18.0 * t) as u8,
-                (58.0 + 32.0 * t) as u8,
-                (104.0 + 44.0 * t) as u8,
-            );
-            // three ascending bars (14..22, 28..36, 42..50) with baseline at y=51
-            let in_bar = (14..22).contains(&x) || (28..36).contains(&x) || (42..50).contains(&x);
-            let tops = [(14..22, 40), (28..36, 31), (42..50, 19)];
-            for (range, top) in tops {
-                if range.contains(&x) && y >= top && y <= 51 {
-                    r = 245;
-                    g = 247;
-                    b = 250;
+
+            // White tile.
+            let (mut r, mut g, mut b) = (255u8, 255u8, 255u8);
+            // A very light accent wash so the tile is not flat white.
+            let wash = 1.0 - (fy / S as f32).min(1.0);
+            r = (r as f32 - 8.0 * wash) as u8;
+            g = (g as f32 - 12.0 * wash) as u8;
+            b = (b as f32 - 4.0 * wash) as u8;
+
+            // The bars.
+            for (i, (x0, x1, y_top)) in BARS.iter().enumerate() {
+                if x >= *x0 && x < *x1 && y >= *y_top && y <= 50 {
+                    let (br, bg, bb) = COLORS[i];
+                    r = br;
+                    g = bg;
+                    b = bb;
                 }
             }
-            if in_bar && y > 51 && y <= 53 {
-                r = 160;
-                g = 190;
-                b = 225; // baseline rule
-            }
-            let i = (y * S + x) * 4;
-            rgba[i] = r;
-            rgba[i + 1] = g;
-            rgba[i + 2] = b;
-            rgba[i + 3] = 255;
+
+            let idx = (y * S + x) * 4;
+            rgba[idx] = r;
+            rgba[idx + 1] = g;
+            rgba[idx + 2] = b;
+            rgba[idx + 3] = 255;
         }
     }
     egui::IconData {
@@ -1635,14 +1749,19 @@ pub fn run(initial_path: Option<String>) -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_icon(app_icon())
-            .with_inner_size([1240.0, 780.0])
-            .with_min_inner_size([760.0, 480.0]),
+            .with_inner_size([1360.0, 860.0])
+            .with_min_inner_size([820.0, 520.0]),
         ..Default::default()
     };
     eframe::run_native(
         "StateCraft",
         options,
-        Box::new(move |_cc| {
+        Box::new(move |cc| {
+            // Install the bundled Inter family and the modern look before the
+            // first frame, so nothing is ever painted with the old defaults.
+            crate::theme::install_fonts(&cc.egui_ctx);
+            crate::theme::apply_style(&cc.egui_ctx, false);
+
             let mut app = StateCraftApp::default();
             if let Some(p) = initial_path {
                 app.path_input = p;

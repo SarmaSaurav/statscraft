@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="24" height="24" viewBox="0 0 24 24">
+  <title>correlation</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M4 3.5 L4 20.5 L20.5 20.5" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <path d="M7.5 16.5 C6.782 16.5 6.2 17.082 6.2 17.8 C6.2 18.518 6.782 19.1 7.5 19.1 C8.218 19.1 8.8 18.518 8.8 17.8 C8.8 17.082 8.218 16.5 7.5 16.5" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <path d="M11 13 C10.282 13 9.7 13.582 9.7 14.3 C9.7 15.018 10.282 15.6 11 15.6 C11.718 15.6 12.3 15.018 12.3 14.3 C12.3 13.582 11.718 13 11 13" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <path d="M14 15 C13.282 15 12.7 15.582 12.7 16.3 C12.7 17.018 13.282 17.6 14 17.6 C14.718 17.6 15.3 17.018 15.3 16.3 C15.3 15.582 14.718 15 14 15" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <path d="M16.5 9 C15.782 9 15.2 9.582 15.2 10.3 C15.2 11.018 15.782 11.6 16.5 11.6 C17.218 11.6 17.8 11.018 17.8 10.3 C17.8 9.582 17.218 9 16.5 9" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <path d="M12 7.5 C11.282 7.5 10.7 8.082 10.7 8.8 C10.7 9.518 11.282 10.1 12 10.1 C12.718 10.1 13.3 9.518 13.3 8.8 C13.3 8.082 12.718 7.5 12 7.5" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

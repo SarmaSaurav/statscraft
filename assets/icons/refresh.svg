@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="24" height="24" viewBox="0 0 24 24">
+  <title>refresh</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M20 12 C19.883 15.708 17.233 18.849 13.597 19.588 C9.961 20.327 6.295 18.469 4.74 15.101 C3.186 11.732 4.151 7.737 7.072 5.45 C9.992 3.162 14.103 3.183 17 5.5" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <path d="M20.5 3.5 L20.5 7 L17 7" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

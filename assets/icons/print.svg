@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="24" height="24" viewBox="0 0 24 24">
+  <title>print</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M7 8 L7 3.5 L17 3.5 L17 8" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <path d="M7 17 L4.5 17 C3.672 17 3 16.328 3 15.5 L3 10 C3 9.172 3.672 8.5 4.5 8.5 L19.5 8.5 C20.328 8.5 21 9.172 21 10 L21 15.5 C21 16.328 20.328 17 19.5 17 L17 17" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <path d="M7 14 L17 14 L17 20.5 L7 20.5 Z" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

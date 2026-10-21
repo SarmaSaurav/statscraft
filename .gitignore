@@ -14,6 +14,9 @@ dist/statecraft.exe
 .DS_Store
 Thumbs.db
 
+# User's own scratch asset, deliberately not tracked
+logo_idea1.jpg
+
 # Packaging scratch
 target/deb/
 packaging/linux/debroot/

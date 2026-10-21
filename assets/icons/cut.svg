@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="24" height="24" viewBox="0 0 24 24">
+  <title>cut</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M6.5 6.5 L17 17" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <path d="M17 6.5 L6.5 17" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <path d="M6.5 4.5 C5.119 4.5 4 5.619 4 7 C4 8.381 5.119 9.5 6.5 9.5 C7.881 9.5 9 8.381 9 7 C9 5.619 7.881 4.5 6.5 4.5" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <path d="M17.5 14.5 C16.119 14.5 15 15.619 15 17 C15 18.381 16.119 19.5 17.5 19.5 C18.881 19.5 20 18.381 20 17 C20 15.619 18.881 14.5 17.5 14.5" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

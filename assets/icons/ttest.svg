@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="24" height="24" viewBox="0 0 24 24">
+  <title>ttest</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M4 3.5 L4 20.5 L20.5 20.5" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <path d="M7 20.5 L7 12 L10.5 12 L10.5 20.5" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <path d="M13.5 20.5 L13.5 12 L17 12 L17 20.5" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <path d="M7 8.5 L17 8.5" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <path d="M7 6 L7 11 M17 6 L17 11" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
