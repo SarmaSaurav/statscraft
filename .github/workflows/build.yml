@@ -46,6 +46,18 @@ jobs:
       - name: Run tests
         run: cargo test
 
+      - name: Check the .deb control file
+        run: |
+          # The control file has to carry a version dpkg will accept.
+          # This check catches a bad version before the package build
+          # does, because dpkg's own error message is not obvious.
+          sed -e 's/@VERSION@/0.0.0/' -e 's/@ARCH@/amd64/' \
+            packaging/linux/control > /tmp/control
+          mkdir -p /tmp/pkg/DEBIAN
+          cp /tmp/control /tmp/pkg/DEBIAN/control
+          dpkg-deb --build /tmp/pkg /tmp/check.deb
+          rm -rf /tmp/pkg /tmp/check.deb /tmp/control
+
       - name: Build .deb package
         run: bash packaging/linux/build_deb.sh
 

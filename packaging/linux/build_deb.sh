@@ -5,7 +5,29 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.." # repo root
 
-VERSION=$(cargo pkgid | cut -d# -f2 | cut -d: -f2)
+# The version comes from Cargo.toml.
+#
+# It used to come from `cargo pkgid | cut -d# -f2 | cut -d: -f2`, which
+# is wrong. `cargo pkgid` prints "path+file:///...#name@version" - but
+# it omits the "name@" part when the package name matches the last
+# directory of the path, and includes it when they differ. The CI
+# checks the repository out into a directory named after the GitHub
+# repository, so a crate whose name differs from the repository's
+# produces "name@version", and dpkg rejects it:
+#
+#   dpkg-deb: error: 'Version' field value 'statecraft@0.1.0':
+#   version number does not start with digit
+#
+# Reading the version out of Cargo.toml does not depend on the crate
+# name and the directory name agreeing.
+VERSION=$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' Cargo.toml | head -1)
+if [ -z "$VERSION" ]; then
+  echo "could not read the version from Cargo.toml" >&2
+  exit 1
+fi
+# A Debian version may only contain alphanumerics, a dot, a plus, a
+# hyphen and a tilde, so anything else is folded into a dot.
+DEB_VERSION=$(printf '%s' "$VERSION" | sed 's/[^A-Za-z0-9.+~-]/-/g')
 ARCH=$(dpkg --print-architecture)
 PKGNAME="statscraft"
 DEB_ROOT="target/deb/${PKGNAME}_${ARCH}"
@@ -30,15 +52,15 @@ cp packaging/assets/statscraft.desktop "$DEB_ROOT$INSTALL_PREFIX/share/applicati
 cp packaging/assets/icon.svg "$DEB_ROOT$INSTALL_PREFIX/share/icons/hicolor/scalable/apps/statscraft.svg"
 cp README.md "$DEB_ROOT$INSTALL_PREFIX/share/doc/$PKGNAME/"
 
-# Replace placeholders
-sed -i "s/@VERSION@/$VERSION/g" "$DEB_ROOT/DEBIAN/control" 2>/dev/null || true
+# The control file: the package's metadata, with the placeholders
+# filled in.
 cp packaging/linux/control "$DEB_ROOT/DEBIAN/control"
-sed -i "s/@VERSION@/$VERSION/g" "$DEB_ROOT/DEBIAN/control"
+sed -i "s/@VERSION@/$DEB_VERSION/g" "$DEB_ROOT/DEBIAN/control"
 sed -i "s/@ARCH@/$ARCH/g" "$DEB_ROOT/DEBIAN/control"
 
 # strip binary
 strip "$DEB_ROOT$INSTALL_PREFIX/bin/statscraft" || true
 
 # 3. Build package
-dpkg-deb --build "$DEB_ROOT" "statscraft_${VERSION}_${ARCH}.deb"
-echo "== produced: statscraft_${VERSION}_${ARCH}.deb =="
+dpkg-deb --build "$DEB_ROOT" "statscraft_${DEB_VERSION}_${ARCH}.deb"
+echo "== produced: statscraft_${DEB_VERSION}_${ARCH}.deb =="
