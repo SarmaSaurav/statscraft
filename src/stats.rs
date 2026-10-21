@@ -623,3 +623,113 @@ pub fn independent_ttest_vars(
         p,
     })
 }
+
+// ============================================================================
+// Phase 6: validation against closed-form / textbook reference values
+// ============================================================================
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+    use crate::data::{Column, VariableMeta};
+
+    fn numeric(name: &str, values: Vec<f64>) -> Column {
+        Column {
+            name: name.to_string(),
+            kind: ColumnKind::Numeric,
+            values: values.into_iter().map(Value::Number).collect(),
+            meta: VariableMeta::default_for(ColumnKind::Numeric),
+        }
+    }
+
+    fn table(cols: Vec<Column>, n_rows: usize) -> DataTable {
+        DataTable {
+            columns: cols,
+            n_rows,
+        }
+    }
+
+    #[test]
+    fn descriptives_match_closed_form() {
+        // SPSS-style sample stats: scores 88.5, 92, 75.3, 90.1, 84.2, 79.9
+        // mean = 85.0, SD (n-1) = sqrt(41.6) = 6.4498, min = 75.3, max = 92
+        let t = table(vec![numeric("score", vec![88.5, 92.0, 75.3, 90.1, 84.2, 79.9])], 6);
+        let d = descriptives(&t);
+        assert_eq!(d.len(), 1);
+        let s = &d[0];
+        assert_eq!(s.n, 6);
+        assert!((s.mean - 85.0).abs() < 1e-9, "mean={}", s.mean);
+        assert!((s.std_dev - 41.6f64.sqrt()).abs() < 1e-9, "sd={}", s.std_dev);
+        assert!((s.min - 75.3).abs() < 1e-9);
+        assert!((s.max - 92.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn perfect_correlation_and_regression_recovered() {
+        // y = 2x + 1 exactly -> r = 1, slope = 2, intercept = 1, r2 = 1
+        let x: Vec<f64> = (1..=6).map(|v| v as f64).collect();
+        let y: Vec<f64> = x.iter().map(|v| 2.0 * v + 1.0).collect();
+        let t = table(vec![numeric("x", x.clone()), numeric("y", y)], 6);
+        let corr = correlations(&t);
+        assert_eq!(corr.len(), 1);
+        assert!((corr[0].r - 1.0).abs() < 1e-12, "r={}", corr[0].r);
+
+        let reg = linear_regression_xy(&t, 1, 0).unwrap(); // y on x
+        assert!((reg.slope - 2.0).abs() < 1e-12);
+        assert!((reg.intercept - 1.0).abs() < 1e-12);
+        assert!((reg.r2 - 1.0).abs() < 1e-12);
+
+        // negative slope case y = -3x: r = -1
+        let y2: Vec<f64> = x.iter().map(|v| -3.0 * v).collect();
+        let t2 = table(vec![numeric("x", x), numeric("y2", y2)], 6);
+        let corr2 = correlations(&t2);
+        assert!((corr2[0].r + 1.0).abs() < 1e-12, "r={}", corr2[0].r);
+    }
+
+    #[test]
+    fn user_missing_excluded_from_procedures() {
+        // score 99 marks a user-missing value: SPSS excludes it from analyses
+        let mut col = numeric("score", vec![1.0, 2.0, 99.0, 4.0, 5.0]);
+        col.meta.user_missing.push(99.0);
+        let t = table(vec![col], 5);
+        let d = descriptives(&t);
+        assert_eq!(d[0].n, 4, "user-missing excluded");
+        assert!((d[0].mean - 3.0).abs() < 1e-9, "mean={}", d[0].mean);
+        assert!((d[0].max - 5.0).abs() < 1e-9, "99 must not be the max");
+    }
+
+    #[test]
+    fn frequencies_include_missing_bucket() {
+        let mut col = numeric("v", vec![1.0, 1.0, 2.0, 99.0]);
+        col.meta.user_missing.push(99.0);
+        let t = table(vec![col], 4);
+        let f = frequencies(&t, 0);
+        let missing = f.iter().find(|r| r.value == "(missing)").unwrap();
+        assert_eq!(missing.count, 1);
+        let ones = f.iter().find(|r| r.value == "1").unwrap();
+        assert_eq!(ones.count, 2);
+    }
+
+    #[test]
+    fn independent_ttest_matches_textbook() {
+        // g1 = [1,2,3], g2 = [4,6,8] (Welch): means 2, 6; t = -2.0
+        let mut g = Column {
+            name: "g".into(),
+            kind: ColumnKind::String,
+            values: ["a", "a", "a", "b", "b", "b"]
+                .into_iter()
+                .map(|s| Value::Text(s.to_string()))
+                .collect(),
+            meta: VariableMeta::default_for(ColumnKind::String),
+        };
+        let _ = &mut g;
+        let t = table(vec![numeric("score", vec![1.0, 2.0, 3.0, 4.0, 6.0, 8.0]), g], 6);
+        let r = independent_ttest_vars(&t, 0, 1).unwrap();
+        assert_eq!(r.n1, 3);
+        assert_eq!(r.n2, 3);
+        assert!((r.mean1 - 2.0).abs() < 1e-9);
+        assert!((r.mean2 - 6.0).abs() < 1e-9);
+        // Welch t: v1=1, v2=4, se = sqrt(1/3 + 4/3) = sqrt(5/3) -> t = -4/1.2910 = -3.0984
+        assert!((r.t + 3.0984).abs() < 1e-3, "t={}", r.t);
+        assert!(r.p > 0.04 && r.p < 0.07, "p={}", r.p);
+    }
+}
