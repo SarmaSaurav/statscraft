@@ -1,4 +1,4 @@
-# StateCraft — Lightweight SPSS-like App in Rust
+# StatsCraft — Lightweight SPSS-like App in Rust
 
 ## 1. What IBM SPSS Statistics is (observed on this machine)
 
@@ -139,7 +139,7 @@ Use `statrs` + hand-rolled linear algebra (or `nalgebra`) for:
 ## 3. Architecture (Rust)
 
 ```
-statecraft/
+statscraft/
 ├── Cargo.toml
 ├── src/
 │   ├── main.rs                # eframe entry

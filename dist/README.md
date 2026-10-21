@@ -1,4 +1,4 @@
-# StateCraft
+# StatsCraft
 
 Lightweight SPSS-like statistical workbench written in Rust.
 

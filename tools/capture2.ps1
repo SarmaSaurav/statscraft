@@ -4,7 +4,7 @@ param(
   [switch]$Move,
   [int]$MoveX = 0, [int]$MoveY = 0, [int]$MoveW = 0, [int]$MoveH = 0
 )
-# Capture a StateCraft window by title substring. Optionally move/resize it first.
+# Capture a StatsCraft window by title substring. Optionally move/resize it first.
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 Add-Type @'
 using System;
@@ -37,13 +37,13 @@ public class VC {
   public static RECT Rect(IntPtr h) { RECT r; GetWindowRect(h, out r); return r; }
 }
 '@
-$p = Get-Process statecraft -EA SilentlyContinue | Select-Object -First 1
+$p = Get-Process statscraft -EA SilentlyContinue | Select-Object -First 1
 if (-not $p) { Write-Output 'NOT_RUNNING'; exit 1 }
 
 $target = $null
 foreach ($h in [VC]::ForPid([uint32]$p.Id)) {
   $t = [VC]::Title($h)
-  if ($t -and $t -notlike '*statecraft.exe' -and ($Match -eq '' -or $t -like "*$Match*")) {
+  if ($t -and $t -notlike '*statscraft.exe' -and ($Match -eq '' -or $t -like "*$Match*")) {
     $target = $h; $title = $t; break
   }
 }

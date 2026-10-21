@@ -5046,22 +5046,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "statecraft"
-version = "0.1.0"
-dependencies = [
- "csv",
- "eframe",
- "egui",
- "egui_extras",
- "egui_plot",
- "libloading",
- "polars",
- "polars-readstat-rs",
- "rfd",
- "statrs",
-]
-
-[[package]]
 name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5077,6 +5061,22 @@ dependencies = [
  "nalgebra",
  "num-traits",
  "rand 0.8.8",
+]
+
+[[package]]
+name = "statscraft"
+version = "0.1.0"
+dependencies = [
+ "csv",
+ "eframe",
+ "egui",
+ "egui_extras",
+ "egui_plot",
+ "libloading",
+ "polars",
+ "polars-readstat-rs",
+ "rfd",
+ "statrs",
 ]
 
 [[package]]

@@ -1,5 +1,5 @@
 [package]
-name = "statecraft"
+name = "statscraft"
 version = "0.1.0"
 edition = "2021"
 description = "Lightweight SPSS-like statistical analysis workstation (Rust)"
@@ -35,5 +35,5 @@ egui_extras = { version = "0.29", features = ["image", "svg"] }
 # (no crate; hand-rolled FFI in src/io/sav_ffi.rs)
 
 [[bin]]
-name = "statecraft"
+name = "statscraft"
 path = "src/main.rs"

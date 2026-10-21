@@ -1,4 +1,4 @@
-# Drive the StateCraft app through its showcase surfaces and capture each.
+# Drive the StatsCraft app through its showcase surfaces and capture each.
 # Windows are re-resolved by title before every action: egui recreates the
 # native window handle when a viewport opens, so a cached handle goes stale.
 param(
@@ -58,11 +58,11 @@ public class D {
 '@
 
 function Get-Win([string]$match) {
-  $p = Get-Process statecraft -EA SilentlyContinue | Select-Object -First 1
+  $p = Get-Process statscraft -EA SilentlyContinue | Select-Object -First 1
   if (-not $p) { return [IntPtr]::Zero }
   foreach ($h in [D]::ForPid([uint32]$p.Id)) {
     $t = [D]::Title($h)
-    if ($t -and $t -like "*$match*" -and $t -notlike '*statecraft.exe') {
+    if ($t -and $t -like "*$match*" -and $t -notlike '*statscraft.exe') {
       return [IntPtr]$h
     }
   }

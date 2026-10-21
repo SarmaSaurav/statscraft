@@ -23,14 +23,14 @@ jobs:
       - name: Publish installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: StateCraftSetup-windows
-          path: installer/target/release/StateCraftSetup.exe
+          name: StatsCraftSetup-windows
+          path: installer/target/release/StatsCraftSetup.exe
 
       - name: Publish portable exe
         uses: actions/upload-artifact@v4
         with:
-          name: statecraft-portable-windows
-          path: target/release/statecraft.exe
+          name: statscraft-portable-windows
+          path: target/release/statscraft.exe
 
   linux:
     runs-on: ubuntu-latest
@@ -52,11 +52,11 @@ jobs:
       - name: Publish .deb
         uses: actions/upload-artifact@v4
         with:
-          name: statecraft-deb
-          path: statecraft_*.deb
+          name: statscraft-deb
+          path: statscraft_*.deb
 
       - name: Publish portable binary
         uses: actions/upload-artifact@v4
         with:
-          name: statecraft-portable-linux
-          path: target/release/statecraft
+          name: statscraft-portable-linux
+          path: target/release/statscraft

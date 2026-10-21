@@ -1,4 +1,4 @@
-//! StateCraft visual theme: palette, typography, spacing and the icon set.
+//! StatsCraft visual theme: palette, typography, spacing and the icon set.
 //!
 //! The old UI was SPSS-grey: 1990s flat greys, the system UI font, and
 //! hand-painted pictograms. This module is the single place where the modern
@@ -171,7 +171,7 @@ pub fn semibold(size: f32) -> egui::FontId {
 // Style
 // ---------------------------------------------------------------------------
 
-/// Apply the StateCraft look to an egui context.
+/// Apply the StatsCraft look to an egui context.
 ///
 /// `dark` selects between the light workbench theme and a dark variant used
 /// by the Output Viewer.

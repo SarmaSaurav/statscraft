@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <!-- StateCraft icon: rounded white tile with three ascending bars in the
+  <!-- StatsCraft icon: rounded white tile with three ascending bars in the
        brand palette (accent blue, mid blue, teal). Matches the app's
        runtime icon in src/app.rs and the `chart` toolbar glyph. -->
   <rect x="2" y="2" width="60" height="60" rx="14" fill="#ffffff"/>

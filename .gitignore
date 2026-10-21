@@ -6,7 +6,7 @@
 *.7z
 
 # Portable dist keeps scripts/docs only; binaries are CI artifacts
-dist/statecraft.exe
+dist/statscraft.exe
 
 # IDE / OS junk
 .vscode/

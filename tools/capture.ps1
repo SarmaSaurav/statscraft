@@ -2,7 +2,7 @@ param(
   [Parameter(Mandatory=$true)][string]$Out,
   [int]$Delay = 2
 )
-# Capture a specific window of the running StateCraft app to a PNG.
+# Capture a specific window of the running StatsCraft app to a PNG.
 # Usage: .\capture.ps1 -Out C:\path\file.png
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 Add-Type @'
@@ -13,7 +13,7 @@ public class Cap {
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L,T,R,B; }
 }
 '@
-$p = Get-Process statecraft -EA SilentlyContinue |
+$p = Get-Process statscraft -EA SilentlyContinue |
      Where-Object { $_.MainWindowTitle -ne '' } |
      Sort-Object { $_.MainWindowTitle -notlike '*Output*' } |
      Select-Object -First 1

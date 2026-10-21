@@ -1,4 +1,4 @@
-# StateCraft
+# StatsCraft
 
 Lightweight SPSS-like statistical workbench written in Rust (native desktop app).
 
@@ -17,15 +17,15 @@ The UI is a modern take on the SPSS workbench, not a pixel copy of it:
   document tabs, hairline borders, and a proper primary button for *Run Syntax*.
 
 ## Install (Windows)
-Run `StateCraftSetup.exe` — a single native installer (no archives, no prompts):
-installs to `%LOCALAPPDATA%\Programs\StateCraft` (no admin) and creates
-Start Menu shortcuts: **StateCraft** and **Uninstall StateCraft**.
-If StateCraft is running, the installer closes it and replaces the binary.
+Run `StatsCraftSetup.exe` — a single native installer (no archives, no prompts):
+installs to `%LOCALAPPDATA%\Programs\StatsCraft` (no admin) and creates
+Start Menu shortcuts: **StatsCraft** and **Uninstall StatsCraft**.
+If StatsCraft is running, the installer closes it and replaces the binary.
 
 ## Install (Linux, .deb-first)
 ```sh
-bash packaging/linux/build_deb.sh   # produces statecraft_<version>_<arch>.deb
-sudo dpkg -i statecraft_*.deb       # integrates with application menus
+bash packaging/linux/build_deb.sh   # produces statscraft_<version>_<arch>.deb
+sudo dpkg -i statscraft_*.deb       # integrates with application menus
 ```
 A CI workflow (`.github/workflows/build.yml`) builds the Windows installer
 and the Linux `.deb` on every push.

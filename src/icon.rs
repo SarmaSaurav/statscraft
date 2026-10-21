@@ -22,7 +22,7 @@ struct IconCache {
 
 /// The egui memory slot the cache lives in.
 fn cache_id() -> egui::Id {
-    egui::Id::new("statecraft_icons")
+    egui::Id::new("statscraft_icons")
 }
 
 /// Get (and cache) the texture for an icon.
@@ -47,7 +47,7 @@ fn icon_texture(ctx: &egui::Context, icon: Icon) -> Option<egui::TextureId> {
         let tex_manager = ctx.tex_manager();
         let mut tex_manager = tex_manager.write();
         tex_manager.alloc(
-            format!("statecraft/icon/{}", name),
+            format!("statscraft/icon/{}", name),
             egui::ImageData::Color(std::sync::Arc::new(img)),
             egui::TextureOptions::LINEAR,
         )

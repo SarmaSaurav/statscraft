@@ -6,7 +6,7 @@ Screenshots in `docs/spss-reference/`.
 
 This file is the source of truth for *what to build next*. It records the
 observed behaviour of the original, the authoritative command grammar shipped
-with it, and the gap list for StateCraft.
+with it, and the gap list for StatsCraft.
 
 ---
 
@@ -94,7 +94,7 @@ column with `Options…`, `Style…`, `Bootstrap…`; plus a
 `☐ Save standardized values as variables` checkbox and the same
 OK/Paste/Reset/Cancel/Help button row.
 
-**Design implication for StateCraft:** a procedure dialog is *not* a small
+**Design implication for StatsCraft:** a procedure dialog is *not* a small
 extra panel. It is a real window with two list boxes, a move button, a
 right-hand column of sub-dialog buttons, procedure-specific checkboxes, and
 a gated OK. That is the single biggest interaction gap in our app.
@@ -210,7 +210,7 @@ each. This is authoritative for what a correct implementation must accept.
 
 ---
 
-## 5. Gap list for StateCraft
+## 5. Gap list for StatsCraft
 
 Ordered by how much it costs the user.
 

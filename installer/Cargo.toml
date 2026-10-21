@@ -1,14 +1,14 @@
 [package]
-name = "statecraft-installer"
+name = "statscraft-installer"
 version = "0.1.0"
 edition = "2021"
-description = "Silent per-user installer for StateCraft (single prebuilt exe, no extraction UI)"
+description = "Silent per-user installer for StatsCraft (single prebuilt exe, no extraction UI)"
 
 # Isolate from the parent project's package
 [workspace]
 
 [[bin]]
-name = "StateCraftSetup"
+name = "StatsCraftSetup"
 path = "src/main.rs"
 
 [profile.release]

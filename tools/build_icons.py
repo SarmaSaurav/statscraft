@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the StateCraft icon set as SVG via the VectorCraft CLI.
+"""Generate the StatsCraft icon set as SVG via the VectorCraft CLI.
 
 Each icon is a 24x24 stroked-path glyph in a single colour. Stroking (not
 filling) is what makes an icon read as a modern line icon rather than a
@@ -18,7 +18,7 @@ import subprocess
 import sys
 
 VC = r"C:/Program Files/VectorCraft/vectorcraft-cli.exe"
-OUT = r"D:/The_SPSS_Garage/StateCraft/assets/icons"
+OUT = r"D:/The_SPSS_Garage/StatsCraft/assets/icons"
 
 # Every icon is drawn on a 24x24 grid, stroke 1.8, round caps/joins.
 # Colour is white: the app tints the icon at draw time, so one asset serves

@@ -12,7 +12,7 @@ pub enum View {
     Syntax,
 }
 
-pub struct StateCraftApp {
+pub struct StatsCraftApp {
     pub path_input: String,
     pub table: Option<DataTable>,
     pub status: String,
@@ -34,7 +34,7 @@ pub struct StateCraftApp {
     pub show_syntax_window: bool,
 }
 
-impl Default for StateCraftApp {
+impl Default for StatsCraftApp {
     fn default() -> Self {
         Self {
             path_input: String::new(),
@@ -57,7 +57,7 @@ impl Default for StateCraftApp {
     }
 }
 
-impl StateCraftApp {
+impl StatsCraftApp {
     pub fn load(&mut self) {
         let p = std::path::Path::new(self.path_input.trim());
         let res = if p
@@ -210,7 +210,7 @@ impl StateCraftApp {
         }
         let mut h = String::from(
             "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n\
-             <title>StateCraft Output</title>\n<style>\n\
+             <title>StatsCraft Output</title>\n<style>\n\
              body{font-family:'Segoe UI',Arial,sans-serif;margin:24px;}\n\
              h2{font-size:14pt;margin-bottom:4px;}\n\
              table{border-collapse:collapse;font-size:10.5pt;margin-bottom:8px;}\n\
@@ -384,16 +384,16 @@ impl StateCraftApp {
     }
 }
 
-impl eframe::App for StateCraftApp {
+impl eframe::App for StatsCraftApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // ---- Phase 4: real OS document windows (SPSS multi-document UX) ----
         // The Output Viewer and Syntax editor live in their own viewports;
         // the Data Editor stays the main window, like IBM SPSS.
         if self.show_output_window {
             ctx.show_viewport_immediate(
-                egui::ViewportId::from_hash_of("statecraft_output"),
+                egui::ViewportId::from_hash_of("statscraft_output"),
                 egui::ViewportBuilder::default()
-                    .with_title(format!("Output1 - StateCraft Statistics Viewer"))
+                    .with_title(format!("Output1 - StatsCraft Statistics Viewer"))
                     .with_inner_size([1080.0, 720.0])
                     .with_min_inner_size([520.0, 360.0]),
                 |vctx, _class| {
@@ -543,9 +543,9 @@ impl eframe::App for StateCraftApp {
         }
         if self.show_syntax_window {
             ctx.show_viewport_immediate(
-                egui::ViewportId::from_hash_of("statecraft_syntax"),
+                egui::ViewportId::from_hash_of("statscraft_syntax"),
                 egui::ViewportBuilder::default()
-                    .with_title(format!("Syntax1 - StateCraft Syntax Editor"))
+                    .with_title(format!("Syntax1 - StatsCraft Syntax Editor"))
                     .with_inner_size([860.0, 560.0])
                     .with_min_inner_size([520.0, 320.0]),
                 |vctx, _class| {
@@ -599,10 +599,10 @@ impl eframe::App for StateCraftApp {
         }
 
         // The theme is installed once in `run`; re-assert it here so a
-        // viewport that inherits the default egui look still gets StateCraft.
+        // viewport that inherits the default egui look still gets StatsCraft.
         crate::theme::apply_style(ctx, false);
         // SPSS titles the window "<dataset> [DataSet<n>] - <product>".
-        let title = format!("{} — StateCraft Statistics", self.dataset_label());
+        let title = format!("{} — StatsCraft Statistics", self.dataset_label());
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
         egui::TopBottomPanel::top("menu")
@@ -812,7 +812,7 @@ impl eframe::App for StateCraftApp {
                     });
                     // ---------------- Help ----------------
                     ui.menu_button("Help", |ui| {
-                        if ui.button("About StateCraft").clicked() { ui.close_menu(); self.status = "StateCraft — lightweight SPSS-like workbench (Rust).".to_string(); }
+                        if ui.button("About StatsCraft").clicked() { ui.close_menu(); self.status = "StatsCraft — lightweight SPSS-like workbench (Rust).".to_string(); }
                     });
                 });
             });
@@ -1110,12 +1110,12 @@ impl eframe::App for StateCraftApp {
                         let ready = !self.status.starts_with("Error");
                         let (label, col) = if ready {
                             (
-                                "StateCraft Statistics Processor is ready",
+                                "StatsCraft Statistics Processor is ready",
                                 crate::theme::TEAL,
                             )
                         } else {
                             (
-                                "StateCraft Statistics Processor has an error",
+                                "StatsCraft Statistics Processor has an error",
                                 crate::theme::AMBER,
                             )
                         };
@@ -1158,7 +1158,7 @@ impl eframe::App for StateCraftApp {
                     }
                     None => Vec::new(),
                 };
-                let StateCraftApp {
+                let StatsCraftApp {
                     table,
                     sel_cell,
                     editing_cell,
@@ -1531,7 +1531,7 @@ mod tests {
 
     #[test]
     fn html_export_escapes_and_right_aligns_numbers() {
-        let mut app = StateCraftApp::default();
+        let mut app = StatsCraftApp::default();
         app.outputs.push(crate::output::OutputTable {
             title: "T<1>".into(),
             headers: vec!["A".into(), "B".into()],
@@ -1848,7 +1848,7 @@ fn render_variables(ui: &mut egui::Ui, table: &mut DataTable) {
         });
 }
 
-/// StateCraft application icon: ascending white bars on a navy rounded square.
+/// StatsCraft application icon: ascending white bars on a navy rounded square.
 /// Generated at runtime so the build stays asset-free.
 /// The app icon: a rounded square in the brand accent with three ascending
 /// bars in the StatCraft palette, matching the toolbar's `chart` icon.
@@ -1925,7 +1925,7 @@ pub fn run(initial_path: Option<String>) -> eframe::Result<()> {
         ..Default::default()
     };
     eframe::run_native(
-        "StateCraft",
+        "StatsCraft",
         options,
         Box::new(move |cc| {
             // Install the bundled Inter family and the modern look before the
@@ -1933,7 +1933,7 @@ pub fn run(initial_path: Option<String>) -> eframe::Result<()> {
             crate::theme::install_fonts(&cc.egui_ctx);
             crate::theme::apply_style(&cc.egui_ctx, false);
 
-            let mut app = StateCraftApp::default();
+            let mut app = StatsCraftApp::default();
             if let Some(p) = initial_path {
                 app.path_input = p;
                 app.load();

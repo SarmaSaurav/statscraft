@@ -1,12 +1,12 @@
-﻿use crate::app::StateCraftApp;
+﻿use crate::app::StatsCraftApp;
 use crate::output::OutputTable;
 use crate::stats;
 
-/// The single execution point for StateCraft: every procedure (menus, dialogs,
+/// The single execution point for StatsCraft: every procedure (menus, dialogs,
 /// syntax window) produces SPSS syntax text that is executed here.
 /// Commands mirror IBM SPSS keywords: LOAD, DESCRIPTIVES, FREQUENCIES,
 /// CORRELATIONS, REGRESSION, T-TEST, SORT CASES, CLEAR.
-pub fn run(app: &mut StateCraftApp, script: &str) {
+pub fn run(app: &mut StatsCraftApp, script: &str) {
     for raw in script.lines() {
         let line = raw.trim();
         if line.is_empty() || line.starts_with('*') {
@@ -16,7 +16,7 @@ pub fn run(app: &mut StateCraftApp, script: &str) {
     }
 }
 
-fn execute_line(app: &mut StateCraftApp, line: &str) {
+fn execute_line(app: &mut StatsCraftApp, line: &str) {
     let tokens: Vec<String> = line.split_whitespace().map(|s| s.to_string()).collect();
     if tokens.is_empty() {
         return;
@@ -317,7 +317,7 @@ fn execute_line(app: &mut StateCraftApp, line: &str) {
 /// `numeric_only` filters to numeric columns.
 /// Empty args default to all numeric (or all) columns — like menu defaults.
 /// On failure sets app.status and returns None.
-fn resolve_vars(app: &mut StateCraftApp, args: &[String], numeric_only: bool) -> Option<Vec<usize>> {
+fn resolve_vars(app: &mut StatsCraftApp, args: &[String], numeric_only: bool) -> Option<Vec<usize>> {
     let t = app.table.as_ref()?;
     if args.is_empty() {
         return Some(
@@ -384,7 +384,7 @@ mod tests {
     fn run_basic_script() {
         let path = std::env::temp_dir().join("sc_syntax_demo.csv");
         write_demo_csv(&path);
-        let mut app = StateCraftApp::default();
+        let mut app = StatsCraftApp::default();
         let script = format!(
             "LOAD \"{}\"\nDESCRIPTIVES score\nFREQUENCIES group\nCORRELATIONS score age\nT-TEST score BY group\nSORT CASES BY score (D)\n",
             path.display()
@@ -406,7 +406,7 @@ mod tests {
     fn unknown_variable_reports_error() {
         let path = std::env::temp_dir().join("sc_syntax_err.csv");
         write_demo_csv(&path);
-        let mut app = StateCraftApp::default();
+        let mut app = StatsCraftApp::default();
         run(&mut app, &format!("LOAD \"{}\"\nDESCRIPTIVES nonsense\n", path.display()));
         assert!(app.outputs.is_empty());
         assert!(app.status.contains("Unknown variable"));
@@ -417,7 +417,7 @@ mod tests {
     fn regression_with_clause() {
         let path = std::env::temp_dir().join("sc_syntax_reg.csv");
         write_demo_csv(&path);
-        let mut app = StateCraftApp::default();
+        let mut app = StatsCraftApp::default();
         run(&mut app, &format!("LOAD \"{}\"\nREGRESSION score WITH age\n", path.display()));
         assert!(app.outputs.last().unwrap().title.contains("Regression"));
         let _ = std::fs::remove_file(path);
@@ -507,7 +507,7 @@ mod tests {
         for (s, g, p) in [(10.0, "A", 9.0), (14.0, "B", 12.0), (9.0, "A", 8.5), (16.0, "B", 15.0)] {
             writeln!(f, "{},{},{}", s, g, p).unwrap();
         }
-        let mut app = StateCraftApp::default();
+        let mut app = StatsCraftApp::default();
         run(
             &mut app,
             &format!(

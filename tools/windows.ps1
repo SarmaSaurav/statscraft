@@ -1,5 +1,5 @@
 param([int]$Delay = 600)
-# Enumerate every visible top-level window of the statecraft process.
+# Enumerate every visible top-level window of the statscraft process.
 Add-Type @'
 using System;
 using System.Text;
@@ -29,6 +29,6 @@ public class WinList {
   }
 }
 '@
-$p = Get-Process statecraft -EA SilentlyContinue | Select-Object -First 1
+$p = Get-Process statscraft -EA SilentlyContinue | Select-Object -First 1
 if (-not $p) { Write-Output 'NOT_RUNNING'; exit 1 }
 [WinList]::ForPid([uint32]$p.Id) | ForEach-Object { Write-Output $_ }

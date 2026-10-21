@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Builds a Debian .deb package for StateCraft.
-# Run on Linux (locally or in CI). Produces StateCraft_<version>_<arch>.deb
+# Builds a Debian .deb package for StatsCraft.
+# Run on Linux (locally or in CI). Produces StatsCraft_<version>_<arch>.deb
 set -euo pipefail
 
 cd "$(dirname "$0")/../.." # repo root
 
 VERSION=$(cargo pkgid | cut -d# -f2 | cut -d: -f2)
 ARCH=$(dpkg --print-architecture)
-PKGNAME="statecraft"
+PKGNAME="statscraft"
 DEB_ROOT="target/deb/${PKGNAME}_${ARCH}"
 INSTALL_PREFIX="/usr"
 
@@ -25,9 +25,9 @@ mkdir -p \
   "$DEB_ROOT$INSTALL_PREFIX/share/icons/hicolor/scalable/apps" \
   "$DEB_ROOT$INSTALL_PREFIX/share/doc/$PKGNAME"
 
-cp target/release/statecraft "$DEB_ROOT$INSTALL_PREFIX/bin/statecraft"
-cp packaging/assets/statecraft.desktop "$DEB_ROOT$INSTALL_PREFIX/share/applications/"
-cp packaging/assets/icon.svg "$DEB_ROOT$INSTALL_PREFIX/share/icons/hicolor/scalable/apps/statecraft.svg"
+cp target/release/statscraft "$DEB_ROOT$INSTALL_PREFIX/bin/statscraft"
+cp packaging/assets/statscraft.desktop "$DEB_ROOT$INSTALL_PREFIX/share/applications/"
+cp packaging/assets/icon.svg "$DEB_ROOT$INSTALL_PREFIX/share/icons/hicolor/scalable/apps/statscraft.svg"
 cp README.md "$DEB_ROOT$INSTALL_PREFIX/share/doc/$PKGNAME/"
 
 # Replace placeholders
@@ -37,8 +37,8 @@ sed -i "s/@VERSION@/$VERSION/g" "$DEB_ROOT/DEBIAN/control"
 sed -i "s/@ARCH@/$ARCH/g" "$DEB_ROOT/DEBIAN/control"
 
 # strip binary
-strip "$DEB_ROOT$INSTALL_PREFIX/bin/statecraft" || true
+strip "$DEB_ROOT$INSTALL_PREFIX/bin/statscraft" || true
 
 # 3. Build package
-dpkg-deb --build "$DEB_ROOT" "statecraft_${VERSION}_${ARCH}.deb"
-echo "== produced: statecraft_${VERSION}_${ARCH}.deb =="
+dpkg-deb --build "$DEB_ROOT" "statscraft_${VERSION}_${ARCH}.deb"
+echo "== produced: statscraft_${VERSION}_${ARCH}.deb =="

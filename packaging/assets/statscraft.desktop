@@ -1,10 +1,10 @@
 [Desktop Entry]
 Type=Application
-Name=StateCraft
+Name=StatsCraft
 Comment=Lightweight SPSS-like statistical workbench
-Exec=statecraft %U
-Icon=statecraft
+Exec=statscraft %U
+Icon=statscraft
 Categories=Science;Math;DataScience;
 Keywords=statistics;spss;data;analysis;regression;
 Terminal=false
-StartupWMClass=statecraft
+StartupWMClass=statscraft
