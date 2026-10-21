@@ -1,0 +1,19 @@
+# Build outputs
+/target
+/installer/target
+*.exe
+*.zip
+*.7z
+
+# Portable dist keeps scripts/docs only; binaries are CI artifacts
+dist/statecraft.exe
+
+# IDE / OS junk
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Packaging scratch
+target/deb/
+packaging/linux/debroot/

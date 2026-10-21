@@ -1,0 +1,62 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build app (release)
+        run: cargo build --release
+
+      - name: Build silent installer (embeds app exe)
+        run: |
+          cd installer
+          cargo build --release
+
+      - name: Publish installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StateCraftSetup-windows
+          path: installer/target/release/StateCraftSetup.exe
+
+      - name: Publish portable exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: statecraft-portable-windows
+          path: target/release/statecraft.exe
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev \
+            libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev fontconfig
+
+      - name: Run tests
+        run: cargo test
+
+      - name: Build .deb package
+        run: bash packaging/linux/build_deb.sh
+
+      - name: Publish .deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: statecraft-deb
+          path: statecraft_*.deb
+
+      - name: Publish portable binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: statecraft-portable-linux
+          path: target/release/statecraft

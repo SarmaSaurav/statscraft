@@ -1,0 +1,16 @@
+[package]
+name = "statecraft-installer"
+version = "0.1.0"
+edition = "2021"
+description = "Silent per-user installer for StateCraft (single prebuilt exe, no extraction UI)"
+
+# Isolate from the parent project's package
+[workspace]
+
+[[bin]]
+name = "StateCraftSetup"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = "z"
+lto = false
