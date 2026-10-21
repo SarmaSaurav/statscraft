@@ -16,6 +16,40 @@ The UI is a modern take on the SPSS workbench, not a pixel copy of it:
 - **Chrome** — rounded cards, soft shadows, zebra-striped grid, pill-shaped
   document tabs, hairline borders, and a proper primary button for *Run Syntax*.
 
+## Procedure dialogs
+
+Like SPSS, a procedure does not run straight from the Analyze menu. It opens
+a dialog:
+
+- a **source variable list**, each row marked with a measure-level icon (a
+  ruler for numeric/scale, a pencil for string/nominal);
+- a **target list**, with an arrow to move a variable across and back;
+- a right-hand column of **sub-dialog buttons** — `Statistics…`, `Charts…`,
+  `Format…`, `Cells…`, `Post-hoc…`, `Options…`;
+- procedure-specific checkboxes;
+- **OK / Paste / Reset / Cancel / Help**, with OK disabled until the dialog
+  has what it needs (and a grouping variable for t-test, ANOVA, means and
+  crosstabs).
+
+The dialog computes nothing — it **builds SPSS syntax** and hands it to the
+same runner the Syntax Editor uses. **OK** runs it; **Paste** puts it in
+the Syntax Editor without running it, so you can edit the command by hand
+first. That is the whole dialog → syntax → output pipeline, and it is why
+the two editors and the menus behave identically.
+
+Ten procedures have dialogs: Frequencies, Descriptives, Crosstabs,
+Independent-Samples T Test, Paired-Samples T Test, One-Way ANOVA, Bivariate
+Correlations, Linear Regression, Means and Explore.
+
+To launch straight into one:
+
+```sh
+statscraft data.csv --dialog frequencies
+```
+
+`docs/SPSS_REFERENCE.md` records the observed behaviour of IBM SPSS
+Statistics 27 that the dialogs are modelled on.
+
 ## Install (Windows)
 Run `StatsCraftSetup.exe` — a single native installer (no archives, no prompts):
 installs to `%LOCALAPPDATA%\Programs\StatsCraft` (no admin) and creates
