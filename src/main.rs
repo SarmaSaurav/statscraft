@@ -19,6 +19,7 @@ fn main() -> eframe::Result<()> {
     let mut path: Option<String> = None;
     let mut procedure: Option<Procedure> = None;
     let mut script: Option<String> = None;
+    let mut dark = false;
     let mut i = 0;
     while i < args.len() {
         let a = args[i].to_ascii_lowercase();
@@ -34,6 +35,9 @@ fn main() -> eframe::Result<()> {
                 }
                 i += 1;
             }
+        } else if a == "--dark" {
+            // Start in the dark theme.
+            dark = true;
         } else if a == "--script" || a == "-s" {
             // A syntax file to run at start-up.
             if i + 1 < args.len() {
@@ -46,7 +50,7 @@ fn main() -> eframe::Result<()> {
         i += 1;
     }
 
-    app::run_with(path, procedure, script)
+    app::run_with(path, procedure, script, dark)
 }
 
 /// Parse a procedure name into the matching dialog.

@@ -588,7 +588,7 @@ pub fn render(
             ui.label(
                 egui::RichText::new("Source Variable(s)")
                     .font(theme::semibold(11.0))
-                    .color(theme::TEXT_MUTED),
+                    .color(theme::text_muted()),
             );
             ui.add_space(2.0);
             let mut list = UiList::new(
@@ -647,7 +647,7 @@ pub fn render(
                     ui.label(
                         egui::RichText::new("Grouping")
                             .font(theme::semibold(10.5))
-                            .color(theme::TEXT_MUTED),
+                            .color(theme::text_muted()),
                     );
                     ui.add_space(2.0);
                     // The grouping variable is chosen from the string
@@ -685,7 +685,7 @@ pub fn render(
             ui.label(
                 egui::RichText::new("Variable(s)")
                     .font(theme::semibold(11.0))
-                    .color(theme::TEXT_MUTED),
+                    .color(theme::text_muted()),
             );
             ui.add_space(2.0);
             // Show the variables that are in the target list.
@@ -817,10 +817,10 @@ pub fn render(
             egui::Button::new(
                 egui::RichText::new("OK")
                     .font(theme::semibold(12.0))
-                    .color(theme::TEXT_ON_ACCENT),
+                    .color(theme::text_on_accent()),
             )
             .min_size(egui::vec2(74.0, 28.0))
-            .fill(theme::ACCENT),
+            .fill(theme::accent()),
         );
         if ok.clicked() {
             if let Some(s) = d.build_syntax() {
@@ -880,7 +880,7 @@ pub fn render(
 fn ui_placeholder(ui: &mut egui::Ui) {
     ui.label(
         egui::RichText::new("No data loaded — open a data file first.")
-            .color(theme::TEXT_MUTED),
+            .color(theme::text_muted()),
     );
 }
 
@@ -890,7 +890,7 @@ fn sub_button(ui: &mut egui::Ui, d: &mut DialogState, which: SubDialog, label: &
     let btn = egui::Button::new(
         egui::RichText::new(label)
             .size(11.5)
-            .color(if active { theme::ACCENT } else { theme::TEXT }),
+            .color(if active { theme::accent() } else { theme::text() }),
     )
     .min_size(egui::vec2(0.0, 26.0));
     if ui.add(btn).clicked() {
@@ -926,7 +926,7 @@ fn render_sub_dialog(ui: &mut egui::Ui, d: &mut DialogState) {
                                 "Descriptive statistics need a numeric variable. Select one in the source list.",
                             )
                             .size(11.5)
-                            .color(theme::TEXT_FAINT),
+                            .color(theme::text_faint()),
                         );
                         return;
                     }
@@ -963,7 +963,7 @@ fn render_sub_dialog(ui: &mut egui::Ui, d: &mut DialogState) {
                     ui.label(
                         egui::RichText::new("Charts are drawn in the Output Viewer.")
                             .size(10.5)
-                            .color(theme::TEXT_FAINT),
+                            .color(theme::text_faint()),
                     );
                 }
                 SubDialog::FrequenciesFormat => {
@@ -1081,7 +1081,7 @@ fn render_sub_dialog(ui: &mut egui::Ui, d: &mut DialogState) {
                     ui.label(
                         egui::RichText::new("Principal components, rotated with varimax.")
                             .size(10.5)
-                            .color(theme::TEXT_FAINT),
+                            .color(theme::text_faint()),
                     );
                 }
                 SubDialog::RocOptions => {
@@ -1122,7 +1122,7 @@ fn render_sub_dialog(ui: &mut egui::Ui, d: &mut DialogState) {
                         }
                         if selected {
                             ui.label(
-                                egui::RichText::new(help).size(10.5).color(theme::TEXT_FAINT),
+                                egui::RichText::new(help).size(10.5).color(theme::text_faint()),
                             );
                         }
                     }
@@ -1167,11 +1167,11 @@ impl<'a> UiList<'a> {
                     let dim = self.numeric_only && *kind != ColumnKind::Numeric;
                     let is_sel = self.selected == Some(name.as_str());
                     let text_col = if dim {
-                        theme::TEXT_FAINT
+                        theme::text_faint()
                     } else if is_sel {
-                        theme::ACCENT
+                        theme::accent()
                     } else {
-                        theme::TEXT
+                        theme::text()
                     };
                     let galley = ui.painter().layout_no_wrap(
                         name.clone(),
@@ -1182,9 +1182,9 @@ impl<'a> UiList<'a> {
                         ui.allocate_exact_size(egui::vec2(ui.available_width(), 21.0), egui::Sense::click());
                     let p = ui.painter();
                     if is_sel {
-                        p.rect_filled(rect, theme::RADIUS_SM, theme::ACCENT_SOFT);
+                        p.rect_filled(rect, theme::RADIUS_SM, theme::accent_soft());
                     } else if resp.hovered() {
-                        p.rect_filled(rect, theme::RADIUS_SM, theme::SURFACE_ALT);
+                        p.rect_filled(rect, theme::RADIUS_SM, theme::surface_alt());
                     }
                     // The measure-level icon SPSS puts beside each variable:
                     // a ruler for numeric/scale, a pencil for string/nominal.

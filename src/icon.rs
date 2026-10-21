@@ -89,10 +89,10 @@ pub fn icon_button_enabled(
         p.rect_filled(
             rect.shrink(2.0),
             theme::RADIUS_SM,
-            theme::ACCENT.gamma_multiply(0.22),
+            theme::accent().gamma_multiply(0.22),
         );
     } else if hovered {
-        p.rect_filled(rect.shrink(2.0), theme::RADIUS_SM, theme::ACCENT_SOFT);
+        p.rect_filled(rect.shrink(2.0), theme::RADIUS_SM, theme::accent_soft());
     }
 
     // The icon's own colour, with a dimmed version for a disabled
@@ -133,7 +133,7 @@ pub fn separator(ui: &mut egui::Ui) {
     p.rect_filled(
         egui::Rect::from_center_size(rect.center(), egui::vec2(1.0, 20.0)),
         0.5,
-        theme::BORDER,
+        theme::border(),
     );
 }
 
@@ -165,7 +165,7 @@ pub fn menu_item(ui: &mut egui::Ui, icon: Icon, label: &str) -> egui::Response {
 
     let p = ui.painter();
     if resp.hovered() {
-        p.rect_filled(rect, theme::RADIUS_SM, theme::ACCENT_SOFT);
+        p.rect_filled(rect, theme::RADIUS_SM, theme::accent_soft());
     }
 
     let icon_rect = egui::Rect::from_center_size(
@@ -176,9 +176,9 @@ pub fn menu_item(ui: &mut egui::Ui, icon: Icon, label: &str) -> egui::Response {
     paint_icon(p, &ctx, icon, icon_rect, egui::Color32::WHITE);
 
     let text_color = if resp.hovered() {
-        theme::ACCENT
+        theme::accent()
     } else {
-        theme::TEXT
+        theme::text()
     };
     let galley = p.layout_no_wrap(label.to_owned(), theme::medium(12.5), text_color);
     p.galley(

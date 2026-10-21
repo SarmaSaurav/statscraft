@@ -2,7 +2,9 @@
 # icons can be looked at closely.
 param(
   [string]$Data = "samples\survey_demo.csv",
-  [string]$Out = "C:\Users\Saurav\AppData\Local\Temp\opencode\ui_icons.png"
+  [string]$Out = "C:\Users\Saurav\AppData\Local\Temp\opencode\ui_icons.png",
+  [string]$Extra = "",
+  [int]$CropHeight = 150
 )
 
 Add-Type -AssemblyName System.Drawing
@@ -36,7 +38,9 @@ public class WI {
 $dir = (Get-Location).Path
 Get-Process -Name statscraft -EA SilentlyContinue | Stop-Process -Force
 Start-Sleep -Seconds 1
-$p = Start-Process -FilePath ".\target\release\statscraft.exe" -ArgumentList @($Data) -WorkingDirectory $dir -PassThru
+$args = @($Data)
+if ($Extra -ne "") { $args += $Extra.Split(" ") }
+$p = Start-Process -FilePath ".\target\release\statscraft.exe" -ArgumentList $args -WorkingDirectory $dir -PassThru
 Start-Sleep -Seconds 7
 
 $handle = [IntPtr]::Zero
@@ -61,8 +65,9 @@ $g.CopyFromScreen($r.L, $r.T, 0, 0, (New-Object System.Drawing.Size $w, $h))
 $g.Dispose()
 
 # The toolbar is the strip under the menu bar.
-$crop = New-Object System.Drawing.Rectangle 0, 30, $w, 150
+$ch = [Math]::Min($CropHeight, $h - 30)
+$crop = New-Object System.Drawing.Rectangle 0, 30, $w, $ch
 $part = $bmp.Clone($crop, $bmp.PixelFormat)
 $part.Save($Out, [System.Drawing.Imaging.ImageFormat]::Png)
 $part.Dispose(); $bmp.Dispose()
-Write-Output "SAVED $Out ($w x 150)"
+Write-Output "SAVED $Out ($w x $ch)"

@@ -11,40 +11,156 @@ use eframe::egui;
 // ---------------------------------------------------------------------------
 
 /// Brand accent — the blue used for focus, selection and primary actions.
-pub const ACCENT: egui::Color32 = egui::Color32::from_rgb(0x2F, 0x6F, 0xED);
-/// Lighter accent tint for hover states.
-pub const ACCENT_SOFT: egui::Color32 = egui::Color32::from_rgb(0xE8, 0xEF, 0xFD);
-/// Secondary accent used for positive/ready states.
-pub const TEAL: egui::Color32 = egui::Color32::from_rgb(0x0F, 0xA8, 0x7E);
-/// Warm accent used for warnings / unsigned state.
-pub const AMBER: egui::Color32 = egui::Color32::from_rgb(0xE0, 0x8A, 0x0B);
+// ---------------------------------------------------------------------------
+// The palette
+//
+// The colours live in one struct rather than in constants, because there
+// are two of them: the light workbench theme and the dark one, which
+// follows the Dracula palette. A theme is chosen at start-up and can be
+// switched from the View menu.
+//
+// The accessors below read the current palette, so a widget writes
+// `theme::surface()` and gets the colour of whichever theme is active.
+// ---------------------------------------------------------------------------
 
-/// Window / panel background.
-pub const SURFACE: egui::Color32 = egui::Color32::from_rgb(0xFA, 0xFB, 0xFD);
-/// Card and toolbar surface — a touch cooler than `SURFACE`.
-pub const SURFACE_ALT: egui::Color32 = egui::Color32::from_rgb(0xF4, 0xF6, 0xFA);
-/// Data-grid cell background.
-pub const CELL: egui::Color32 = egui::Color32::from_rgb(0xFF, 0xFF, 0xFF);
-/// Data-grid zebra stripe.
-pub const CELL_ALT: egui::Color32 = egui::Color32::from_rgb(0xF7, 0xF9, 0xFC);
-/// Column-header band.
-pub const HEADER: egui::Color32 = egui::Color32::from_rgb(0xEE, 0xF2, 0xF8);
-/// Selected cell / row.
-pub const SELECTED: egui::Color32 = egui::Color32::from_rgb(0xE4, 0xEE, 0xFF);
+/// The colours of one theme.
+#[derive(Clone, Copy)]
+pub struct Palette {
+    /// The accent: the primary action colour.
+    pub accent: egui::Color32,
+    /// A darker accent tint, for the hover states.
+    pub accent_soft: egui::Color32,
+    /// The secondary accent, for the ready state.
+    pub teal: egui::Color32,
+    /// The warm accent, for the warnings.
+    pub amber: egui::Color32,
+    /// The window background.
+    pub surface: egui::Color32,
+    /// The card and toolbar surface.
+    pub surface_alt: egui::Color32,
+    /// The data-grid cell background.
+    pub cell: egui::Color32,
+    /// The data-grid zebra stripe.
+    pub cell_alt: egui::Color32,
+    /// The column-header band.
+    pub header: egui::Color32,
+    /// The selected cell or row.
+    pub selected: egui::Color32,
+    /// The primary text.
+    pub text: egui::Color32,
+    /// The secondary text.
+    pub text_muted: egui::Color32,
+    /// The tertiary text.
+    pub text_faint: egui::Color32,
+    /// The text on an accent-filled surface.
+    pub text_on_accent: egui::Color32,
+    /// The hairline borders.
+    pub border: egui::Color32,
+    /// The stronger border, for the focused elements.
+    pub border_strong: egui::Color32,
+}
 
-/// Primary text.
-pub const TEXT: egui::Color32 = egui::Color32::from_rgb(0x1A, 0x1F, 0x2B);
-/// Secondary text (labels, captions).
-pub const TEXT_MUTED: egui::Color32 = egui::Color32::from_rgb(0x5B, 0x66, 0x78);
-/// Tertiary text (placeholders, disabled).
-pub const TEXT_FAINT: egui::Color32 = egui::Color32::from_rgb(0x93, 0x9E, 0xB0);
-/// Text on an accent-filled surface.
-pub const TEXT_ON_ACCENT: egui::Color32 = egui::Color32::WHITE;
+/// The light workbench theme.
+const LIGHT: Palette = Palette {
+    accent: egui::Color32::from_rgb(0x2F, 0x6F, 0xED),
+    accent_soft: egui::Color32::from_rgb(0xE8, 0xEF, 0xFD),
+    teal: egui::Color32::from_rgb(0x0F, 0xA8, 0x7E),
+    amber: egui::Color32::from_rgb(0xE0, 0x8A, 0x0B),
+    surface: egui::Color32::from_rgb(0xFA, 0xFB, 0xFD),
+    surface_alt: egui::Color32::from_rgb(0xF4, 0xF6, 0xFA),
+    cell: egui::Color32::from_rgb(0xFF, 0xFF, 0xFF),
+    cell_alt: egui::Color32::from_rgb(0xF7, 0xF9, 0xFC),
+    header: egui::Color32::from_rgb(0xEE, 0xF2, 0xF8),
+    selected: egui::Color32::from_rgb(0xE4, 0xEE, 0xFF),
+    text: egui::Color32::from_rgb(0x1A, 0x1F, 0x2B),
+    text_muted: egui::Color32::from_rgb(0x5B, 0x66, 0x78),
+    text_faint: egui::Color32::from_rgb(0x93, 0x9E, 0xB0),
+    text_on_accent: egui::Color32::WHITE,
+    border: egui::Color32::from_rgb(0xDD, 0xE3, 0xED),
+    border_strong: egui::Color32::from_rgb(0xC2, 0xCC, 0xDC),
+};
 
-/// Hairline borders.
-pub const BORDER: egui::Color32 = egui::Color32::from_rgb(0xDD, 0xE3, 0xED);
-/// Slightly stronger border for focused/selected elements.
-pub const BORDER_STRONG: egui::Color32 = egui::Color32::from_rgb(0xC2, 0xCC, 0xDC);
+/// The dark theme, after the Dracula palette.
+///
+/// Dracula's foreground is very close to white, which is too harsh in a
+/// data grid that is read for hours, so the text is a shade off it and
+/// the surfaces are the background and the panel colour.
+const DARK: Palette = Palette {
+    accent: egui::Color32::from_rgb(0xBD, 0x93, 0xF9),
+    accent_soft: egui::Color32::from_rgb(0x39, 0x33, 0x50),
+    teal: egui::Color32::from_rgb(0x50, 0xFA, 0x7B),
+    amber: egui::Color32::from_rgb(0xFF, 0xB8, 0x6C),
+    surface: egui::Color32::from_rgb(0x21, 0x23, 0x2D),
+    surface_alt: egui::Color32::from_rgb(0x2A, 0x2C, 0x38),
+    cell: egui::Color32::from_rgb(0x25, 0x27, 0x33),
+    cell_alt: egui::Color32::from_rgb(0x2A, 0x2C, 0x38),
+    header: egui::Color32::from_rgb(0x34, 0x37, 0x45),
+    selected: egui::Color32::from_rgb(0x3D, 0x36, 0x5C),
+    text: egui::Color32::from_rgb(0xE6, 0xE6, 0xE0),
+    text_muted: egui::Color32::from_rgb(0xA0, 0xA6, 0xB8),
+    text_faint: egui::Color32::from_rgb(0x62, 0x72, 0xA4),
+    text_on_accent: egui::Color32::from_rgb(0x28, 0x2A, 0x36),
+    border: egui::Color32::from_rgb(0x3A, 0x3D, 0x4B),
+    border_strong: egui::Color32::from_rgb(0x50, 0x54, 0x66),
+};
+
+/// The palette in use: 0 for the light theme, 1 for the dark one.
+static CURRENT: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Whether the dark theme is active.
+pub fn is_dark() -> bool {
+    CURRENT.load(std::sync::atomic::Ordering::Relaxed) == 1
+}
+
+/// Switch between the light and the dark theme.
+///
+/// The change is picked up by the widgets on the next frame; the caller
+/// re-applies the style.
+pub fn set_dark(dark: bool) {
+    CURRENT.store(
+        if dark { 1 } else { 0 },
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+/// The palette in use.
+pub fn palette() -> Palette {
+    if is_dark() {
+        DARK
+    } else {
+        LIGHT
+    }
+}
+
+macro_rules! colour_accessors {
+    ($($name:ident),* $(,)?) => {
+        $(
+            /// The colour of the current theme.
+            pub fn $name() -> egui::Color32 {
+                palette().$name
+            }
+        )*
+    };
+}
+
+colour_accessors!(
+    accent,
+    accent_soft,
+    teal,
+    amber,
+    surface,
+    surface_alt,
+    cell,
+    cell_alt,
+    header,
+    selected,
+    text,
+    text_muted,
+    text_faint,
+    text_on_accent,
+    border,
+    border_strong,
+);
 
 // ---------------------------------------------------------------------------
 // Metrics
@@ -173,9 +289,11 @@ pub fn semibold(size: f32) -> egui::FontId {
 
 /// Apply the StatsCraft look to an egui context.
 ///
-/// `dark` selects between the light workbench theme and a dark variant used
-/// by the Output Viewer.
+/// The `dark` flag selects the theme. The style is built from the
+/// palette, so the widgets and the style always agree.
 pub fn apply_style(ctx: &egui::Context, dark: bool) {
+    set_dark(dark);
+    let p = palette();
     let mut style = (*ctx.style()).clone();
 
     style.spacing.item_spacing = egui::vec2(8.0, 5.0);
@@ -184,147 +302,76 @@ pub fn apply_style(ctx: &egui::Context, dark: bool) {
     style.spacing.window_margin = egui::Margin::same(12.0);
     style.spacing.interact_size.y = 22.0;
 
-    style.text_styles.insert(
-        egui::TextStyle::Small,
-        body(11.0),
-    );
-    style.text_styles.insert(
-        egui::TextStyle::Body,
-        body(13.0),
-    );
-    style.text_styles.insert(
-        egui::TextStyle::Monospace,
-        font(FONT_MONO, 12.5),
-    );
-    style.text_styles.insert(
-        egui::TextStyle::Button,
-        medium(13.0),
-    );
-    style.text_styles.insert(
-        egui::TextStyle::Heading,
-        semibold(19.0),
-    );
+    style.text_styles.insert(egui::TextStyle::Small, body(11.0));
+    style.text_styles.insert(egui::TextStyle::Body, body(13.0));
+    style.text_styles.insert(egui::TextStyle::Monospace, font(FONT_MONO, 12.5));
+    style.text_styles.insert(egui::TextStyle::Button, medium(13.0));
+    style.text_styles.insert(egui::TextStyle::Heading, semibold(19.0));
 
-    if dark {
-        apply_dark_visuals(&mut style);
+    let mut v = if dark {
+        egui::Visuals::dark()
     } else {
-        apply_light_visuals(&mut style);
-    }
-
-    ctx.set_style(style);
-}
-
-fn apply_light_visuals(style: &mut egui::Style) {
-    let mut v = egui::Visuals::light();
-    v.panel_fill = SURFACE;
-    v.window_fill = SURFACE;
-    v.extreme_bg_color = SURFACE_ALT;
-    v.faint_bg_color = SURFACE_ALT;
-    v.code_bg_color = SURFACE_ALT;
+        egui::Visuals::light()
+    };
+    v.panel_fill = p.surface;
+    v.window_fill = p.surface;
+    v.extreme_bg_color = p.surface_alt;
+    v.faint_bg_color = p.surface_alt;
+    v.code_bg_color = p.surface_alt;
     v.override_text_color = None;
 
-    v.selection.bg_fill = ACCENT_SOFT;
-    v.selection.stroke = egui::Stroke::new(1.0, ACCENT);
+    v.selection.bg_fill = p.selected;
+    v.selection.stroke = egui::Stroke::new(1.0, p.accent);
 
-    v.hyperlink_color = ACCENT;
-    v.warn_fg_color = AMBER;
-    v.error_fg_color = egui::Color32::from_rgb(0xD9, 0x3A, 0x3A);
+    v.hyperlink_color = p.accent;
+    v.warn_fg_color = p.amber;
+    v.error_fg_color = if dark {
+        egui::Color32::from_rgb(0xFF, 0x55, 0x55)
+    } else {
+        egui::Color32::from_rgb(0xD9, 0x3A, 0x3A)
+    };
 
     v.window_rounding = egui::Rounding::same(RADIUS);
     v.menu_rounding = egui::Rounding::same(RADIUS);
-    v.window_stroke = egui::Stroke::new(1.0, BORDER);
+    v.window_stroke = egui::Stroke::new(1.0, p.border);
     v.window_shadow = egui::Shadow {
         offset: egui::vec2(0.0, 6.0),
         blur: 18.0,
         spread: 0.0,
-        color: egui::Color32::from_black_alpha(28),
+        color: egui::Color32::from_black_alpha(if dark { 90 } else { 28 }),
     };
     v.popup_shadow = v.window_shadow;
 
-    v.widgets.noninteractive.bg_fill = SURFACE_ALT;
-    v.widgets.noninteractive.weak_bg_fill = SURFACE;
-    v.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, BORDER);
-    v.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, TEXT);
+    v.widgets.noninteractive.bg_fill = p.surface_alt;
+    v.widgets.noninteractive.weak_bg_fill = p.surface;
+    v.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, p.border);
+    v.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, p.text);
     v.widgets.noninteractive.rounding = egui::Rounding::same(RADIUS_SM);
 
-    v.widgets.inactive.bg_fill = SURFACE;
-    v.widgets.inactive.weak_bg_fill = SURFACE;
-    v.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, BORDER);
-    v.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, TEXT);
+    v.widgets.inactive.bg_fill = p.surface;
+    v.widgets.inactive.weak_bg_fill = p.surface;
+    v.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, p.border);
+    v.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, p.text);
     v.widgets.inactive.rounding = egui::Rounding::same(RADIUS_SM);
 
-    v.widgets.hovered.bg_fill = ACCENT_SOFT;
-    v.widgets.hovered.weak_bg_fill = ACCENT_SOFT;
-    v.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, ACCENT);
-    v.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, ACCENT);
+    v.widgets.hovered.bg_fill = p.accent_soft;
+    v.widgets.hovered.weak_bg_fill = p.accent_soft;
+    v.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, p.accent);
+    v.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, p.accent);
     v.widgets.hovered.rounding = egui::Rounding::same(RADIUS_SM);
 
-    v.widgets.active.bg_fill = ACCENT;
-    v.widgets.active.weak_bg_fill = ACCENT;
-    v.widgets.active.bg_stroke = egui::Stroke::new(1.0, ACCENT);
-    v.widgets.active.fg_stroke = egui::Stroke::new(1.0, TEXT_ON_ACCENT);
+    v.widgets.active.bg_fill = p.accent;
+    v.widgets.active.weak_bg_fill = p.accent;
+    v.widgets.active.bg_stroke = egui::Stroke::new(1.0, p.accent);
+    v.widgets.active.fg_stroke = egui::Stroke::new(1.0, p.text_on_accent);
     v.widgets.active.rounding = egui::Rounding::same(RADIUS_SM);
 
-    v.widgets.open.bg_fill = ACCENT_SOFT;
-    v.widgets.open.weak_bg_fill = ACCENT_SOFT;
-    v.widgets.open.bg_stroke = egui::Stroke::new(1.0, ACCENT);
+    v.widgets.open.bg_fill = p.accent_soft;
+    v.widgets.open.weak_bg_fill = p.accent_soft;
+    v.widgets.open.bg_stroke = egui::Stroke::new(1.0, p.accent);
 
     style.visuals = v;
-}
-
-fn apply_dark_visuals(style: &mut egui::Style) {
-    let mut v = egui::Visuals::dark();
-    v.panel_fill = egui::Color32::from_rgb(0x1B, 0x1F, 0x27);
-    v.window_fill = egui::Color32::from_rgb(0x1B, 0x1F, 0x27);
-    v.extreme_bg_color = egui::Color32::from_rgb(0x14, 0x18, 0x1F);
-    v.faint_bg_color = egui::Color32::from_rgb(0x22, 0x27, 0x31);
-    v.override_text_color = None;
-
-    v.selection.bg_fill = egui::Color32::from_rgb(0x24, 0x3A, 0x66);
-    v.selection.stroke = egui::Stroke::new(1.0, ACCENT);
-
-    v.hyperlink_color = egui::Color32::from_rgb(0x7A, 0xA8, 0xFF);
-    v.window_rounding = egui::Rounding::same(RADIUS);
-    v.menu_rounding = egui::Rounding::same(RADIUS);
-    v.window_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(0x33, 0x3B, 0x4A));
-    v.window_shadow = egui::Shadow {
-        offset: egui::vec2(0.0, 8.0),
-        blur: 24.0,
-        spread: 0.0,
-        color: egui::Color32::from_black_alpha(90),
-    };
-    v.popup_shadow = v.window_shadow;
-
-    let fg = egui::Color32::from_rgb(0xE6, 0xEA, 0xF2);
-    v.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(0x22, 0x27, 0x31);
-    v.widgets.noninteractive.weak_bg_fill = egui::Color32::from_rgb(0x1B, 0x1F, 0x27);
-    v.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(0x33, 0x3B, 0x4A));
-    v.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, fg);
-    v.widgets.noninteractive.rounding = egui::Rounding::same(RADIUS_SM);
-
-    v.widgets.inactive.bg_fill = egui::Color32::from_rgb(0x26, 0x2C, 0x37);
-    v.widgets.inactive.weak_bg_fill = egui::Color32::from_rgb(0x1B, 0x1F, 0x27);
-    v.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(0x3A, 0x43, 0x54));
-    v.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, fg);
-    v.widgets.inactive.rounding = egui::Rounding::same(RADIUS_SM);
-
-    v.widgets.hovered.bg_fill = egui::Color32::from_rgb(0x2B, 0x36, 0x4C);
-    v.widgets.hovered.weak_bg_fill = egui::Color32::from_rgb(0x24, 0x2C, 0x3C);
-    v.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, ACCENT);
-    v.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, fg);
-    v.widgets.hovered.rounding = egui::Rounding::same(RADIUS_SM);
-
-    v.widgets.active.bg_fill = ACCENT;
-    v.widgets.active.weak_bg_fill = ACCENT;
-    v.widgets.active.bg_stroke = egui::Stroke::new(1.0, ACCENT);
-    v.widgets.active.fg_stroke = egui::Stroke::new(1.0, egui::Color32::WHITE);
-    v.widgets.active.rounding = egui::Rounding::same(RADIUS_SM);
-
-    v.widgets.open.bg_fill = egui::Color32::from_rgb(0x24, 0x3A, 0x66);
-    v.widgets.open.weak_bg_fill = egui::Color32::from_rgb(0x24, 0x3A, 0x66);
-    v.widgets.open.bg_stroke = egui::Stroke::new(1.0, ACCENT);
-
-    style.visuals = v;
+    ctx.set_style(style);
 }
 
 // ---------------------------------------------------------------------------

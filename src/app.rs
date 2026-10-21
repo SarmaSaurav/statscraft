@@ -34,6 +34,11 @@ pub struct StatsCraftApp {
     pub show_syntax_window: bool,
     /// Phase 5: the open procedure dialog, if any.
     pub dialog: Option<crate::dialog::DialogState>,
+    /// Whether the dark theme is active.
+    pub dark: bool,
+    /// The egui context, so the theme can be re-applied when it
+    /// changes.
+    pub ctx: egui::Context,
 }
 
 impl Default for StatsCraftApp {
@@ -56,6 +61,10 @@ impl Default for StatsCraftApp {
             show_output_window: false,
             show_syntax_window: false,
             dialog: None,
+            dark: false,
+            // A placeholder context, replaced when the app is created.
+            // The theme is applied to the real one there.
+            ctx: egui::Context::default(),
         }
     }
 }
@@ -200,6 +209,24 @@ impl StatsCraftApp {
         } else {
             self.status = "No data loaded.".to_string();
         }
+    }
+
+    /// Switch between the light and the dark theme.
+    ///
+    /// The palette is global, so the change reaches every window, and
+    /// the style is re-applied to the context so the egui widgets
+    /// follow.
+    pub fn set_dark(&mut self, dark: bool) {
+        // The flag is what matters: the style is re-applied on the next
+        // frame, and every viewport follows it.
+        self.dark = dark;
+        let ctx = self.ctx.clone();
+        crate::theme::apply_style(&ctx, dark);
+        self.status = if dark {
+            "Dark theme.".to_string()
+        } else {
+            "Light theme.".to_string()
+        };
     }
 
     /// Save the data as an SPSS .sav file.
@@ -445,14 +472,14 @@ impl eframe::App for StatsCraftApp {
                     egui::CentralPanel::default()
                         .frame(
                             egui::Frame::none()
-                                .fill(crate::theme::SURFACE)
+                                .fill(crate::theme::surface())
                                 .inner_margin(egui::Margin::same(12.0)),
                         )
                         .show(vctx, |ui| {
                             egui::TopBottomPanel::top("ov_title")
                                 .frame(
                                     egui::Frame::none()
-                                        .fill(crate::theme::SURFACE_ALT)
+                                        .fill(crate::theme::surface_alt())
                                         .inner_margin(egui::Margin::symmetric(12.0, 8.0)),
                                 )
                                 .show_inside(ui, |ui| {
@@ -472,24 +499,24 @@ impl eframe::App for StatsCraftApp {
                                                 egui::Align2::LEFT_CENTER,
                                                 "",
                                                 crate::theme::body(12.0),
-                                                crate::theme::TEXT,
+                                                crate::theme::text(),
                                             )
                                             .min,
                                             egui::vec2(48.0, 48.0),
                                         ),
-                                        crate::theme::TEXT_FAINT,
+                                        crate::theme::text_faint(),
                                     );
                                     ui.add_space(10.0);
                                     ui.label(
                                         egui::RichText::new("No output yet")
                                             .font(crate::theme::semibold(15.0))
-                                            .color(crate::theme::TEXT_MUTED),
+                                            .color(crate::theme::text_muted()),
                                     );
                                     ui.label(
                                         egui::RichText::new(
                                             "Run an analysis from the Analyze menu, or type SPSS syntax in Syntax1.",
                                         )
-                                        .color(crate::theme::TEXT_FAINT)
+                                        .color(crate::theme::text_faint())
                                         .size(12.0),
                                     );
                                 });
@@ -505,7 +532,7 @@ impl eframe::App for StatsCraftApp {
                                         egui::Label::new(
                                             egui::RichText::new("Outline")
                                                 .font(crate::theme::semibold(11.0))
-                                                .color(crate::theme::TEXT_FAINT),
+                                                .color(crate::theme::text_faint()),
                                         ),
                                     );
                                     ui.add_space(4.0);
@@ -515,9 +542,9 @@ impl eframe::App for StatsCraftApp {
                                             for (i, t) in self.outputs.iter().enumerate() {
                                                 let sel = self.selected_output == i;
                                                 let color = if sel {
-                                                    crate::theme::ACCENT
+                                                    crate::theme::accent()
                                                 } else {
-                                                    crate::theme::TEXT_MUTED
+                                                    crate::theme::text_muted()
                                                 };
                                                 let galley = ui.painter().layout_no_wrap(
                                                     t.title.clone(),
@@ -533,13 +560,13 @@ impl eframe::App for StatsCraftApp {
                                                     p.rect_filled(
                                                         rect,
                                                         crate::theme::RADIUS_SM,
-                                                        crate::theme::ACCENT_SOFT,
+                                                        crate::theme::accent_soft(),
                                                     );
                                                 } else if resp.hovered() {
                                                     p.rect_filled(
                                                         rect,
                                                         crate::theme::RADIUS_SM,
-                                                        crate::theme::SURFACE_ALT,
+                                                        crate::theme::surface_alt(),
                                                     );
                                                 }
                                                 // a small tree bullet
@@ -619,14 +646,14 @@ impl eframe::App for StatsCraftApp {
                     egui::CentralPanel::default()
                         .frame(
                             egui::Frame::none()
-                                .fill(crate::theme::SURFACE)
+                                .fill(crate::theme::surface())
                                 .inner_margin(egui::Margin::same(12.0)),
                         )
                         .show(vctx, |ui| {
                             egui::TopBottomPanel::top("sx_title")
                                 .frame(
                                     egui::Frame::none()
-                                        .fill(crate::theme::SURFACE_ALT)
+                                        .fill(crate::theme::surface_alt())
                                         .inner_margin(egui::Margin::symmetric(12.0, 8.0)),
                                 )
                                 .show_inside(ui, |ui| {
@@ -646,9 +673,9 @@ impl eframe::App for StatsCraftApp {
                                 egui::Button::new(
                                     egui::RichText::new("Run Syntax")
                                         .font(crate::theme::medium(13.0))
-                                        .color(crate::theme::TEXT_ON_ACCENT),
+                                        .color(crate::theme::text_on_accent()),
                                 )
-                                .fill(crate::theme::ACCENT)
+                                .fill(crate::theme::accent())
                                 .rounding(crate::theme::RADIUS_SM)
                                 .min_size(egui::vec2(110.0, 30.0)),
                             );
@@ -666,8 +693,10 @@ impl eframe::App for StatsCraftApp {
         }
 
         // The theme is installed once in `run`; re-assert it here so a
-        // viewport that inherits the default egui look still gets StatsCraft.
-        crate::theme::apply_style(ctx, false);
+        // viewport that inherits the default egui look still gets
+        // StatsCraft. The flag is the app's own, so a viewport that is
+        // opened later follows the theme the user chose.
+        crate::theme::apply_style(ctx, self.dark);
         // SPSS titles the window "<dataset> [DataSet<n>] - <product>".
         let title = format!("{} — StatsCraft Statistics", self.dataset_label());
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
@@ -675,7 +704,7 @@ impl eframe::App for StatsCraftApp {
         egui::TopBottomPanel::top("menu")
             .frame(
                 egui::Frame::none()
-                    .fill(crate::theme::SURFACE)
+                    .fill(crate::theme::surface())
                     .inner_margin(egui::Margin {
                         left: 8.0,
                         right: 8.0,
@@ -796,6 +825,14 @@ impl eframe::App for StatsCraftApp {
                         if ui.checkbox(&mut self.show_status, "Status Bar").clicked() {
                             ui.close_menu();
                         }
+                        ui.separator();
+                        // The theme: the light workbench one and the
+                        // dark one, which follows the Dracula palette.
+                        let mut dark = crate::theme::is_dark();
+                        if ui.checkbox(&mut dark, "Dark Theme").clicked() {
+                            ui.close_menu();
+                            self.set_dark(dark);
+                        }
                     });
                     // ---------------- Data ----------------
                     ui.menu_button("Data", |ui| {
@@ -903,7 +940,7 @@ impl eframe::App for StatsCraftApp {
         egui::TopBottomPanel::top("toolbar")
             .frame(
                 egui::Frame::none()
-                    .fill(crate::theme::SURFACE)
+                    .fill(crate::theme::surface())
                     .inner_margin(egui::Margin {
                         left: 8.0,
                         right: 8.0,
@@ -1035,7 +1072,7 @@ impl eframe::App for StatsCraftApp {
                             .unwrap_or(0);
                         ui.label(
                             egui::RichText::new(format!("Visible: {} of {} Variables", visible, total))
-                                .color(crate::theme::TEXT_MUTED)
+                                .color(crate::theme::text_muted())
                                 .size(11.5),
                         );
                         ui.add_space(10.0);
@@ -1055,7 +1092,7 @@ impl eframe::App for StatsCraftApp {
         egui::TopBottomPanel::bottom("tabs")
             .frame(
                 egui::Frame::none()
-                    .fill(crate::theme::SURFACE_ALT)
+                    .fill(crate::theme::surface_alt())
                     .inner_margin(egui::Margin {
                         left: 8.0,
                         right: 12.0,
@@ -1082,9 +1119,9 @@ impl eframe::App for StatsCraftApp {
                         // The active tab is a solid blue pill; the other is
                         // a quiet grey one that fills with blue on hover.
                         let color = if sel {
-                            crate::theme::TEXT_ON_ACCENT
+                            crate::theme::text_on_accent()
                         } else {
-                            crate::theme::TEXT_MUTED
+                            crate::theme::text_muted()
                         };
 
                         let galley = ui
@@ -1097,12 +1134,12 @@ impl eframe::App for StatsCraftApp {
                         let p = ui.painter();
                         if sel {
                             // A fully rounded blue pill.
-                            p.rect_filled(rect, rect.height() / 2.0, crate::theme::ACCENT);
+                            p.rect_filled(rect, rect.height() / 2.0, crate::theme::accent());
                         } else if resp.hovered() {
                             p.rect_filled(
                                 rect,
                                 rect.height() / 2.0,
-                                crate::theme::ACCENT.gamma_multiply(0.14),
+                                crate::theme::accent().gamma_multiply(0.14),
                             );
                         }
 
@@ -1137,7 +1174,7 @@ impl eframe::App for StatsCraftApp {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
                             egui::RichText::new("Unicode: ON")
-                                .color(crate::theme::TEXT_FAINT)
+                                .color(crate::theme::text_faint())
                                 .size(11.0),
                         );
                         ui.add_space(10.0);
@@ -1147,12 +1184,12 @@ impl eframe::App for StatsCraftApp {
                         let (label, col) = if ready {
                             (
                                 "StatsCraft Statistics Processor is ready",
-                                crate::theme::TEAL,
+                                crate::theme::teal(),
                             )
                         } else {
                             (
                                 "StatsCraft Statistics Processor has an error",
-                                crate::theme::AMBER,
+                                crate::theme::amber(),
                             )
                         };
                         ui.label(
@@ -1165,14 +1202,14 @@ impl eframe::App for StatsCraftApp {
                         if let Some(t) = &self.table {
                             ui.label(
                                 egui::RichText::new(format!("{} cells", t.n_rows * t.columns.len()))
-                                    .color(crate::theme::TEXT_FAINT)
+                                    .color(crate::theme::text_faint())
                                     .size(11.0),
                             );
                             ui.add_space(12.0);
                         }
                         ui.label(
                             egui::RichText::new(&self.status)
-                                .color(crate::theme::TEXT_MUTED)
+                                .color(crate::theme::text_muted())
                                 .size(11.5),
                         );
                         });
@@ -1273,9 +1310,9 @@ impl eframe::App for StatsCraftApp {
                             egui::Button::new(
                                 egui::RichText::new("Run Syntax")
                                     .font(crate::theme::medium(13.0))
-                                    .color(crate::theme::TEXT_ON_ACCENT),
+                                    .color(crate::theme::text_on_accent()),
                             )
-                            .fill(crate::theme::ACCENT)
+                            .fill(crate::theme::accent())
                             .rounding(crate::theme::RADIUS_SM)
                             .min_size(egui::vec2(110.0, 30.0)),
                         )
@@ -1321,17 +1358,17 @@ fn spss_grid(
     let content_w =
         theme::ROWNUM_W + theme::GAP + (total_cols as f32) * (theme::COL_W + theme::GAP);
 
-    let header_fill = theme::HEADER;
-    let header_sel_fill = theme::ACCENT_SOFT;
-    let cell_fill = theme::CELL;
-    let cell_alt_fill = theme::CELL_ALT;
-    let sel_fill = theme::SELECTED;
-    let sel_stroke = egui::Stroke::new(1.5, theme::ACCENT);
-    let header_text = theme::TEXT;
-    let placeholder_text = theme::TEXT_FAINT;
-    let value_text = theme::TEXT;
-    let rownum_text = theme::TEXT_FAINT;
-    let rownum_sel_text = theme::ACCENT;
+    let header_fill = theme::header();
+    let header_sel_fill = theme::accent_soft();
+    let cell_fill = theme::cell();
+    let cell_alt_fill = theme::cell_alt();
+    let sel_fill = theme::selected();
+    let sel_stroke = egui::Stroke::new(1.5, theme::accent());
+    let header_text = theme::text();
+    let placeholder_text = theme::text_faint();
+    let value_text = theme::text();
+    let rownum_text = theme::text_faint();
+    let rownum_sel_text = theme::accent();
 
     let font = theme::body(12.5);
     let header_font = theme::medium(12.5);
@@ -1399,7 +1436,7 @@ fn spss_grid(
                             egui::pos2(rect.left(), rect.bottom()),
                             egui::pos2(rect.right(), rect.bottom()),
                         ],
-                        egui::Stroke::new(1.0, theme::BORDER),
+                        egui::Stroke::new(1.0, theme::border()),
                     );
                 } else {
                     // ---- data row ----
@@ -1444,7 +1481,7 @@ fn spss_grid(
                                     p.text(egui::pos2(px, mid_y), anchor, txt, font.clone(), value_text);
                                 }
                             } else {
-                                p.rect_filled(r, theme::RADIUS_SM, theme::SURFACE_ALT);
+                                p.rect_filled(r, theme::RADIUS_SM, theme::surface_alt());
                             }
                         }
                     } else {
@@ -1489,7 +1526,7 @@ fn spss_grid(
                     if row > 0 && edi == di_of_row(row) {
                         if let Some(j) = vis_cols.iter().position(|&c| c == eci) {
                             let r = cell_rect(j, 0.5);
-                            p.rect_filled(r, theme::RADIUS_SM, theme::CELL);
+                            p.rect_filled(r, theme::RADIUS_SM, theme::cell());
                             p.rect_stroke(r, theme::RADIUS_SM, sel_stroke);
                             let mut child = ui.child_ui(
                                 r.shrink(1.0),
@@ -1602,7 +1639,7 @@ fn render_output_chart(ui: &mut egui::Ui, chart: &crate::output::Chart) {
     ui.label(
         egui::RichText::new(&chart.title)
             .font(theme::semibold(13.0))
-            .color(theme::TEXT),
+            .color(theme::text()),
     );
     ui.add_space(4.0);
 
@@ -1612,8 +1649,8 @@ fn render_output_chart(ui: &mut egui::Ui, chart: &crate::output::Chart) {
     let painter = ui.painter();
 
     // A light card behind the plot.
-    painter.rect_filled(rect, theme::RADIUS, theme::SURFACE);
-    painter.rect_stroke(rect, theme::RADIUS, egui::Stroke::new(1.0, theme::BORDER));
+    painter.rect_filled(rect, theme::RADIUS, theme::surface());
+    painter.rect_stroke(rect, theme::RADIUS, egui::Stroke::new(1.0, theme::border()));
 
     // The plot area inside the card, leaving room for the axis labels.
     let left = rect.left() + 52.0;
@@ -1661,7 +1698,7 @@ fn render_output_chart(ui: &mut egui::Ui, chart: &crate::output::Chart) {
     };
 
     // ---- The grid and the y axis ----
-    let grid = egui::Stroke::new(0.5, theme::BORDER);
+    let grid = egui::Stroke::new(0.5, theme::border());
     let y_ticks = 5;
     for i in 0..=y_ticks {
         let t = i as f64 / y_ticks as f64;
@@ -1685,7 +1722,7 @@ fn render_output_chart(ui: &mut egui::Ui, chart: &crate::output::Chart) {
             egui::Align2::RIGHT_CENTER,
             format!("{:.*}", decimals, value),
             theme::body(10.5),
-            theme::TEXT_FAINT,
+            theme::text_faint(),
         );
     }
     // The x axis line.
@@ -1694,7 +1731,7 @@ fn render_output_chart(ui: &mut egui::Ui, chart: &crate::output::Chart) {
             egui::pos2(plot_rect.left(), plot_rect.bottom()),
             egui::pos2(plot_rect.right(), plot_rect.bottom()),
         ],
-        egui::Stroke::new(1.0, theme::BORDER_STRONG),
+        egui::Stroke::new(1.0, theme::border_strong()),
     );
 
     // ---- The series ----
@@ -1731,7 +1768,7 @@ fn render_output_chart(ui: &mut egui::Ui, chart: &crate::output::Chart) {
                             egui::Align2::CENTER_TOP,
                             label,
                             theme::body(10.5),
-                            theme::TEXT_MUTED,
+                            theme::text_muted(),
                         );
                     }
                 }
@@ -1790,34 +1827,38 @@ fn render_output_chart(ui: &mut egui::Ui, chart: &crate::output::Chart) {
         egui::Align2::CENTER_BOTTOM,
         &chart.x_label,
         theme::medium(10.5),
-        theme::TEXT_MUTED,
+        theme::text_muted(),
     );
     painter.text(
         egui::pos2(rect.left() + 6.0, (plot_rect.top() + plot_rect.bottom()) / 2.0),
         egui::Align2::LEFT_CENTER,
         &chart.y_label,
         theme::medium(10.5),
-        theme::TEXT_MUTED,
+        theme::text_muted(),
     );
 }
 
 /// The colour of the nth series.
+///
+/// The first three come from the theme, so a chart's series follow the
+/// palette of whichever theme is active; the last two are fixed, so
+/// there is always a fifth and sixth colour that no theme collides
+/// with.
 fn series_color(i: usize) -> egui::Color32 {
-    const PALETTE: [egui::Color32; 5] = [
-        crate::theme::ACCENT,
-        crate::theme::TEAL,
-        crate::theme::AMBER,
-        egui::Color32::from_rgb(140, 110, 220),
-        egui::Color32::from_rgb(220, 110, 140),
-    ];
-    PALETTE[i % PALETTE.len()]
+    match i % 5 {
+        0 => crate::theme::accent(),
+        1 => crate::theme::teal(),
+        2 => crate::theme::amber(),
+        3 => egui::Color32::from_rgb(140, 110, 220),
+        _ => egui::Color32::from_rgb(220, 110, 140),
+    }
 }
 
 fn render_output_table(ui: &mut egui::Ui, t: &OutputTable) {
     use crate::theme;
-    let header_fill = theme::HEADER;
-    let edge = theme::BORDER;
-    let stub_fill = theme::SURFACE_ALT;
+    let header_fill = theme::header();
+    let edge = theme::border();
+    let stub_fill = theme::surface_alt();
     // A wide table gets a horizontal scrollbar, so that a table with
     // many columns stays readable instead of running off the panel.
     egui::ScrollArea::horizontal()
@@ -1837,7 +1878,7 @@ fn render_output_table(ui: &mut egui::Ui, t: &OutputTable) {
                         ui.label(
                             egui::RichText::new(h)
                                 .font(crate::theme::semibold(12.0))
-                                .color(theme::TEXT),
+                                .color(theme::text()),
                         );
                     });
             }
@@ -1846,7 +1887,7 @@ fn render_output_table(ui: &mut egui::Ui, t: &OutputTable) {
                 for (k, cell) in row.iter().enumerate() {
                     let is_num = k > 0 && cell.parse::<f64>().is_ok();
                     egui::Frame::none()
-                        .fill(if k == 0 { stub_fill } else { theme::CELL })
+                        .fill(if k == 0 { stub_fill } else { theme::cell() })
                         .stroke(egui::Stroke::new(0.5, edge))
                         .inner_margin(egui::Margin::symmetric(10.0, 4.0))
                         .show(ui, |ui| {
@@ -1860,9 +1901,9 @@ fn render_output_table(ui: &mut egui::Ui, t: &OutputTable) {
                                 |ui| {
                                     let rt = egui::RichText::new(cell).size(12.5);
                                     let rt = if k == 0 {
-                                        rt.font(crate::theme::medium(12.5)).color(theme::TEXT)
+                                        rt.font(crate::theme::medium(12.5)).color(theme::text())
                                     } else {
-                                        rt.color(theme::TEXT)
+                                        rt.color(theme::text())
                                     };
                                     ui.label(rt);
                                 },
@@ -1946,9 +1987,9 @@ fn render_charts(ui: &mut egui::Ui, table: &DataTable) {
 fn render_variables(ui: &mut egui::Ui, table: &mut DataTable) {
     use crate::data::{Measure, VarAlign, ColumnKind};
     use crate::theme;
-    let header_fill = theme::HEADER;
-    let cell_fill = theme::CELL;
-    let header_text = theme::TEXT;
+    let header_fill = theme::header();
+    let cell_fill = theme::cell();
+    let header_text = theme::text();
 
     let mut block = |ui: &mut egui::Ui,
                      w: f32,
@@ -2250,7 +2291,7 @@ fn app_icon() -> egui::IconData {
 }
 
 pub fn run(initial_path: Option<String>) -> eframe::Result<()> {
-    run_with(initial_path, None, None)
+    run_with(initial_path, None, None, false)
 }
 
 /// Run the app, optionally opening a procedure dialog on start.
@@ -2262,6 +2303,7 @@ pub fn run_with(
     initial_path: Option<String>,
     initial_dialog: Option<crate::dialog::Procedure>,
     initial_script: Option<String>,
+    dark: bool,
 ) -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -2279,9 +2321,13 @@ pub fn run_with(
             // Install the bundled Inter family and the modern look before the
             // first frame, so nothing is ever painted with the old defaults.
             crate::theme::install_fonts(&cc.egui_ctx);
-            crate::theme::apply_style(&cc.egui_ctx, false);
+            crate::theme::apply_style(&cc.egui_ctx, dark);
 
             let mut app = StatsCraftApp::default();
+            // The real egui context, so the theme can be re-applied when
+            // the user switches it.
+            app.ctx = cc.egui_ctx.clone();
+            app.dark = dark;
             if let Some(p) = initial_path {
                 app.path_input = p;
                 app.load();
