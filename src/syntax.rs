@@ -386,6 +386,115 @@ fn execute_line(app: &mut StatsCraftApp, line: &str) {
                 }
             }
         }
+        "GLM" => {
+            // GLM <dependent> BY <factor> [BY <factor> ...] [WITH <covariate>]
+            //     /METHOD=SSTYPE(3) /PRINT=DESCRIPTIVE ETASQ
+            let cmd = Command::parse(line);
+            let rest: Vec<String> = cmd.args.clone();
+
+            // The BY and WITH clauses.
+            let mut factor_names: Vec<String> = Vec::new();
+            let mut covariate: Option<String> = None;
+            let mut dependent: Option<String> = None;
+            let mut in_with = false;
+            let mut i = 0usize;
+            while i < rest.len() {
+                let t = &rest[i];
+                if t.eq_ignore_ascii_case("BY") {
+                    // The factors run until the next BY or WITH.
+                    i += 1;
+                    while i < rest.len()
+                        && !rest[i].eq_ignore_ascii_case("BY")
+                        && !rest[i].eq_ignore_ascii_case("WITH")
+                    {
+                        factor_names.push(rest[i].clone());
+                        i += 1;
+                    }
+                    continue;
+                }
+                if t.eq_ignore_ascii_case("WITH") {
+                    in_with = true;
+                    i += 1;
+                    continue;
+                }
+                if in_with {
+                    covariate = Some(t.clone());
+                } else if dependent.is_none() {
+                    dependent = Some(t.clone());
+                }
+                i += 1;
+            }
+
+            let Some(dep) = dependent else {
+                app.status = "GLM: expected 'GLM depvar BY factor'.".to_string();
+                return;
+            };
+            if factor_names.is_empty() {
+                app.status = "GLM: expected at least one factor after BY.".to_string();
+                return;
+            }
+
+            // The sum-of-squares type: /METHOD=SSTYPE(3) is the
+            // default, and /DESIGN= names the effects.
+            let ss_type = cmd
+                .sub("METHOD")
+                .and_then(|kw| {
+                    kw.iter()
+                        .find_map(|k| {
+                            let t = k.trim_start_matches("SSTYPE").trim_matches(|c| c == '(' || c == ')');
+                            t.parse::<i32>().ok().and_then(|n| match n {
+                                1 => Some(crate::glm::SumOfSquaresType::TypeI),
+                                2 => Some(crate::glm::SumOfSquaresType::TypeII),
+                                3 => Some(crate::glm::SumOfSquaresType::TypeIII),
+                                4 => Some(crate::glm::SumOfSquaresType::TypeIV),
+                                _ => None,
+                            })
+                        })
+                })
+                .unwrap_or(crate::glm::SumOfSquaresType::TypeIII);
+
+            let Some(t) = &app.table else {
+                app.status = "GLM: no data loaded.".to_string();
+                return;
+            };
+            let Some(yi) = t.column_index(&dep) else {
+                app.status = format!("GLM: unknown variable '{}'.", dep);
+                return;
+            };
+            let mut factors: Vec<(usize, String)> = Vec::new();
+            for f in &factor_names {
+                let Some(fi) = t.column_index(f) else {
+                    app.status = format!("GLM: unknown variable '{}'.", f);
+                    return;
+                };
+                factors.push((fi, f.clone()));
+            }
+            let cov = covariate.as_ref().and_then(|c| t.column_index(c));
+            if covariate.is_some() && cov.is_none() {
+                app.status = format!(
+                    "GLM: unknown covariate '{}'.",
+                    covariate.as_deref().unwrap_or("")
+                );
+                return;
+            }
+
+            match crate::glm::glm(t, yi, &factors, cov, ss_type) {
+                Some(g) => {
+                    app.outputs.push(OutputTable::glm_descriptives(&g));
+                    app.outputs.push(OutputTable::glm_tests(&g));
+                    app.status = format!(
+                        "GLM executed for {} with {} factor(s): {} sums of squares.",
+                        dep,
+                        factor_names.len(),
+                        ss_type.keyword()
+                    );
+                    app.show_output_window = true;
+                }
+                None => {
+                    app.status = "GLM failed (the factors need at least two levels each).".to_string();
+                }
+            }
+        }
         "ONEWAY" | "ANOVA" => {
             // ONEWAY <y> BY <factor> [/POSTHOC=... /STATISTICS=...]
             let cmd = Command::parse(line);
@@ -1192,6 +1301,56 @@ NONPARAMETRIC /FRIEDMAN= score age response_time
             app.outputs.iter().any(|o| o.chart.is_some()),
             "no chart was produced"
         );
+    }
+
+    #[test]
+    fn the_glm_runs_through_the_syntax() {
+        let path = std::env::temp_dir().join("sc_glm.csv");
+        let mut f = std::fs::File::create(&path).unwrap();
+        use std::io::Write;
+        writeln!(f, "g,c,y").unwrap();
+        // A 2x2 with a real interaction.
+        for (g, c, base) in [
+            ("A1", "B1", 120.0),
+            ("A1", "B2", 110.0),
+            ("A2", "B1", 104.0),
+            ("A2", "B2", 99.0),
+        ] {
+            for i in 0..40 {
+                writeln!(f, "{},{},{}", g, c, base + i as f64 * 0.1).unwrap();
+            }
+        }
+        let mut app = StatsCraftApp::default();
+        app.path_input = path.display().to_string();
+        app.load();
+
+        run(&mut app, "GLM y BY g c /METHOD=SSTYPE(3)");
+        assert!(
+            !app.status.contains("failed") && !app.status.contains("unknown"),
+            "GLM failed: {}",
+            app.status
+        );
+        assert_eq!(app.outputs.len(), 2, "the descriptives and the tests");
+        let tests = &app.outputs[1];
+        assert!(
+            tests.title.contains("Between-Subjects Effects"),
+            "the title was {}",
+            tests.title
+        );
+        // The three effects are there, with the interaction found.
+        let names: Vec<&str> = tests.rows.iter().map(|r| r[0].as_str()).collect();
+        assert!(names.contains(&"g"), "the rows were {:?}", names);
+        assert!(names.contains(&"c"), "the rows were {:?}", names);
+        assert!(names.contains(&"g*c"), "the rows were {:?}", names);
+        // The interaction's F is large, because the design has one.
+        let interaction = tests
+            .rows
+            .iter()
+            .find(|r| r[0] == "g*c")
+            .expect("the interaction row");
+        let f: f64 = interaction[4].parse().unwrap();
+        assert!(f > 10.0, "the interaction's F was {}", f);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

@@ -48,6 +48,7 @@ pub enum Procedure {
     Reliability,
     Factor,
     Roc,
+    Glm,
 }
 
 impl Procedure {
@@ -71,6 +72,7 @@ impl Procedure {
             Procedure::Reliability => "Reliability Analysis",
             Procedure::Factor => "Factor Analysis",
             Procedure::Roc => "ROC Curve",
+            Procedure::Glm => "General Linear Model",
         }
     }
 
@@ -94,6 +96,7 @@ impl Procedure {
             Procedure::Reliability => "RELIABILITY",
             Procedure::Factor => "FACTOR",
             Procedure::Roc => "ROC",
+            Procedure::Glm => "GLM",
         }
     }
 
@@ -141,6 +144,7 @@ pub enum SubDialog {
     ExploreOptions,
     FactorOptions,
     RocOptions,
+    GlmOptions,
 }
 
 /// The statistic choices offered by the `Statistics…` sub-dialog, keyed by
@@ -168,6 +172,8 @@ pub struct StatOptions {
     pub significance_stars: bool,
     /// For correlations: delete pairwise instead of listwise.
     pub pairwise_delete: bool,
+    /// For the general linear model: the type of the sums of squares.
+    pub ss_type: Option<u8>,
 }
 
 impl Default for StatOptions {
@@ -184,6 +190,8 @@ impl Default for StatOptions {
             effect_sizes: false,
             significance_stars: false,
             pairwise_delete: false,
+            // SPSS uses Type III by default.
+            ss_type: Some(3),
         }
     }
 }
@@ -383,6 +391,16 @@ impl DialogState {
                     "NONPARAMETRIC /FRIEDMAN= {}",
                     self.targets.join(" ")
                 ));
+            }
+            Procedure::Glm => {
+                // GLM <dependent> BY <factor> [<factor> ...]
+                //     /METHOD=SSTYPE(3)
+                let g = self.group_var.clone()?;
+                let mut p = format!("GLM {} BY {}", vars, g);
+                if let Some(ss) = self.options.ss_type {
+                    p.push_str(&format!(" /METHOD=SSTYPE({})", ss));
+                }
+                parts.push(p);
             }
             Procedure::Reliability => {
                 if self.targets.len() < 2 {
@@ -732,6 +750,9 @@ pub fn render(
                     Procedure::Roc => {
                         sub_button(ui, d, SubDialog::RocOptions, "Options…");
                     }
+                    Procedure::Glm => {
+                        sub_button(ui, d, SubDialog::GlmOptions, "Model…");
+                    }
                     // The nonparametric tests have no options of their own.
                     Procedure::PairedT
                     | Procedure::MannWhitney
@@ -1080,6 +1101,31 @@ fn render_sub_dialog(ui: &mut egui::Ui, d: &mut DialogState) {
                         egui::RichText::new("Group means with counts and standard deviations.")
                             .size(11.5),
                     );
+                }
+                SubDialog::GlmOptions => {
+                    ui.label(egui::RichText::new("Model").font(theme::semibold(11.0)));
+                    ui.add_space(3.0);
+                    ui.label(
+                        egui::RichText::new("The type of the sums of squares:").size(11.5),
+                    );
+                    ui.add_space(3.0);
+                    // The three radio buttons SPSS offers.
+                    for (n, label, help) in [
+                        (1u8, "Type I", "Sequential: each factor is tested after the ones before it."),
+                        (2u8, "Type II", "Each factor is tested after the others, except the interactions that contain it."),
+                        (3u8, "Type III", "Each factor is tested after all the others. The default."),
+                    ] {
+                        let mut current = d.options.ss_type.unwrap_or(3);
+                        let selected = current == n;
+                        if ui.radio_value(&mut current, n, label).clicked() {
+                            d.options.ss_type = Some(n);
+                        }
+                        if selected {
+                            ui.label(
+                                egui::RichText::new(help).size(10.5).color(theme::TEXT_FAINT),
+                            );
+                        }
+                    }
                 }
             }
         });

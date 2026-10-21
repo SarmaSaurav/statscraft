@@ -70,6 +70,7 @@ fn parse_procedure(name: &str) -> Option<Procedure> {
         "reliability" | "alpha" => Some(Procedure::Reliability),
         "factor" => Some(Procedure::Factor),
         "roc" => Some(Procedure::Roc),
+        "glm" => Some(Procedure::Glm),
         _ => None,
     }
 }
@@ -93,5 +94,6 @@ fn known_procedures() -> Vec<&'static str> {
         "reliability",
         "factor",
         "roc",
+        "glm",
     ]
 }

@@ -779,6 +779,105 @@ impl OutputTable {
     /// Levene's test and the post-hoc comparisons.
     /// The descriptives of the groups, as SPSS shows them above the
     /// ANOVA table.
+    /// The Tests of Between-Subjects Effects table of a general
+    /// linear model, laid out the way SPSS lays it out.
+    pub fn glm_tests(g: &crate::glm::GlmResult) -> Self {
+        let headers = vec![
+            "Source".into(),
+            format!("{} Sum of Squares", g.ss_type.keyword()),
+            "df".into(),
+            "Mean Square".into(),
+            "F".into(),
+            "Sig.".into(),
+            "Partial Eta Squared".into(),
+        ];
+        let mut rows: Vec<Vec<String>> = Vec::new();
+        for e in &g.effects {
+            if e.name == "Total" {
+                continue;
+            }
+            rows.push(vec![
+                e.name.clone(),
+                format!("{:.3}", e.ss),
+                format!("{:.0}", e.df),
+                format!("{:.3}", e.ms),
+                e.f.map(|f| format!("{:.3}", f)).unwrap_or_default(),
+                e.p.map(|p| format!("{:.4}", p)).unwrap_or_default(),
+                e.partial_eta_squared
+                    .map(|r| format!("{:.3}", r))
+                    .unwrap_or_default(),
+            ]);
+        }
+        let mut note = format!(
+            "F({:.0}, {:.0}) = {:.3}, Sig. = {:.4} for the Corrected Model.",
+            g.effects
+                .iter()
+                .find(|e| e.name == "Corrected Model")
+                .map(|e| e.df)
+                .unwrap_or(0.0),
+            g.effects
+                .iter()
+                .find(|e| e.name == "Error")
+                .map(|e| e.df)
+                .unwrap_or(0.0),
+            g.effects
+                .iter()
+                .find(|e| e.name == "Corrected Model")
+                .and_then(|e| e.f)
+                .unwrap_or(f64::NAN),
+            g.effects
+                .iter()
+                .find(|e| e.name == "Corrected Model")
+                .and_then(|e| e.p)
+                .unwrap_or(f64::NAN),
+        );
+        if g.ss_type == crate::glm::SumOfSquaresType::TypeI {
+            note.push_str(&format!("\nThe sums of squares are Type I ({}).", g.ss_type.keyword()));
+        } else if g.ss_type == crate::glm::SumOfSquaresType::TypeII {
+            note.push_str(&format!("\nThe sums of squares are Type II ({}).", g.ss_type.keyword()));
+        } else {
+            note.push_str(&format!("\nThe sums of squares are {}.", g.ss_type.keyword()));
+        }
+        Self {
+            title: format!("Tests of Between-Subjects Effects: {}", g.outcome),
+            headers,
+            rows,
+            note,
+            chart: None,
+        }
+    }
+
+    /// The descriptives of the cells of a general linear model.
+    pub fn glm_descriptives(g: &crate::glm::GlmResult) -> Self {
+        let headers = vec![
+            "Cell".into(),
+            "N".into(),
+            "Mean".into(),
+            "Std. Deviation".into(),
+            "Std. Error Mean".into(),
+        ];
+        let rows: Vec<Vec<String>> = g
+            .descriptives
+            .iter()
+            .map(|c| {
+                vec![
+                    c.name.clone(),
+                    c.n.to_string(),
+                    format!("{:.4}", c.mean),
+                    format!("{:.4}", c.std_dev),
+                    format!("{:.4}", c.std_error),
+                ]
+            })
+            .collect();
+        Self {
+            title: format!("Descriptive Statistics: {}", g.outcome),
+            headers,
+            rows,
+            note: String::new(),
+            chart: None,
+        }
+    }
+
     pub fn anova_descriptives(a: &crate::stats::AnovaResult) -> Self {
         let headers = vec![
             String::new(),

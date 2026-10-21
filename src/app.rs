@@ -851,6 +851,7 @@ impl eframe::App for StatsCraftApp {
                             if crate::icon::menu_item(ui, crate::theme::Icon::TTest, "Independent-Samples T Test…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::TTest); }
                             if crate::icon::menu_item(ui, crate::theme::Icon::TTest, "Paired-Samples T Test…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::PairedT); }
                             if crate::icon::menu_item(ui, crate::theme::Icon::Anova, "One-Way ANOVA…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Anova); }
+                            if crate::icon::menu_item(ui, crate::theme::Icon::Anova, "General Linear Model…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Glm); }
                         });
                         ui.menu_button("Correlate", |ui| {
                             if crate::icon::menu_item(ui, crate::theme::Icon::Correlation, "Bivariate…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Correlations); }
@@ -1817,6 +1818,11 @@ fn render_output_table(ui: &mut egui::Ui, t: &OutputTable) {
     let header_fill = theme::HEADER;
     let edge = theme::BORDER;
     let stub_fill = theme::SURFACE_ALT;
+    // A wide table gets a horizontal scrollbar, so that a table with
+    // many columns stays readable instead of running off the panel.
+    egui::ScrollArea::horizontal()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
     egui::Grid::new(&t.title)
         .striped(false)
         .spacing([0.0, 0.0])
@@ -1865,6 +1871,7 @@ fn render_output_table(ui: &mut egui::Ui, t: &OutputTable) {
                 }
                 ui.end_row();
             }
+        });
         });
     if !t.note.is_empty() {
         ui.add_space(3.0);
