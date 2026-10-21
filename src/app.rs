@@ -229,6 +229,32 @@ impl StatsCraftApp {
         };
     }
 
+    /// Pivot the selected output: exchange its row and column
+    /// dimensions.
+    ///
+    /// This is the drag-and-drop of a pivot table, done with a button.
+    /// The flattened grid is rebuilt from the pivoted table, so the
+    /// export carries the new orientation too.
+    pub fn pivot_selected_output(&mut self) {
+        let i = self.selected_output;
+        let Some(p) = self.outputs.get(i).and_then(|o| o.pivot.clone()) else {
+            self.status = "This table has no pivot structure.".to_string();
+            return;
+        };
+        let pivoted = p.pivoted();
+        // The flattened view follows the pivot.
+        let flat = pivoted.flattened();
+        let (headers, rows) = match flat.first() {
+            Some((_, h, r)) => (h.clone(), r.clone()),
+            None => (Vec::new(), Vec::new()),
+        };
+        let t = &mut self.outputs[i];
+        t.pivot = Some(pivoted);
+        t.headers = headers;
+        t.rows = rows;
+        self.status = "Table pivoted: the row and column dimensions were exchanged.".to_string();
+    }
+
     /// Save the data as an SPSS .sav file.
     pub fn save_data_sav(&mut self, path: &std::path::Path) {
         let Some(t) = &self.table else {
@@ -291,32 +317,41 @@ impl StatsCraftApp {
              td.num{text-align:right;font-variant-numeric:tabular-nums;}\n\
              td.stub{font-weight:600;background:#f6f8fb;}\n\
              .note{color:#555;font-size:9.5pt;}\n\
+             th.corner{text-align:right;}\n\
+             .measures{color:#555;font-size:9.5pt;margin:0 0 4px 0;}\n\
+             .measures span{color:#888;}\n\
              </style>\n</head>\n<body>\n",
         );
         for t in &self.outputs {
-            h.push_str(&format!(
-                "<h2>{}</h2>\n<table>\n<tr>",
-                html_escape(&t.title)
-            ));
-            for hdr in &t.headers {
-                h.push_str(&format!("<th>{}</th>", html_escape(hdr)));
-            }
-            h.push_str("</tr>\n");
-            for row in &t.rows {
-                h.push_str("<tr>");
-                for (k, cell) in row.iter().enumerate() {
-                    let esc = html_escape(cell);
-                    if k > 0 && cell.trim().parse::<f64>().is_ok() {
-                        h.push_str(&format!("<td class=\"num\">{}</td>", esc));
-                    } else if k == 0 {
-                        h.push_str(&format!("<td class=\"stub\">{}</td>", esc));
-                    } else {
-                        h.push_str(&format!("<td>{}</td>", esc));
+            h.push_str(&format!("<h2>{}</h2>\n", html_escape(&t.title)));
+            // A pivot table is exported as itself, with the spanning
+            // header and the measures, so the structure survives the
+            // export rather than being flattened away.
+            match &t.pivot {
+                Some(p) => h.push_str(&pivot_to_html(p)),
+                None => {
+                    h.push_str("<table>\n<tr>");
+                    for hdr in &t.headers {
+                        h.push_str(&format!("<th>{}</th>", html_escape(hdr)));
                     }
+                    h.push_str("</tr>\n");
+                    for row in &t.rows {
+                        h.push_str("<tr>");
+                        for (k, cell) in row.iter().enumerate() {
+                            let esc = html_escape(cell);
+                            if k > 0 && cell.trim().parse::<f64>().is_ok() {
+                                h.push_str(&format!("<td class=\"num\">{}</td>", esc));
+                            } else if k == 0 {
+                                h.push_str(&format!("<td class=\"stub\">{}</td>", esc));
+                            } else {
+                                h.push_str(&format!("<td>{}</td>", esc));
+                            }
+                        }
+                        h.push_str("</tr>\n");
+                    }
+                    h.push_str("</table>\n");
                 }
-                h.push_str("</tr>\n");
             }
-            h.push_str("</table>\n");
             if !t.note.is_empty() {
                 h.push_str(&format!("<p class=\"note\">{}</p>\n", html_escape(&t.note)));
             }
@@ -589,6 +624,9 @@ impl eframe::App for StatsCraftApp {
                                             }
                                         });
                                 });
+                                // The pivot action is applied after
+                                // the table's borrow ends.
+                                let mut pivot_requested = false;
                                 cols[1].group(|ui| {
                                     let t = &self.outputs[self.selected_output.min(self.outputs.len() - 1)];
                                     egui::ScrollArea::vertical()
@@ -599,13 +637,48 @@ impl eframe::App for StatsCraftApp {
                                                 egui::RichText::new(&t.title)
                                                     .font(crate::theme::semibold(16.0)),
                                             ));
-                                            ui.add_space(8.0);
+                                            ui.add_space(6.0);
+                                            // A pivot table can be
+                                            // pivoted: the row and the
+                                            // column dimensions
+                                            // exchanged, the way SPSS
+                                            // lets the reader drag one
+                                            // across.
+                                            if t.pivot.is_some() {
+                                                let mut clicked = false;
+                                                ui.horizontal(|ui| {
+                                                    if ui
+                                                        .button(
+                                                            egui::RichText::new("Pivot")
+                                                                .size(11.5)
+                                                                .color(crate::theme::text()),
+                                                        )
+                                                        .on_hover_text(
+                                                            "Exchange the row and the column dimensions.",
+                                                        )
+                                                        .clicked()
+                                                    {
+                                                        clicked = true;
+                                                    }
+                                                });
+                                                ui.add_space(6.0);
+                                                if clicked {
+                                                    // The action is
+                                                    // applied after
+                                                    // the borrow of
+                                                    // the table ends.
+                                                    pivot_requested = true;
+                                                }
+                                            }
                                             render_output_table(ui, t);
                                             if let Some(chart) = &t.chart {
                                                 render_output_chart(ui, chart);
                                             }
                                         });
                                 });
+                                if pivot_requested {
+                                    self.pivot_selected_output();
+                                }
                             });
                         });
                     // closing the window hides it until re-opened from Window menu
@@ -1281,6 +1354,31 @@ impl eframe::App for StatsCraftApp {
                                     ui.add_space(2.0);
                                     ui.heading(egui::RichText::new(&self.outputs[self.selected_output].title));
                                     ui.add_space(4.0);
+                                    // A pivot table can be pivoted: the
+                                    // row and the column dimensions
+                                    // exchanged, the way SPSS lets
+                                    // the reader drag one across.
+                                    let has_pivot = self.outputs[self.selected_output]
+                                        .pivot
+                                        .is_some();
+                                    if has_pivot {
+                                        ui.horizontal(|ui| {
+                                            if ui
+                                                .button(
+                                                    egui::RichText::new("Pivot")
+                                                        .size(11.5)
+                                                        .color(crate::theme::text()),
+                                                )
+                                                .on_hover_text(
+                                                    "Exchange the row and the column dimensions.",
+                                                )
+                                                .clicked()
+                                            {
+                                                self.pivot_selected_output();
+                                            }
+                                        });
+                                        ui.add_space(4.0);
+                                    }
                                     render_output_table(ui, &self.outputs[self.selected_output]);
                                 });
                         });
@@ -1592,6 +1690,88 @@ fn commit_edit(table: &mut DataTable, ci: usize, di: usize, buf: &str) {
     table.columns[ci].values[di] = v;
 }
 
+/// A pivot table as HTML, with the spanning header and the measures.
+///
+/// The header is one band per column dimension, and the cells of the
+/// outer dimension span the inner ones, so the exported table reads
+/// the same way the table on the screen does.
+fn pivot_to_html(pivot: &crate::pivot::PivotTable) -> String {
+    use crate::pivot::label;
+
+    let mut h = String::new();
+    let row_keys = pivot.row_keys();
+    let col_keys = pivot.col_keys();
+    let measure = pivot.measure_index.min(pivot.measures.len().saturating_sub(1));
+
+    // The measures are tabs, as they are in SPSS's output tree.
+    if pivot.measures.len() > 1 {
+        h.push_str("<p class=\"measures\">");
+        for (i, m) in pivot.measures.iter().enumerate() {
+            if i == measure {
+                h.push_str(&format!("<strong>{}</strong>", html_escape(m)));
+            } else {
+                h.push_str(&format!("<span>{}</span>", html_escape(m)));
+            }
+            if i + 1 < pivot.measures.len() {
+                h.push_str(" &middot; ");
+            }
+        }
+        h.push_str("</p>\n");
+    }
+
+    h.push_str("<table>\n");
+    // The header: one row per column dimension.
+    for (d, dim) in pivot.col_dims.iter().enumerate() {
+        h.push_str("<tr>");
+        // The corner cell, over the stub.
+        if d == 0 {
+            h.push_str(&format!(
+                "<th rowspan=\"{}\" class=\"corner\">{}</th>",
+                pivot.col_dims.len(),
+                html_escape(&dim.name)
+            ));
+        }
+        // The cells of this dimension, each spanning the columns below.
+        let below: usize = pivot.col_dims[d + 1..]
+            .iter()
+            .map(|x| x.levels.len().max(1))
+            .product::<usize>()
+            .max(1);
+        let mut j = 0;
+        while j < col_keys.len() {
+            let level = dim.levels.get(col_keys[j].get(d).copied().unwrap_or(0));
+            let span = below.min(col_keys.len() - j);
+            h.push_str(&format!(
+                "<th colspan=\"{}\">{}</th>",
+                span,
+                html_escape(&level.cloned().unwrap_or_default())
+            ));
+            j += span;
+        }
+        h.push_str("</tr>\n");
+    }
+    // The body.
+    for rk in &row_keys {
+        h.push_str("<tr>");
+        h.push_str(&format!(
+            "<td class=\"stub\">{}</td>",
+            html_escape(&label(&pivot.row_dims, rk))
+        ));
+        for ck in &col_keys {
+            let v = pivot.measure_at(rk, ck, measure);
+            let esc = html_escape(v);
+            if v.trim().parse::<f64>().is_ok() {
+                h.push_str(&format!("<td class=\"num\">{}</td>", esc));
+            } else {
+                h.push_str(&format!("<td>{}</td>", esc));
+            }
+        }
+        h.push_str("</tr>\n");
+    }
+    h.push_str("</table>\n");
+    h
+}
+
 fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -1612,6 +1792,7 @@ mod tests {
             rows: vec![vec!["x".into(), "1.5".into()]],
             note: "n".into(),
             chart: None,
+            pivot: None,
         });
         let path = std::env::temp_dir().join("sc_out.html");
         app.export_output_html_to(&path);
@@ -1619,6 +1800,56 @@ mod tests {
         assert!(s.contains("T&lt;1&gt;"), "title escaped");
         assert!(s.contains("<td class=\"num\">1.5</td>"), "numeric right-aligned");
         assert!(s.contains("<p class=\"note\">n</p>"), "note rendered");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn the_html_export_carries_the_pivot_structure() {
+        // A pivot table is exported with the spanning header and the
+        // measures, so the structure survives rather than being
+        // flattened away.
+        let ct = crate::stats::CrosstabsResult {
+            var1: "region".into(),
+            var2: "group".into(),
+            levels1: vec!["East".into(), "West".into()],
+            levels2: vec!["A".into(), "B".into()],
+            observed: vec![vec![10, 5], vec![5, 20]],
+            row_totals: vec![15, 25],
+            col_totals: vec![15, 25],
+            n: 40,
+            chi2: 8.7111,
+            df: 1,
+            p: 0.00316,
+            expected: vec![vec![5.625, 9.375], vec![9.375, 15.625]],
+            phi: 0.4667,
+            cramers_v: 0.4667,
+            min_expected: 5.625,
+            linear_by_linear: None,
+            fisher_exact: None,
+        };
+        let mut app = StatsCraftApp::default();
+        app.outputs.push(crate::output::OutputTable::crosstabs_with(
+            &ct,
+            &crate::stats::CellCounts {
+                observed: true,
+                expected: true,
+                row_percent: true,
+                column_percent: true,
+                total_percent: true,
+            },
+            &Default::default(),
+        ));
+        let path = std::env::temp_dir().join("sc_pivot.html");
+        app.export_output_html_to(&path);
+        let s = std::fs::read_to_string(&path).unwrap();
+        // The column dimension's name is in the corner cell.
+        assert!(s.contains("group"), "the column dimension is named");
+        // The levels are in the header.
+        assert!(s.contains(">A</th>"), "the levels are in the header");
+        // The measures are listed.
+        assert!(s.contains("Expected Count"), "the measures are listed");
+        // The counts are there.
+        assert!(s.contains(">10</td>"), "the counts are exported");
         let _ = std::fs::remove_file(path);
     }
 }
@@ -1854,8 +2085,263 @@ fn series_color(i: usize) -> egui::Color32 {
     }
 }
 
+/// Draw a pivot table, with the multi-level header SPSS builds.
+///
+/// A pivot table has a header for each column dimension, and the cells
+/// of the outer dimension span the cells of the inner one. The body
+/// is the grid of cells, and the stub is the row dimension.
+///
+/// The table is drawn with a fixed column layout rather than with the
+/// `Grid` widget, because a spanning cell needs to know the width of
+/// the columns it covers.
+fn render_pivot_table(ui: &mut egui::Ui, pivot: &crate::pivot::PivotTable) {
+    use crate::theme;
+    use crate::pivot::label;
+
+    let row_keys = pivot.row_keys();
+    let col_keys = pivot.col_keys();
+    let n_rows = row_keys.len();
+    let n_cols = col_keys.len();
+    if n_rows == 0 || n_cols == 0 {
+        return;
+    }
+
+    // ---- The measures, and which one is shown ----
+    // A pivot holds several measures of the same cells - the counts,
+    // the expected counts, the percentages. SPSS shows them as
+    // separate tables under the crosstabulation, so the reader picks
+    // which one to look at.
+    let mut measure = pivot.measure_index.min(pivot.measures.len().saturating_sub(1));
+    if pivot.measures.len() > 1 {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(egui::RichText::new("Show:").size(11.5).color(theme::text_muted()));
+            for (i, m) in pivot.measures.iter().enumerate() {
+                let selected = i == measure;
+                if ui
+                    .selectable_label(selected, egui::RichText::new(m).size(11.5))
+                    .clicked()
+                {
+                    measure = i;
+                }
+            }
+        });
+        ui.add_space(4.0);
+    }
+
+    // ---- The column widths ----
+    // The stub holds the row dimension's label; the columns hold the
+    // values. A header label is centred over the columns it spans, so
+    // it needs a share of their width rather than all of it.
+    let stub_text: Vec<String> = row_keys
+        .iter()
+        .map(|k| label(&pivot.row_dims, k))
+        .collect();
+    // The text is measured through the font atlas, which is how egui
+    // sizes a label.
+    let measure_text = |s: &str, font: egui::FontId| -> f32 {
+        ui.ctx().fonts(|f| {
+            f.layout_no_wrap(s.to_string(), font, egui::Color32::PLACEHOLDER)
+                .size()
+                .x
+        })
+    };
+    let mut col_widths: Vec<f32> = vec![0.0; n_cols];
+    for (j, ck) in col_keys.iter().enumerate() {
+        let mut w = 0.0f32;
+        for rk in &row_keys {
+            let v = pivot.measure_at(rk, ck, measure);
+            w = w.max(measure_text(v, theme::body(12.5)));
+        }
+        col_widths[j] = w;
+    }
+    // The header: for each dimension, the widest label sets the width
+    // of the columns it covers, divided by how many it covers.
+    for (d, dim) in pivot.col_dims.iter().enumerate() {
+        // The number of leaf columns one level of this dimension
+        // covers.
+        let below: usize = pivot.col_dims[d + 1..]
+            .iter()
+            .map(|x| x.levels.len().max(1))
+            .product::<usize>()
+            .max(1);
+        for (li, level) in dim.levels.iter().enumerate() {
+            let w = measure_text(level, theme::semibold(12.0));
+            let share = w / below as f32;
+            // The first column of the group carries the whole label;
+            // the rest are the same group and need no more.
+            for j in 0..n_cols {
+                if col_keys[j].get(d) == Some(&li) {
+                    let first = col_keys[..j]
+                        .iter()
+                        .filter(|ck| ck.get(d) == Some(&li))
+                        .count();
+                    if first == 0 {
+                        col_widths[j] = col_widths[j].max(share);
+                    }
+                }
+            }
+        }
+    }
+    let stub_width = stub_text
+        .iter()
+        .map(|t| measure_text(t, theme::medium(12.5)))
+        .fold(0.0f32, f32::max)
+        .max(90.0)
+        + 20.0;
+    for w in col_widths.iter_mut() {
+        *w += 20.0;
+    }
+    let total_width: f32 = stub_width + col_widths.iter().sum::<f32>();
+
+    egui::ScrollArea::horizontal()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            let header_h = 24.0;
+            let cell_h = 22.0;
+            let header_rows = pivot.col_dims.len().max(1);
+            let body_h = n_rows as f32 * cell_h;
+            let height = header_rows as f32 * header_h + body_h;
+            let (rect, _) =
+                ui.allocate_exact_size(egui::vec2(total_width, height), egui::Sense::hover());
+            let painter = ui.painter();
+
+            let edge = theme::border();
+            let header_fill = theme::header();
+            let stub_fill = theme::surface_alt();
+
+            // The x of each column, and the x of the stub.
+            let mut xs = vec![rect.left() + stub_width];
+            for w in &col_widths {
+                xs.push(xs.last().unwrap() + w);
+            }
+
+            // ---- The header ----
+            // The outer dimension's cells span the inner ones, so the
+            // header is drawn as one band per dimension.
+            for d in 0..header_rows {
+                let y = rect.top() + d as f32 * header_h;
+                // The stub's corner cell.
+                painter.rect_filled(
+                    egui::Rect::from_min_max(
+                        egui::pos2(rect.left(), y),
+                        egui::pos2(rect.left() + stub_width, y + header_h),
+                    ),
+                    0.0,
+                    header_fill,
+                );
+                painter.rect_stroke(
+                    egui::Rect::from_min_max(
+                        egui::pos2(rect.left(), y),
+                        egui::pos2(rect.left() + stub_width, y + header_h),
+                    ),
+                    0.0,
+                    egui::Stroke::new(0.5, edge),
+                );
+                if d == 0 {
+                    if let Some(dim) = pivot.col_dims.first() {
+                        painter.text(
+                            egui::pos2(rect.left() + stub_width - 8.0, y + header_h / 2.0),
+                            egui::Align2::RIGHT_CENTER,
+                            &dim.name,
+                            theme::semibold(12.0),
+                            theme::text(),
+                        );
+                    }
+                }
+                // The cells of this dimension.
+                let mut j = 0;
+                while j < n_cols {
+                    let level = match pivot.col_dims.get(d) {
+                        Some(dim) => dim.levels.get(col_keys[j].get(d).copied().unwrap_or(0)),
+                        None => None,
+                    };
+                    let label_text = level.cloned().unwrap_or_default();
+                    // How many columns this cell spans: the ones below
+                    // it in the dimension stack.
+                    let below: usize = pivot.col_dims[d + 1..]
+                        .iter()
+                        .map(|x| x.levels.len().max(1))
+                        .product::<usize>()
+                        .max(1);
+                    let span = below.min(n_cols - j);
+                    // The band is centred over the columns it covers.
+                    let x0 = xs[j];
+                    let x1 = xs[j + span];
+                    let cell = egui::Rect::from_min_max(
+                        egui::pos2(x0, y),
+                        egui::pos2(x1, y + header_h),
+                    );
+                    painter.rect_filled(cell, 0.0, header_fill);
+                    painter.rect_stroke(cell, 0.0, egui::Stroke::new(0.5, edge));
+                    painter.text(
+                        egui::pos2((x0 + x1) / 2.0, y + header_h / 2.0),
+                        egui::Align2::CENTER_CENTER,
+                        &label_text,
+                        theme::semibold(12.0),
+                        theme::text(),
+                    );
+                    j += span;
+                }
+            }
+
+            // ---- The body ----
+            let body_top = rect.top() + header_rows as f32 * header_h;
+            for (i, rk) in row_keys.iter().enumerate() {
+                let y = body_top + i as f32 * cell_h;
+                // The stub.
+                let stub = egui::Rect::from_min_max(
+                    egui::pos2(rect.left(), y),
+                    egui::pos2(rect.left() + stub_width, y + cell_h),
+                );
+                painter.rect_filled(stub, 0.0, stub_fill);
+                painter.rect_stroke(stub, 0.0, egui::Stroke::new(0.5, edge));
+                painter.text(
+                    egui::pos2(rect.left() + 8.0, y + cell_h / 2.0),
+                    egui::Align2::LEFT_CENTER,
+                    &stub_text[i],
+                    theme::medium(12.5),
+                    theme::text(),
+                );
+                // The cells.
+                for (j, ck) in col_keys.iter().enumerate() {
+                    let v = pivot.measure_at(rk, ck, measure);
+                    let cell = egui::Rect::from_min_max(
+                        egui::pos2(xs[j], y),
+                        egui::pos2(xs[j + 1], y + cell_h),
+                    );
+                    painter.rect_filled(cell, 0.0, theme::cell());
+                    painter.rect_stroke(cell, 0.0, egui::Stroke::new(0.5, edge));
+                    // A number is right-aligned; a label is centred.
+                    let is_num = v.parse::<f64>().is_ok();
+                    let align = if is_num {
+                        egui::Align2::RIGHT_CENTER
+                    } else {
+                        egui::Align2::CENTER_CENTER
+                    };
+                    painter.text(
+                        egui::pos2(cell.right() - 8.0, cell.center().y),
+                        align,
+                        v,
+                        theme::body(12.5),
+                        theme::text(),
+                    );
+                }
+            }
+        });
+}
+
 fn render_output_table(ui: &mut egui::Ui, t: &OutputTable) {
     use crate::theme;
+    // A table with a pivot behind it is drawn as one, with the
+    // multi-level header.
+    if let Some(p) = &t.pivot {
+        render_pivot_table(ui, p);
+        if !t.note.is_empty() {
+            ui.add_space(3.0);
+            ui.label(egui::RichText::new(&t.note).size(10.5).weak());
+        }
+        return;
+    }
     let header_fill = theme::header();
     let edge = theme::border();
     let stub_fill = theme::surface_alt();

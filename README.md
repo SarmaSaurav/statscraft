@@ -125,7 +125,10 @@ cd installer && cargo build --release   # Windows installer (embeds the app exe)
   the value labels, the measures and the display widths intact
 - Procedures: Descriptives, Frequencies, Correlations, Linear Regression,
   Independent-Samples T Test, Paired-Samples T Test, One-Way ANOVA,
-  Crosstabs with Pearson Chi-Square, **General Linear Model** (factorial
+  Crosstabs with Pearson Chi-Square, as a real **pivot table** with the
+  totals as levels of the dimensions, the measures of a cell and a
+  **Pivot** button that exchanges the row and the column dimensions,
+  **General Linear Model** (factorial
   ANOVA with the three types of sums of squares), **Reliability
   (Cronbach's alpha)**,
   **Factor Analysis (principal components)**, **ROC curves**, **Means**,

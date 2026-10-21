@@ -3,6 +3,15 @@ pub struct OutputTable {
     pub title: String,
     pub headers: Vec<String>,
     pub rows: Vec<Vec<String>>,
+    /// The pivot structure behind the table, when the table has one.
+    ///
+    /// A pivot table is a grid addressed by a row key and a column key
+    /// rather than by a row and a column number, which is what makes
+    /// the SPSS operations - pivoting, drilling into a cell -
+    /// possible. The `headers` and `rows` above are the flattened view
+    /// of the same table, for the export and for the procedures that do
+    /// not need the structure.
+    pub pivot: Option<crate::pivot::PivotTable>,
     /// Footnote rendered beneath the pivot table (SPSS "Notes").
     pub note: String,
     /// An optional chart drawn under the table, as SPSS draws one when
@@ -50,6 +59,33 @@ pub struct ChartSeries {
     /// The label for each x value, so a bar chart can show the category
     /// names rather than 0, 1, 2.
     pub x_labels: Vec<String>,
+}
+
+/// Format a number with the given number of decimals, rounding the
+/// way SPSS does.
+///
+/// Rust's own formatter rounds a half to even, so 5.625 comes out as
+/// 5.62. SPSS rounds a half away from zero, so the same value comes
+/// out as 5.63. The difference is visible in a table of expected
+/// counts, so the rounding is done here.
+fn spss_round(value: f64, decimals: usize) -> String {
+    let factor = 10f64.powi(decimals as i32);
+    let scaled = value * factor;
+    // A value that is a half in decimal is often a hair below it in
+    // binary - 2.675 is stored as 2.67499... - so the half is added
+    // first and an epsilon carries the last bit.
+    let eps = 1e-9 * factor;
+    let rounded = if scaled >= 0.0 {
+        (scaled + 0.5 + eps).floor()
+    } else {
+        (scaled - 0.5 - eps).ceil()
+    };
+    let out = rounded / factor;
+    if decimals == 0 {
+        format!("{}", out.round() as i64)
+    } else {
+        format!("{:.*}", decimals, out)
+    }
 }
 
 impl OutputTable {
@@ -168,6 +204,7 @@ impl OutputTable {
             rows,
             note: "a. Counts exclude system- and user-missing cases.".to_string(),
             chart: None,
+            pivot: None,
         }
     }
 
@@ -266,6 +303,7 @@ impl OutputTable {
             rows,
             note,
             chart: None,
+            pivot: None,
         }
     }
 
@@ -377,6 +415,7 @@ impl OutputTable {
                 r.outcome, r.n
             ),
             chart: None,
+            pivot: None,
         }
     }
 
@@ -493,6 +532,7 @@ impl OutputTable {
             rows,
             note: String::new(),
             chart: None,
+            pivot: None,
         }
     }
 
@@ -548,6 +588,7 @@ impl OutputTable {
             rows,
             note: "a. Counts exclude system- and user-missing cases.".to_string(),
             chart: None,
+            pivot: None,
         }
     }
 
@@ -563,137 +604,150 @@ impl OutputTable {
         cells: &crate::stats::CellCounts,
         stats_sel: &crate::stats::CrosstabStats,
     ) -> Self {
-        let mut headers = vec![ct.var1.clone()];
-        headers.extend(ct.levels2.iter().cloned());
-        headers.push("Total".into());
-        let mut rows = Vec::new();
+        use crate::pivot::{PivotDimension, PivotTable};
 
         let r = ct.levels1.len();
         let c = ct.levels2.len();
         let n = ct.n.max(1) as f64;
 
-        // ---- Observed counts ----
+        // The measures the user asked for. SPSS shows the counts, the
+        // expected counts and the percentages of the same cells, so
+        // they are measures of one pivot rather than separate tables.
+        let mut measures: Vec<String> = Vec::new();
         if cells.observed || cells.is_empty() {
-            rows.push(vec![format!("{} (count)", ct.var1)]);
-            for (i, l1) in ct.levels1.iter().enumerate() {
-                let mut row = vec![l1.clone()];
-                for j in 0..c {
-                    row.push(ct.observed[i][j].to_string());
-                }
-                row.push(ct.row_totals[i].to_string());
-                rows.push(row);
-            }
-            let mut total_row = vec![String::from("Total")];
-            for j in 0..c {
-                total_row.push(col_total(ct, j).to_string());
-            }
-            total_row.push(ct.n.to_string());
-            rows.push(total_row);
+            measures.push("Count".into());
         }
-
-        // ---- Expected counts ----
         if cells.expected {
-            rows.push(vec![format!("{} (expected count)", ct.var1)]);
-            for (i, l1) in ct.levels1.iter().enumerate() {
-                let mut row = vec![l1.clone()];
-                for j in 0..c {
-                    row.push(format!("{:.2}", ct.expected[i][j]));
-                }
-                row.push(format!("{:.2}", ct.row_totals[i] as f64));
-                rows.push(row);
-            }
-            let mut total_row = vec![String::from("Total")];
-            for j in 0..c {
-                let e: f64 = (0..r).map(|i| ct.expected[i][j]).sum();
-                total_row.push(format!("{:.2}", e));
-            }
-            total_row.push(format!("{:.2}", n));
-            rows.push(total_row);
+            measures.push("Expected Count".into());
         }
-
-        // ---- Row percentages ----
         if cells.row_percent {
-            rows.push(vec![format!("{} (row %)", ct.var1)]);
-            for (i, l1) in ct.levels1.iter().enumerate() {
-                let mut row = vec![l1.clone()];
-                for j in 0..c {
-                    let pct = if ct.row_totals[i] > 0 {
-                        ct.observed[i][j] as f64 / ct.row_totals[i] as f64 * 100.0
-                    } else {
-                        0.0
-                    };
-                    row.push(format!("{:.1}%", pct));
-                }
-                row.push("100.0%".to_string());
-                rows.push(row);
-            }
-            let mut total_row = vec![String::from("Total")];
-            for j in 0..c {
-                let ct_total = col_total(ct, j);
-                let pct = if ct_total > 0 {
-                    ct_total as f64 / ct.n as f64 * 100.0
-                } else {
-                    0.0
-                };
-                total_row.push(format!("{:.1}%", pct));
-            }
-            total_row.push("100.0%".to_string());
-            rows.push(total_row);
+            measures.push("Row %".into());
         }
-
-        // ---- Column percentages ----
         if cells.column_percent {
-            rows.push(vec![format!("{} (column %)", ct.var1)]);
-            for (i, l1) in ct.levels1.iter().enumerate() {
-                let mut row = vec![l1.clone()];
-                for j in 0..c {
-                    let ct_total = col_total(ct, j);
-                    let pct = if ct_total > 0 {
-                        ct.observed[i][j] as f64 / ct_total as f64 * 100.0
-                    } else {
-                        0.0
-                    };
-                    row.push(format!("{:.1}%", pct));
-                }
-                let total_pct = if ct.n > 0 {
-                    ct.row_totals[i] as f64 / ct.n as f64 * 100.0
-                } else {
-                    0.0
-                };
-                row.push(format!("{:.1}%", total_pct));
-                rows.push(row);
-            }
-            let mut total_row = vec![String::from("Total")];
-            for j in 0..c {
-                let ct_total = col_total(ct, j);
-                let pct = if ct_total > 0 {
-                    ct_total as f64 / ct.n as f64 * 100.0
-                } else {
-                    0.0
-                };
-                total_row.push(format!("{:.1}%", pct));
-            }
-            total_row.push("100.0%".to_string());
-            rows.push(total_row);
+            measures.push("Column %".into());
+        }
+        if cells.total_percent {
+            measures.push("Total %".into());
+        }
+        if measures.is_empty() {
+            measures.push("Count".into());
         }
 
-        // ---- Total percentages ----
-        if cells.total_percent {
-            rows.push(vec![format!("{} (total %)", ct.var1)]);
-            for (i, l1) in ct.levels1.iter().enumerate() {
-                let mut row = vec![l1.clone()];
-                for j in 0..c {
-                    row.push(format!("{:.1}%", ct.observed[i][j] as f64 / n * 100.0));
+        // The row dimension is the first variable, with a Total level
+        // at the end; the column dimension is the second, likewise.
+        // SPSS always shows the totals, so the levels are always
+        // there.
+        let row_levels: Vec<String> = ct
+            .levels1
+            .iter()
+            .cloned()
+            .chain(std::iter::once("Total".to_string()))
+            .collect();
+        let col_levels: Vec<String> = ct
+            .levels2
+            .iter()
+            .cloned()
+            .chain(std::iter::once("Total".to_string()))
+            .collect();
+
+        let mut pivot = PivotTable::new(
+            format!("Crosstabulation: {} by {}", ct.var1, ct.var2),
+            vec![PivotDimension::new(ct.var1.clone(), row_levels)],
+            vec![PivotDimension::new(ct.var2.clone(), col_levels)],
+            measures,
+        );
+
+        // The counts of a cell. The totals are levels of the
+        // dimensions, so they are ordinary cells: the count of the
+        // total row at a level is that level's column total, and the
+        // count of the total column at a level is that level's row
+        // total.
+        let count = |i: usize, j: usize| -> usize {
+            if i == r && j == c {
+                ct.n
+            } else if i == r {
+                col_total(ct, j)
+            } else if j == c {
+                ct.row_totals[i]
+            } else {
+                ct.observed[i][j]
+            }
+        };
+        // The expected count, under independence.
+        let expected = |i: usize, j: usize| -> f64 {
+            if i == r && j == c {
+                n
+            } else if i == r {
+                (0..r).map(|k| ct.expected[k][j]).sum()
+            } else if j == c {
+                ct.row_totals[i] as f64
+            } else {
+                ct.expected[i][j]
+            }
+        };
+
+        // Fill the cells.
+        let row_keys = pivot.row_keys();
+        let col_keys = pivot.col_keys();
+        for (i, rk) in row_keys.iter().enumerate() {
+            for (j, ck) in col_keys.iter().enumerate() {
+                let mut values: Vec<String> = Vec::new();
+                for m in &pivot.measures {
+                    let v = match m.as_str() {
+                        "Count" => count(i, j).to_string(),
+                        "Expected Count" => spss_round(expected(i, j), 2),
+                        // The percentage of the row the cell is in; the
+                        // total row is the percentage of the whole.
+                        "Row %" => {
+                            let denom = if i == r { ct.n } else { ct.row_totals[i] };
+                            if denom == 0 {
+                                "0.0%".to_string()
+                            } else {
+                                format!(
+                                    "{:.1}%",
+                                    count(i, j) as f64 / denom as f64 * 100.0
+                                )
+                            }
+                        }
+                        // The percentage of the column.
+                        "Column %" => {
+                            let denom = if j == c { ct.n } else { col_total(ct, j) };
+                            if denom == 0 {
+                                "0.0%".to_string()
+                            } else {
+                                format!(
+                                    "{:.1}%",
+                                    count(i, j) as f64 / denom as f64 * 100.0
+                                )
+                            }
+                        }
+                        "Total %" => {
+                            format!("{:.1}%", count(i, j) as f64 / n * 100.0)
+                        }
+                        _ => String::new(),
+                    };
+                    values.push(v);
                 }
-                row.push(format!("{:.1}%", ct.row_totals[i] as f64 / n * 100.0));
-                rows.push(row);
+                pivot.set(rk, ck, values);
             }
-            let mut total_row = vec![String::from("Total")];
-            for j in 0..c {
-                total_row.push(format!("{:.1}%", col_total(ct, j) as f64 / n * 100.0));
+        }
+
+        // The flattened view, for the export and for the procedures
+        // that only read the grid.
+        let mut headers = vec![ct.var1.clone()];
+        headers.extend(ct.levels2.iter().cloned());
+        headers.push("Total".into());
+        let mut rows = Vec::new();
+        for i in 0..=r {
+            let mut row = vec![if i == r {
+                "Total".to_string()
+            } else {
+                ct.levels1[i].clone()
+            }];
+            for j in 0..=c {
+                row.push(count(i, j).to_string());
             }
-            total_row.push("100.0%".to_string());
-            rows.push(total_row);
+            rows.push(row);
         }
 
         // ---- The test statistics ----
@@ -732,13 +786,15 @@ impl OutputTable {
                 "a. Some expected counts are below 5 - the chi-square may not be reliable.".to_string(),
             );
         }
+        pivot.note = note_lines.join("\n");
 
         Self {
-            title: format!("Crosstabulation: {} by {}", ct.var1, ct.var2),
+            title: pivot.title.clone(),
             headers,
             rows,
             note: note_lines.join("\n"),
             chart: None,
+            pivot: Some(pivot),
         }
     }
 
@@ -771,6 +827,7 @@ impl OutputTable {
                 "Pearson Chi-Square = {:.3}, df = {}, Asymp. Sig. (2-sided) = {:.4}; N = {} (missing excluded pairwise)." , ct.chi2, ct.df, ct.p, ct.n
             ),
             chart: None,
+            pivot: None,
         }
     }
 
@@ -844,6 +901,7 @@ impl OutputTable {
             rows,
             note,
             chart: None,
+            pivot: None,
         }
     }
 
@@ -875,6 +933,7 @@ impl OutputTable {
             rows,
             note: String::new(),
             chart: None,
+            pivot: None,
         }
     }
 
@@ -928,6 +987,7 @@ impl OutputTable {
             rows,
             note: String::new(),
             chart: None,
+            pivot: None,
         }
     }
 
@@ -1048,6 +1108,7 @@ impl OutputTable {
             rows,
             note: note_lines.join("\n"),
             chart: None,
+            pivot: None,
         }
     }
 
@@ -1092,6 +1153,7 @@ impl OutputTable {
             ],
             note: String::new(),
             chart: None,
+            pivot: None,
         }
     }
 
@@ -1162,6 +1224,7 @@ impl OutputTable {
             rows,
             note: String::new(),
             chart: None,
+            pivot: None,
         }
     }
 
@@ -1236,6 +1299,7 @@ impl OutputTable {
             rows,
             note,
             chart: None,
+            pivot: None,
         }
     }
 
@@ -1279,6 +1343,7 @@ impl OutputTable {
             rows,
             note: "a. Kolmogorov-Smirnov test for normality.".to_string(),
             chart: None,
+            pivot: None,
         }
     }
 
@@ -1319,6 +1384,7 @@ impl OutputTable {
                 r.effect_size
             ),
             chart: None,
+            pivot: None,
         }
     }
 
@@ -1346,6 +1412,7 @@ impl OutputTable {
             ]],
             note: "a. Based on the normal approximation with tie correction.".to_string(),
             chart: None,
+            pivot: None,
         }
     }
 
@@ -1385,6 +1452,7 @@ impl OutputTable {
             rows,
             note: "a. Based on the chi-square approximation.".to_string(),
             chart: None,
+            pivot: None,
         }
     }
 
@@ -1404,6 +1472,7 @@ impl OutputTable {
             rows,
             note: "a. Based on the chi-square approximation.".to_string(),
             chart: None,
+            pivot: None,
         }
     }
 
@@ -1464,6 +1533,7 @@ impl OutputTable {
             rows,
             note: note_lines.join("\n"),
             chart: None,
+            pivot: None,
         }
     }
 
@@ -1505,6 +1575,7 @@ impl OutputTable {
             rows,
             note: String::new(),
             chart: None,
+            pivot: None,
         }
     }
 
@@ -1555,6 +1626,7 @@ impl OutputTable {
             rows,
             note: note_lines.join("\n"),
             chart: None,
+            pivot: None,
         }
     }
 
@@ -1578,6 +1650,7 @@ impl OutputTable {
             rows,
             note: "a. Extraction Method: Principal Component Analysis.".to_string(),
             chart: None,
+            pivot: None,
         }
     }
 
@@ -1593,6 +1666,7 @@ impl OutputTable {
             rows,
             note: String::new(),
             chart: None,
+            pivot: None,
         }
     }
 
@@ -1627,6 +1701,7 @@ impl OutputTable {
             rows,
             note: "a. Welch's test does not assume equal group variances; Brown-Forsythe's test is robust to outliers.".to_string(),
             chart: None,
+            pivot: None,
         }
     }
 
@@ -1694,6 +1769,7 @@ impl OutputTable {
             rows,
             note: "a. A higher test value counts as a positive result.".to_string(),
             chart,
+            pivot: None,
         }
     }
 
@@ -1722,6 +1798,7 @@ impl OutputTable {
                 r.positive_group, r.n_positive, r.n_negative
             ),
             chart: None,
+            pivot: None,
         }
     }
 }
@@ -1871,5 +1948,122 @@ pub fn scatter_chart(s: &crate::stats::Scatter) -> crate::output::Chart {
             quartiles: None,
             x_labels: Vec::new(),
         }],
+    }
+}
+
+#[cfg(test)]
+mod pivot_tests {
+    use super::*;
+
+    /// The cell counts: every kind of them.
+    fn all_cells() -> crate::stats::CellCounts {
+        crate::stats::CellCounts {
+            observed: true,
+            expected: true,
+            row_percent: true,
+            column_percent: true,
+            total_percent: true,
+        }
+    }
+
+    /// A small crosstab: 2 x 2 with 40 cases.
+    fn crosstab() -> crate::stats::CrosstabsResult {
+        let mut ct = crate::stats::CrosstabsResult {
+            var1: "region".into(),
+            var2: "group".into(),
+            levels1: vec!["East".into(), "West".into()],
+            levels2: vec!["A".into(), "B".into()],
+            observed: vec![vec![10, 5], vec![5, 20]],
+            row_totals: vec![15, 25],
+            col_totals: vec![15, 25],
+            n: 40,
+            chi2: 8.7111,
+            df: 1,
+            p: 0.00316,
+            expected: vec![vec![5.625, 9.375], vec![9.375, 15.625]],
+            phi: 0.4667,
+            cramers_v: 0.4667,
+            min_expected: 5.625,
+            linear_by_linear: None,
+            fisher_exact: None,
+        };
+        ct.n = 40;
+        ct
+    }
+
+    #[test]
+    fn the_rounding_is_the_way_spss_rounds() {
+        // Rust rounds a half to even; SPSS rounds it away from zero.
+        assert_eq!(spss_round(5.625, 2), "5.63");
+        assert_eq!(spss_round(2.675, 2), "2.68");
+        assert_eq!(spss_round(0.125, 2), "0.13");
+        assert_eq!(spss_round(1.005, 2), "1.01");
+        // The ordinary cases are unaffected.
+        assert_eq!(spss_round(5.6249, 2), "5.62");
+        assert_eq!(spss_round(-5.625, 2), "-5.63");
+        assert_eq!(spss_round(12.0, 1), "12.0");
+    }
+
+    #[test]
+    fn the_crosstab_counts_land_in_the_right_cells() {
+        let ct = crosstab();
+        let t = OutputTable::crosstabs_with(&ct, &all_cells(), &Default::default());
+        let p = t.pivot.expect("a pivot table");
+        let rk = p.row_keys();
+        let ck = p.col_keys();
+        // East/A is 10, and the row's total is 15.
+        assert_eq!(p.measure_at(&rk[0], &ck[0], 0), "10");
+        assert_eq!(p.measure_at(&rk[0], &ck[2], 0), "15");
+        // The grand total is 40.
+        assert_eq!(p.measure_at(&rk[2], &ck[2], 0), "40");
+    }
+
+    #[test]
+    fn the_row_percentage_is_of_the_row() {
+        let ct = crosstab();
+        let t = OutputTable::crosstabs_with(&ct, &all_cells(), &Default::default());
+        let p = t.pivot.expect("a pivot table");
+        let rk = p.row_keys();
+        let ck = p.col_keys();
+        // East has 15 cases, of which 10 are A.
+        let row_pct = p
+            .measures
+            .iter()
+            .position(|m| m == "Row %")
+            .expect("a row percentage measure");
+        assert_eq!(p.measure_at(&rk[0], &ck[0], row_pct), "66.7%");
+        // The total row is the whole table.
+        assert_eq!(p.measure_at(&rk[2], &ck[0], row_pct), "37.5%");
+    }
+
+    #[test]
+    fn the_expected_count_is_under_independence() {
+        let ct = crosstab();
+        let t = OutputTable::crosstabs_with(&ct, &all_cells(), &Default::default());
+        let p = t.pivot.expect("a pivot table");
+        let rk = p.row_keys();
+        let ck = p.col_keys();
+        let exp = p
+            .measures
+            .iter()
+            .position(|m| m == "Expected Count")
+            .expect("an expected count measure");
+        assert_eq!(p.measure_at(&rk[0], &ck[0], exp), "5.63");
+        assert_eq!(p.measure_at(&rk[0], &ck[2], exp), "15.00");
+    }
+
+    #[test]
+    fn the_pivot_transposes_the_crosstabulation() {
+        let ct = crosstab();
+        let t = OutputTable::crosstabs_with(&ct, &all_cells(), &Default::default());
+        let p = t.pivot.expect("a pivot table");
+        let q = p.pivoted();
+        assert_eq!(q.row_dims[0].name, "group");
+        assert_eq!(q.col_dims[0].name, "region");
+        let rk = q.row_keys();
+        let ck = q.col_keys();
+        // The cell that was East/A is now A/East.
+        assert_eq!(q.measure_at(&rk[0], &ck[0], 0), "10");
+        assert_eq!(q.measure_at(&rk[1], &ck[0], 0), "5");
     }
 }

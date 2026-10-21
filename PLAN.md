@@ -211,8 +211,9 @@ now, against the design above.
 | 6 | A new icon set: every icon a coloured tile in a Dracula accent, so the ribbon reads as a set of colourful buttons on either background. |
 | 7 | An app icon, in the executable, the installer, the shortcuts and the window title bar. |
 | 8 | A dark theme after the Dracula palette, switched from the View menu. |
+| 9 | A real pivot-table model: cells addressed by a row key and a column key, the totals as levels of the dimensions, the measures of a cell, the pivoting operation and an export that carries the structure. |
 
-Nineteen procedures, 75 tests, one runner behind both the menus and the
+Nineteen procedures, 87 tests, one runner behind both the menus and the
 Syntax Editor. `docs/SPSS_REFERENCE.md` records what was observed in the
 installed IBM SPSS Statistics 27 and where the app deliberately differs
 from it.
@@ -223,9 +224,6 @@ The remaining work, in the order it should be taken:
   mixed), the nonparametric outliers and 1-sample procedures, the
   resampling menus, the missing-data analysis procedures, and the
   survival procedures.
-- **A real pivot-table model** — the output tables are currently a grid
-  of strings with a note. SPSS's output is a pivot table you can pivot
-  and drill into, and the export should carry that structure.
 - **The Data Editor's editing features** — a case can be added, deleted
   and pasted, the cells can be sorted in place, and the missing values
   can be defined per variable.

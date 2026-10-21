@@ -602,3 +602,77 @@ enough to white to be harsh in a data grid that is read for hours.
 
 The theme is switched from the **View** menu, and `statscraft data.csv
 --dark` starts in the dark one.
+
+## 11. Phase 9 — the pivot table
+
+### 11.1 What the model is
+
+An output table in SPSS is not a grid of strings. It is a *pivot
+table*: a set of **dimensions** — the variables down the side and the
+variables across the top — and a value in each cell, addressed by the
+combination of levels the dimensions are at.
+
+`src/pivot.rs` models that directly:
+
+```rust
+pub struct PivotTable {
+    pub title: String,
+    pub row_dims: Vec<PivotDimension>,
+    pub col_dims: Vec<PivotDimension>,
+    pub measures: Vec<String>,
+    pub cells: BTreeMap<(Vec<usize>, Vec<usize>), Vec<String>>,
+    pub note: String,
+    pub measure_index: usize,
+}
+```
+
+The key of a cell is a *row key* and a *column key*, each of which is
+the list of level indices the dimensions are at — not a row and a
+column number. The enumeration order is the spreadsheet one: the last
+dimension varies fastest, so the levels of the first dimension group
+the ones below them.
+
+The **measures** are the several statistics of the same cells: the
+counts, the expected counts, the row percentages and the column
+percentages. SPSS shows them as separate tables under the
+crosstabulation; here they are measures of one pivot, and the reader
+picks which one to look at.
+
+The **totals** are levels of the dimensions, not a separate concept.
+The crosstabulation's row dimension carries the levels of the first
+variable and then a "Total" level, and the cell at that level holds
+the row total. This is how SPSS draws it, and it means the total is
+an ordinary cell that the pivot, the export and the pivot action all
+handle without a special case.
+
+### 11.2 The operations it makes possible
+
+- **Pivoting** — `pivoted()` exchanges the row and the column
+  dimensions and transposes the cells with them. This is the
+  drag-and-drop of a pivot table, and the Output Viewer has a **Pivot**
+  button that does it.
+- **Moving a dimension** — `with_dimension_moved()` takes a variable
+  from one side to the other, and the moved dimension becomes the
+  outermost of its new side, the way SPSS does it.
+- **Flattening** — `flattened()` gives the grid of strings the export
+  and the older procedures read.
+
+### 11.3 The rendering
+
+A spanning cell needs to know the width of the columns it covers, so
+the pivot is drawn with a fixed column layout rather than with the
+`Grid` widget. The header is one band per column dimension, and the
+cells of the outer dimension span the inner ones.
+
+### 11.4 The rounding
+
+Rust's own formatter rounds a half to even, so 5.625 comes out as
+5.62. SPSS rounds a half away from zero, so the same value comes out
+as 5.63. The difference is visible in a table of expected counts, so
+`spss_round` does the rounding the way SPSS does.
+
+### 11.5 The export
+
+The HTML export writes a pivot table as itself — the spanning header,
+the measures, the corner cell — so the structure survives the export
+rather than being flattened away.

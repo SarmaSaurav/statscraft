@@ -4,6 +4,7 @@ mod dialog;
 mod glm;
 mod icon;
 mod output;
+mod pivot;
 mod stats;
 mod syntax;
 mod theme;

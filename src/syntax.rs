@@ -230,6 +230,7 @@ fn execute_line(app: &mut StatsCraftApp, line: &str) {
                                             .collect(),
                                         note: String::new(),
                                         chart: Some(crate::output::histogram_chart(&h)),
+                                        pivot: None,
                                     });
                                 }
                             }
@@ -1252,16 +1253,37 @@ NONPARAMETRIC /FRIEDMAN= score age response_time
         );
         assert!(app.outputs.len() >= 14, "only {} outputs", app.outputs.len());
 
-        // The crosstab must carry the extra cell counts.
+        // The crosstab must carry the extra cell counts. They are
+        // measures of the same cells, so they live in the pivot.
         let crosstab = app
             .outputs
             .iter()
             .find(|o| o.title.starts_with("Crosstabulation"))
             .expect("a crosstab");
+        let pivot = crosstab.pivot.as_ref().expect("a pivot table");
         assert!(
-            crosstab.rows.iter().any(|r| r[0].contains("row %")),
+            pivot.measures.iter().any(|m| m == "Row %"),
             "no row percentages: {:?}",
-            crosstab.rows
+            pivot.measures
+        );
+        assert!(
+            pivot.measures.iter().any(|m| m == "Column %"),
+            "no column percentages: {:?}",
+            pivot.measures
+        );
+        assert!(
+            pivot.measures.iter().any(|m| m == "Expected Count"),
+            "no expected counts: {:?}",
+            pivot.measures
+        );
+        // The totals are levels of the dimensions, as SPSS has them.
+        assert_eq!(
+            pivot.row_dims[0].levels.last().map(|s| s.as_str()),
+            Some("Total")
+        );
+        assert_eq!(
+            pivot.col_dims[0].levels.last().map(|s| s.as_str()),
+            Some("Total")
         );
         assert!(crosstab.note.contains("Phi"), "no Phi: {}", crosstab.note);
 
