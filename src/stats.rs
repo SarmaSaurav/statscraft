@@ -12,11 +12,24 @@ pub struct Descriptive {
 }
 
 pub fn descriptives(table: &DataTable) -> Vec<Descriptive> {
+    // Phase 2 pipeline: menus/syntax select explicit variables; default = all numerics
+    let idx: Vec<usize> = table
+        .columns
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.kind == ColumnKind::Numeric)
+        .map(|(i, _)| i)
+        .collect();
+    descriptives_in(table, &idx)
+}
+
+pub fn descriptives_in(table: &DataTable, var_idx: &[usize]) -> Vec<Descriptive> {
     let mut out = Vec::new();
-    for col in &table.columns {
-        if col.kind != ColumnKind::Numeric {
-            continue;
-        }
+    for &ci in var_idx {
+        let col = match table.columns.get(ci) {
+            Some(c) if c.kind == ColumnKind::Numeric => c,
+            _ => continue,
+        };
         let mut vals: Vec<f64> = Vec::new();
         for (row, v) in col.values.iter().enumerate() {
             if col.is_missing(row) {
@@ -104,6 +117,10 @@ pub fn correlations(table: &DataTable) -> Vec<Correlation> {
         .filter(|(_, c)| c.kind == ColumnKind::Numeric)
         .map(|(i, _)| i)
         .collect();
+    correlations_in(table, &nums)
+}
+
+pub fn correlations_in(table: &DataTable, nums: &[usize]) -> Vec<Correlation> {
     let mut out = Vec::new();
     for a in 0..nums.len() {
         for b in (a + 1)..nums.len() {
@@ -172,7 +189,13 @@ pub fn linear_regression(table: &DataTable) -> Option<RegressionResult> {
     if nums.len() < 2 {
         return None;
     }
-    let (xi, yi) = (nums[0], nums[1]);
+    linear_regression_xy(table, nums[0], nums[1])
+}
+
+pub fn linear_regression_xy(table: &DataTable, yi: usize, xi: usize) -> Option<RegressionResult> {
+    if yi >= table.columns.len() || xi >= table.columns.len() {
+        return None;
+    }
     let cx = &table.columns[xi];
     let cy = &table.columns[yi];
     let mut xs = Vec::new();
@@ -257,8 +280,19 @@ pub fn independent_ttest(table: &DataTable) -> Option<TTestResult> {
         uniq.len() == 2
     })?;
     let outcome_idx = table.columns.iter().position(|c| c.kind == ColumnKind::Numeric)?;
-    let gcol = &table.columns[group_idx];
-    let ocol = &table.columns[outcome_idx];
+    independent_ttest_vars(table, outcome_idx, group_idx)
+}
+
+pub fn independent_ttest_vars(
+    table: &DataTable,
+    outcome_idx: usize,
+    group_idx: usize,
+) -> Option<TTestResult> {
+    let gcol = &table.columns.get(group_idx)?;
+    let ocol = &table.columns.get(outcome_idx)?;
+    if gcol.kind != ColumnKind::String || ocol.kind != ColumnKind::Numeric {
+        return None;
+    }
 
     let mut uniq = std::collections::BTreeSet::new();
     for v in &gcol.values {

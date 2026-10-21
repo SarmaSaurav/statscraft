@@ -89,50 +89,77 @@ impl StateCraftApp {
         format!("{} [DataSet{}]", stem, self.dataset_no)
     }
 
-    pub fn analyze_descriptives(&mut self) {
-        if let Some(t) = &self.table {
-            let d = stats::descriptives(t);
-            self.outputs.push(OutputTable::from_descriptives(&d));
-            self.status = format!("Computed descriptives for {} variables.", d.len());
+    /// Phase 2 pipeline: menus/dialogs generate SPSS syntax text; the single
+    /// syntax runner executes it; results appear in the Output Viewer.
+    pub fn paste_and_run(&mut self, cmd: String) {
+        self.status = format!("Pasted: {}", cmd);
+        crate::syntax::run(self, &cmd);
+        if !self.outputs.is_empty() {
             self.view = View::Output;
-        } else {
-            self.status = "No data loaded.".to_string();
         }
+    }
+
+    fn numeric_var_names(&self) -> Vec<String> {
+        self.table
+            .as_ref()
+            .map(|t| {
+                t.columns
+                    .iter()
+                    .filter(|c| crate::data::ColumnKind::Numeric == c.kind)
+                    .map(|c| c.name.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn analyze_descriptives(&mut self) {
+        let names = self.numeric_var_names();
+        if self.table.is_none() {
+            self.status = "No data loaded.".to_string();
+            return;
+        }
+        if names.is_empty() {
+            self.status = "No numeric variables to analyze.".to_string();
+            return;
+        }
+        self.paste_and_run(format!("DESCRIPTIVES {}", names.join(" ")));
     }
 
     pub fn analyze_frequencies(&mut self) {
-        if let Some(t) = &self.table {
-            for ci in 0..t.columns.len() {
-                let name = t.columns[ci].name.clone();
-                let rows = stats::frequencies(t, ci);
-                self.outputs.push(OutputTable::from_frequencies(&name, &rows));
-            }
-            self.status = format!("Computed frequencies for {} variables.", t.columns.len());
-            self.view = View::Output;
-        } else {
+        if self.table.is_none() {
             self.status = "No data loaded.".to_string();
+            return;
         }
+        self.paste_and_run("FREQUENCIES".to_string());
     }
 
     pub fn analyze_correlations(&mut self) {
-        if let Some(t) = &self.table {
-            let c = stats::correlations(t);
-            self.outputs.push(OutputTable::from_correlations(&c));
-            self.status = format!("Computed {} correlations.", c.len());
-            self.view = View::Output;
-        } else {
+        let names = self.numeric_var_names();
+        if self.table.is_none() {
             self.status = "No data loaded.".to_string();
+            return;
         }
+        if names.len() < 2 {
+            self.status = "CORRELATIONS needs two or more numeric variables.".to_string();
+            return;
+        }
+        self.paste_and_run(format!("CORRELATIONS {}", names.join(" ")));
     }
 
     pub fn analyze_regression(&mut self) {
         if let Some(t) = &self.table {
-            if let Some(r) = stats::linear_regression(t) {
-                self.outputs.push(OutputTable::from_regression(&r));
-                self.status = "Computed linear regression.".to_string();
-                self.view = View::Output;
-            } else {
+            let nums: Vec<usize> = t
+                .columns
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.kind == crate::data::ColumnKind::Numeric)
+                .map(|(i, _)| i)
+                .collect();
+            if nums.len() < 2 {
                 self.status = "Need at least 2 numeric columns.".to_string();
+            } else {
+                let (y, x) = (t.columns[nums[0]].name.clone(), t.columns[nums[1]].name.clone());
+                self.paste_and_run(format!("REGRESSION {} WITH {}", y, x));
             }
         } else {
             self.status = "No data loaded.".to_string();
@@ -190,13 +217,28 @@ impl StateCraftApp {
     }
 
     pub fn analyze_ttest(&mut self) {
+        // pick the same defaults the procedure dialog would: first 2-level
+        // string variable as group, first numeric as outcome -> paste & run
         if let Some(t) = &self.table {
-            if let Some(r) = stats::independent_ttest(t) {
-                self.outputs.push(OutputTable::from_ttest(&r));
-                self.status = "Computed t-test.".to_string();
-                self.view = View::Output;
-            } else {
-                self.status = "Need a 2-level group and numeric outcome.".to_string();
+            let group = t.columns.iter().find(|c| {
+                if c.kind != crate::data::ColumnKind::String {
+                    return false;
+                }
+                let mut uniq = std::collections::BTreeSet::new();
+                for v in &c.values {
+                    if let crate::data::Value::Text(s) = v {
+                        uniq.insert(s.clone());
+                    }
+                }
+                uniq.len() == 2
+            });
+            let outcome = t.columns.iter().find(|c| c.kind == crate::data::ColumnKind::Numeric);
+            match (outcome, group) {
+                (Some(o), Some(g)) => {
+                    let cmd = format!("T-TEST {} BY {}", o.name, g.name);
+                    self.paste_and_run(cmd);
+                }
+                _ => self.status = "Need a 2-level group and numeric outcome.".to_string(),
             }
         } else {
             self.status = "No data loaded.".to_string();
@@ -280,8 +322,8 @@ impl eframe::App for StateCraftApp {
                             let names: Vec<String> = self.table.as_ref().unwrap().columns.iter().map(|c| c.name.clone()).collect();
                             for (i, name) in names.iter().enumerate() {
                                 ui.menu_button(name, |ui| {
-                                    if ui.button("Ascending").clicked() { ui.close_menu(); if let Some(t) = &mut self.table { t.sort_rows(i, true); self.status = format!("Sorted cases by {} (ascending).", name); } }
-                                    if ui.button("Descending").clicked() { ui.close_menu(); if let Some(t) = &mut self.table { t.sort_rows(i, false); self.status = format!("Sorted cases by {} (descending).", name); } }
+                                    if ui.button("Ascending").clicked() { ui.close_menu(); let cmd = format!("SORT CASES BY {} (A)", name); self.paste_and_run(cmd); }
+                                    if ui.button("Descending").clicked() { ui.close_menu(); let cmd = format!("SORT CASES BY {} (D)", name); self.paste_and_run(cmd); }
                                 });
                             }
                         }

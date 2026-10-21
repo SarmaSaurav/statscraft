@@ -403,6 +403,12 @@ impl DataTable {
 
     /// SPSS "Sort Cases": stable reorder of all rows by one column.
     /// Numeric values sort as numbers, text after numbers, missing last.
+    /// Column index by name (case-insensitive), for the syntax runner.
+    pub fn column_index(&self, name: &str) -> Option<usize> {
+        let lower = name.trim().to_lowercase();
+        self.columns.iter().position(|c| c.name.to_lowercase() == lower)
+    }
+
     pub fn sort_rows(&mut self, col: usize, ascending: bool) {
         if col >= self.columns.len() || self.n_rows == 0 {
             return;
