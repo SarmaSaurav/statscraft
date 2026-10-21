@@ -41,6 +41,10 @@ pub enum Procedure {
     Regression,
     Means,
     Explore,
+    MannWhitney,
+    Wilcoxon,
+    KruskalWallis,
+    Friedman,
 }
 
 impl Procedure {
@@ -57,6 +61,10 @@ impl Procedure {
             Procedure::Regression => "Linear Regression",
             Procedure::Means => "Means",
             Procedure::Explore => "Explore",
+            Procedure::MannWhitney => "Mann-Whitney Test",
+            Procedure::Wilcoxon => "Wilcoxon Signed-Rank Test",
+            Procedure::KruskalWallis => "Kruskal-Wallis Test",
+            Procedure::Friedman => "Friedman Test",
         }
     }
 
@@ -73,6 +81,10 @@ impl Procedure {
             Procedure::Regression => "REGRESSION",
             Procedure::Means => "MEANS",
             Procedure::Explore => "EXPLORE",
+            Procedure::MannWhitney => "NONPARAMETRIC /MW=",
+            Procedure::Wilcoxon => "NONPARAMETRIC /WILCOXON=",
+            Procedure::KruskalWallis => "NONPARAMETRIC /K-W=",
+            Procedure::Friedman => "NONPARAMETRIC /FRIEDMAN=",
         }
     }
 
@@ -81,13 +93,21 @@ impl Procedure {
     pub fn needs_group(self) -> bool {
         matches!(
             self,
-            Procedure::TTest | Procedure::Anova | Procedure::Means | Procedure::Crosstabs
+            Procedure::TTest
+                | Procedure::Anova
+                | Procedure::Means
+                | Procedure::Crosstabs
+                | Procedure::MannWhitney
+                | Procedure::KruskalWallis
         )
     }
 
     /// True when the procedure operates on numeric variables only.
     pub fn numeric_only(self) -> bool {
-        !matches!(self, Procedure::Frequencies | Procedure::Crosstabs)
+        !matches!(
+            self,
+            Procedure::Frequencies | Procedure::Crosstabs | Procedure::Wilcoxon
+        )
     }
 }
 
@@ -211,10 +231,14 @@ impl DialogState {
 
     /// SPSS disables OK until the dialog has everything it needs.
     pub fn ok_enabled(&self) -> bool {
-        if self.procedure.needs_group() {
-            self.targets.len() >= 1 && self.group_var.is_some()
-        } else {
-            !self.targets.is_empty()
+        match self.procedure {
+            // The paired and Friedman tests compare several variables.
+            Procedure::Wilcoxon => self.targets.len() >= 2,
+            Procedure::Friedman => self.targets.len() >= 3,
+            _ if self.procedure.needs_group() => {
+                self.targets.len() >= 1 && self.group_var.is_some()
+            }
+            _ => !self.targets.is_empty(),
         }
     }
 
@@ -239,7 +263,7 @@ impl DialogState {
                     p.push_str(&stats);
                 }
                 if self.options.show_charts {
-                    p.push_str(" /CHART=HISTOGRAM");
+                    p.push_str(" /CHART=BARCHART");
                 }
                 parts.push(p);
             }
@@ -317,6 +341,33 @@ impl DialogState {
             }
             Procedure::Explore => {
                 parts.push(format!("EXPLORE {}", vars));
+            }
+            Procedure::MannWhitney => {
+                let g = self.group_var.clone()?;
+                parts.push(format!("NONPARAMETRIC /MW= {} BY {}", vars, g));
+            }
+            Procedure::Wilcoxon => {
+                if self.targets.len() < 2 {
+                    return None;
+                }
+                parts.push(format!(
+                    "NONPARAMETRIC /WILCOXON= {} {}",
+                    self.targets[0],
+                    self.targets[1]
+                ));
+            }
+            Procedure::KruskalWallis => {
+                let g = self.group_var.clone()?;
+                parts.push(format!("NONPARAMETRIC /K-W= {} BY {}", vars, g));
+            }
+            Procedure::Friedman => {
+                if self.targets.len() < 3 {
+                    return None;
+                }
+                parts.push(format!(
+                    "NONPARAMETRIC /FRIEDMAN= {}",
+                    self.targets.join(" ")
+                ));
             }
         }
 
@@ -639,7 +690,12 @@ pub fn render(
                     Procedure::Explore => {
                         sub_button(ui, d, SubDialog::ExploreOptions, "Options…");
                     }
-                    Procedure::PairedT => {}
+                    // The nonparametric tests have no options of their own.
+                    Procedure::PairedT
+                    | Procedure::MannWhitney
+                    | Procedure::Wilcoxon
+                    | Procedure::KruskalWallis
+                    | Procedure::Friedman => {}
                 }
             });
 
@@ -662,7 +718,7 @@ pub fn render(
                     );
                     ui.checkbox(
                         &mut d.options.show_charts,
-                        egui::RichText::new("Create charts (histogram)").size(12.0),
+                        egui::RichText::new("Create charts (bar chart)").size(12.0),
                     );
                 }
                 Procedure::Descriptives => {
@@ -838,7 +894,7 @@ fn render_sub_dialog(ui: &mut egui::Ui, d: &mut DialogState) {
                     ui.add_space(3.0);
                     ui.checkbox(
                         &mut d.options.show_charts,
-                        egui::RichText::new("Histogram").size(11.5),
+                        egui::RichText::new("Bar chart of the counts").size(11.5),
                     );
                     ui.label(
                         egui::RichText::new("Charts are drawn in the Output Viewer.")

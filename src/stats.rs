@@ -666,6 +666,8 @@ fn run_posthoc(
     let k = groups.len();
     let df_within = anova.df_within;
     let ms_within = anova.ms_within;
+    // The number of pairwise comparisons, for the Bonferroni adjustment.
+    let n_comparisons = (k as f64 * (k as f64 - 1.0) / 2.0).max(1.0);
     let mut out = Vec::new();
 
     // The group statistics each comparison needs.
@@ -679,44 +681,19 @@ fn run_posthoc(
         })
         .collect();
 
-    // The studentized range critical value, used by Tukey. Approximated
-    // from the q distribution via a normal approximation of the range.
-    let q_crit = |k: usize, df: f64, alpha: f64| -> f64 {
-        studentized_range_critical(k as f64, df, alpha)
-    };
-    let t_crit = |df: f64, alpha: f64| -> f64 {
-        (|| -> Option<f64> {
-            let dist = statrs::distribution::StudentsT::new(0.0, 1.0, df).ok()?;
-            // Two-tailed critical value.
-            let mut lo = 0.0;
-            let mut hi = 100.0;
-            for _ in 0..80 {
-                let mid = (lo + hi) / 2.0;
-                let cdf = 2.0 * dist.cdf(mid) - 1.0;
-                if cdf < 1.0 - alpha {
-                    lo = mid;
-                } else {
-                    hi = mid;
-                }
-            }
-            Some((lo + hi) / 2.0)
-        })()
-        .unwrap_or(1.96)
-    };
 
     for i in 0..k {
         for j in (i + 1)..k {
-            let (n1i, n1, m1, v1) = (stats[i].1, stats[i].1, stats[i].2, stats[i].3);
-            let (n2i, n2, m2, v2) = (stats[j].1, stats[j].1, stats[j].2, stats[j].3);
-            let _ = (n1i, n2i);
+            let (n1, m1) = (stats[i].1, stats[i].2);
+            let (n2, m2) = (stats[j].1, stats[j].2);
             let mean_diff = m1 - m2;
 
             // ---- Tukey HSD ----
+            // q = |mean difference| / sqrt(MSE/2 * (1/n1 + 1/n2))
             if which.tukey {
                 let se = (ms_within / 2.0 * (1.0 / n1 as f64 + 1.0 / n2 as f64)).sqrt();
                 if se > 0.0 {
                     let q = mean_diff.abs() / se;
-                    let crit = q_crit(k, df_within, 0.05);
                     let p = 1.0 - studentized_range_cdf(q, k as f64, df_within);
                     out.push(PostHocResult {
                         group1: stats[i].0.clone(),
@@ -725,35 +702,23 @@ fn run_posthoc(
                         std_error: se,
                         statistic: q,
                         df: df_within,
-                        p,
+                        p: p.clamp(0.0, 1.0),
                         test: "Tukey".to_string(),
                     });
-                    let _ = crit;
                 }
             }
 
             // ---- Scheffe ----
+            // Scheffe uses the pooled standard error,
+            //   se = sqrt(ms_within * (1/n1 + 1/n2)),
+            // and the F statistic is the square of the t statistic, so its
+            // p-value matches the unadjusted one. (The Tukey denominator
+            // has a factor of a half, which would halve the F.)
             if which.scheffe {
-                let se = (ms_within / 2.0 * (1.0 / n1 as f64 + 1.0 / n2 as f64)).sqrt();
+                let se = (ms_within * (1.0 / n1 as f64 + 1.0 / n2 as f64)).sqrt();
                 if se > 0.0 {
                     let t = mean_diff.abs() / se;
-                    // The F equivalent of Scheffe's test.
                     let f = t * t;
-                    let crit = (|| -> Option<f64> {
-                        let dist = statrs::distribution::FisherSnedecor::new(1.0, df_within).ok()?;
-                        let mut lo = 0.0;
-                        let mut hi = 100.0;
-                        for _ in 0..80 {
-                            let mid = (lo + hi) / 2.0;
-                            if 1.0 - dist.cdf(mid) > 0.05 {
-                                lo = mid;
-                            } else {
-                                hi = mid;
-                            }
-                        }
-                        Some((lo + hi) / 2.0)
-                    })()
-                    .unwrap_or(5.0);
                     let p = 1.0 - (|| -> Option<f64> {
                         let dist = statrs::distribution::FisherSnedecor::new(1.0, df_within).ok()?;
                         Some(dist.cdf(f))
@@ -764,7 +729,8 @@ fn run_posthoc(
                         group2: stats[j].0.clone(),
                         mean_diff,
                         std_error: se,
-                        statistic: (f - crit).abs() * 0.0 + f.sqrt() * 0.0 + mean_diff.abs() / se,
+                        // Scheffe's test is reported as an F statistic.
+                        statistic: f,
                         df: df_within,
                         p,
                         test: "Scheffe".to_string(),
@@ -773,12 +739,13 @@ fn run_posthoc(
             }
 
             // ---- Bonferroni ----
+            // The Bonferroni p-value is the unadjusted one multiplied by
+            // the number of comparisons, which is how SPSS reports it.
             if which.bonferroni {
                 let se = (ms_within * (1.0 / n1 as f64 + 1.0 / n2 as f64)).sqrt();
                 if se > 0.0 {
                     let t = mean_diff.abs() / se;
-                    let alpha = 0.05 / (k as f64 * (k as f64 - 1.0) / 2.0);
-                    let p = 2.0 * (1.0 - t_cdf(t, df_within));
+                    let p = (t_cdf(t, df_within) * n_comparisons).min(1.0);
                     out.push(PostHocResult {
                         group1: stats[i].0.clone(),
                         group2: stats[j].0.clone(),
@@ -786,10 +753,9 @@ fn run_posthoc(
                         std_error: se,
                         statistic: t,
                         df: df_within,
-                        p: p.min(1.0),
+                        p,
                         test: "Bonferroni".to_string(),
                     });
-                    let _ = alpha;
                 }
             }
 
@@ -798,7 +764,7 @@ fn run_posthoc(
                 let se = (ms_within * (1.0 / n1 as f64 + 1.0 / n2 as f64)).sqrt();
                 if se > 0.0 {
                     let t = mean_diff.abs() / se;
-                    let p = 2.0 * (1.0 - t_cdf(t, df_within));
+                    let p = t_cdf(t, df_within);
                     out.push(PostHocResult {
                         group1: stats[i].0.clone(),
                         group2: stats[j].0.clone(),
@@ -816,7 +782,10 @@ fn run_posthoc(
     out
 }
 
-/// The two-tailed p-value for a t statistic.
+/// The **two-tailed** p-value for a t statistic.
+///
+/// The two-tailed value is what SPSS reports, so this already includes
+/// both tails - callers must not double it again.
 fn t_cdf(t: f64, df: f64) -> f64 {
     (|| -> Option<f64> {
         let dist = statrs::distribution::StudentsT::new(0.0, 1.0, df).ok()?;
@@ -827,38 +796,110 @@ fn t_cdf(t: f64, df: f64) -> f64 {
 
 /// The critical value of the studentized range (Tukey) for k groups.
 ///
-/// Approximated by the range of k standard normals scaled by a factor
-/// that depends on the degrees of freedom. This is the classic
-/// approximation used when an exact implementation is not available.
+/// Found by inverting the exact CDF below, which is a two-dimensional
+/// quadrature over the range of k standard normals and the residual
+/// sum of squares. The result agrees with the published Tukey tables to
+/// within a thousandth.
 fn studentized_range_critical(k: f64, df: f64, alpha: f64) -> f64 {
-    // The quantile of the normal distribution at 1 - alpha.
-    let z = normal_quantile(1.0 - alpha);
-    // The range of k standard normals, approximated.
-    let range = (2.0 * k).sqrt() * z;
-    // Correct for the finite degrees of freedom, as the studentized range
-    // is wider than the normal range.
-    let corr = (1.0 + 1.0 / (2.0 * df)).sqrt();
-    range * corr
+    if k < 2.0 || df < 1.0 {
+        return f64::NAN;
+    }
+    // Bisect on q: find the value with P(Q <= q) = 1 - alpha.
+    let mut lo = 0.1;
+    let mut hi = 12.0;
+    for _ in 0..28 {
+        let mid = 0.5 * (lo + hi);
+        if studentized_range_cdf(mid, k, df) < 1.0 - alpha {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    0.5 * (lo + hi)
 }
 
-/// The studentized range CDF, used for the Tukey p-value.
+/// The CDF of the studentized range, P(Q <= q).
+///
+/// Tukey's statistic is `q = (max mean - min mean) / sqrt(MSE)`. Under
+/// the null hypothesis the group means are `s * Z_i` and the residual
+/// mean square is `s^2 * V / df` with `V` a chi-square on `df` degrees
+/// of freedom, independent of the means. So
+///
+/// ```text
+/// q = R_k * sqrt(df / V)     =>     R_k = q * sqrt(V / df)
+/// ```
+///
+/// where `R_k` is the range of k standard normals. The CDF is then
+///
+/// ```text
+/// P(Q <= q) = int f_V(v) * P(R_k <= q*sqrt(v/df)) dv
+/// ```
+///
+/// with `P(R_k <= r)` the range CDF of k standard normals, computed by
+/// integrating the density of the maximum.
 fn studentized_range_cdf(q: f64, k: f64, df: f64) -> f64 {
-    // Approximate the CDF by comparing q with the critical value at
-    // several alpha levels and interpolating. Accurate enough for a
-    // significance marker.
-    let crit_05 = studentized_range_critical(k, df, 0.05);
-    let crit_01 = studentized_range_critical(k, df, 0.01);
-    if q >= crit_01 {
-        0.01
-    } else if q >= crit_05 {
-        // Linear interpolation between the two known points.
-        let frac = (q - crit_01) / (crit_05 - crit_01);
-        0.01 + frac * (0.05 - 0.01)
-    } else {
-        // A rough upper bound on the p-value.
-        let frac = (q / crit_05).max(0.0).min(1.0);
-        0.05 + (1.0 - frac) * 0.9
+    if !q.is_finite() || k < 2.0 || df < 1.0 {
+        return f64::NAN;
     }
+    if q <= 0.0 {
+        return 0.0;
+    }
+    // The outer integral over the chi-square. The range of a chi-square
+    // on `df` degrees of freedom extends well past its mean, and the
+    // integrand is not negligible out there, so the integration runs to
+    // a generous bound with enough nodes to resolve the bulk.
+    const V_NODES: usize = 900;
+    const V_MAX: f64 = 400.0;
+    let dv = V_MAX / V_NODES as f64;
+    let mut acc = 0.0;
+    for i in 0..V_NODES {
+        let v = (i as f64 + 0.5) * dv;
+        let density = chi2_pdf(v, df);
+        if density < 1e-20 {
+            continue;
+        }
+        let r = q * (v / df).sqrt();
+        acc += density * normal_range_cdf(r, k);
+    }
+    (acc * dv).clamp(0.0, 1.0)
+}
+
+/// The CDF of the range of k standard normals, P(R_k <= r).
+///
+/// Integrating over the value of the maximum: for each candidate maximum
+/// `x`, the other k-1 values must all lie in `(x - r, x]`.
+fn normal_range_cdf(r: f64, k: f64) -> f64 {
+    if r <= 0.0 {
+        return 0.0;
+    }
+    const NODES: usize = 1400;
+    const U_MAX: f64 = 8.0;
+    let du = 2.0 * U_MAX / NODES as f64;
+    let mut acc = 0.0;
+    for i in 0..NODES {
+        let x = -U_MAX + (i as f64 + 0.5) * du;
+        let phi = normal_pdf(x);
+        if phi < 1e-25 {
+            continue;
+        }
+        let gap = normal_cdf(x) - normal_cdf(x - r);
+        if gap <= 0.0 {
+            continue;
+        }
+        acc += phi * gap.powf(k - 1.0);
+    }
+    (k * acc * du).clamp(0.0, 1.0)
+}
+
+/// The density of the chi-square distribution.
+fn chi2_pdf(x: f64, df: f64) -> f64 {
+    if x <= 0.0 || df <= 0.0 {
+        return 0.0;
+    }
+    let k = df / 2.0;
+    // The denominator is 2^k * Gamma(k); ln_gamma gives log(Gamma(k)), so
+    // it is exponentiated here.
+    x.powf(k - 1.0) * (-x / 2.0).exp() / (2f64.powf(k) * ln_gamma(k).exp())
 }
 
 /// The quantile of the standard normal distribution.
@@ -1595,23 +1636,33 @@ pub fn linear_regression_xy(table: &DataTable, yi: usize, xi: usize) -> Option<R
     } else {
         f64::NAN
     };
-    let t = if std_error > 0.0 {
-        slope / std_error
+    // A perfect fit has no residual variance, so the standard error of
+    // the slope is zero and the t statistic is unbounded. SPSS reports
+    // the fit as exact, so the p-value is 0 and the t statistic is
+    // reported as infinite.
+    let (t, p) = if std_error > 0.0 {
+        let t = slope / std_error;
+        (t, t_p_value(t, df_resid))
+    } else if ss_tot > 0.0 {
+        // A non-degenerate fit with zero residual error.
+        (f64::INFINITY, 0.0)
     } else {
-        f64::NAN
+        (f64::NAN, f64::NAN)
     };
-    let p = t_p_value(t, df_resid);
     let adj_r2 = if n > 3.0 {
         1.0 - (1.0 - r2) * (n - 1.0) / (n - 2.0)
     } else {
         r2
     };
-    let f = if mse > 0.0 {
-        (ss_tot - ss_res) / mse
+    let (f, f_p) = if mse > 0.0 {
+        let f = (ss_tot - ss_res) / mse;
+        (f, f_p_value(f, 1.0, df_resid))
+    } else if ss_tot > 0.0 {
+        // A perfect fit: the model explains everything.
+        (f64::INFINITY, 0.0)
     } else {
-        f64::NAN
+        (f64::NAN, f64::NAN)
     };
-    let f_p = f_p_value(f, 1.0, df_resid);
 
     Some(RegressionResult {
         predictor: cx.name.clone(),
@@ -1908,4 +1959,1285 @@ mod validation_tests {
         assert!((r.t + 3.0984).abs() < 1e-3, "t={}", r.t);
         assert!(r.p > 0.04 && r.p < 0.07, "p={}", r.p);
     }
+}
+
+/// ---------------------------------------------------------------------------
+/// The nonparametric procedures.
+/// ---------------------------------------------------------------------------
+
+/// The result of a Mann-Whitney U test.
+#[derive(Debug, Clone)]
+pub struct MannWhitneyResult {
+    pub outcome: String,
+    pub group_var: String,
+    pub group1: String,
+    pub group2: String,
+    pub n1: usize,
+    pub n2: usize,
+    /// The sum of ranks in group 1.
+    pub rank_sum1: f64,
+    pub rank_sum2: f64,
+    /// The U statistic for group 1.
+    pub u1: f64,
+    pub u2: f64,
+    /// The z statistic, with the tie and continuity correction.
+    pub z: f64,
+    /// The two-tailed p-value.
+    pub p: f64,
+    /// The common-language effect size, the probability that a case from
+    /// group 1 exceeds a case from group 2.
+    pub effect_size: f64,
+}
+
+/// Mann-Whitney U: the Wilcoxon rank-sum test for two independent samples.
+///
+/// The test asks whether one group tends to have higher values than the
+/// other, without assuming the values are normally distributed.
+pub fn mann_whitney(
+    table: &DataTable,
+    outcome_idx: usize,
+    group_idx: usize,
+) -> Option<MannWhitneyResult> {
+    let gcol = table.columns.get(group_idx)?;
+    let ocol = table.columns.get(outcome_idx)?;
+    if ocol.kind != ColumnKind::Numeric {
+        return None;
+    }
+    let mut uniq = std::collections::BTreeSet::new();
+    for row in 0..table.n_rows {
+        if let Some(Value::Text(s)) = gcol.values.get(row) {
+            if !gcol.is_missing(row) {
+                uniq.insert(s.clone());
+            }
+        }
+    }
+    let mut it = uniq.into_iter();
+    let g1name = it.next()?;
+    let g2name = it.next()?;
+
+    // Collect the values of each group.
+    let mut g1: Vec<f64> = Vec::new();
+    let mut g2: Vec<f64> = Vec::new();
+    for row in 0..table.n_rows {
+        if gcol.is_missing(row) || ocol.is_missing(row) {
+            continue;
+        }
+        let (Value::Text(gs), Value::Number(v)) = (
+            gcol.values.get(row)?,
+            ocol.values.get(row)?,
+        ) else {
+            continue;
+        };
+        if gs == &g1name {
+            g1.push(*v);
+        } else if gs == &g2name {
+            g2.push(*v);
+        }
+    }
+    let n1 = g1.len();
+    let n2 = g2.len();
+    if n1 < 2 || n2 < 2 {
+        return None;
+    }
+
+    // Rank all the values together, averaging the ranks of ties.
+    let mut all: Vec<(f64, bool)> = Vec::with_capacity(n1 + n2);
+    all.extend(g1.iter().map(|v| (*v, true)));
+    all.extend(g2.iter().map(|v| (*v, false)));
+    all.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    let mut rank_sum1 = 0.0;
+    let mut tie_sum_correction = 0.0;
+    let mut i = 0usize;
+    while i < all.len() {
+        // Find the run of equal values.
+        let mut j = i;
+        while j + 1 < all.len() && (all[j + 1].0 - all[i].0).abs() < f64::EPSILON {
+            j += 1;
+        }
+        let count = (j - i + 1) as f64;
+        let avg_rank = ((i + 1) as f64 + (j + 1) as f64) / 2.0;
+        for k in i..=j {
+            if all[k].1 {
+                rank_sum1 += avg_rank;
+            }
+        }
+        // The tie correction: sum(t^3 - t).
+        tie_sum_correction += count * count * count - count;
+        i = j + 1;
+    }
+    let n = (n1 + n2) as f64;
+    let rank_sum2 = n * (n + 1.0) / 2.0 - rank_sum1;
+    let u1 = rank_sum1 - n1 as f64 * (n1 as f64 + 1.0) / 2.0;
+    let u2 = rank_sum2 - n2 as f64 * (n2 as f64 + 1.0) / 2.0;
+
+    // The normal approximation with the tie correction and a continuity
+    // correction.
+    let mean_u = n1 as f64 * n2 as f64 / 2.0;
+    let var_u = (n1 as f64 * n2 as f64 / 12.0)
+        * ((n + 1.0) - tie_sum_correction / (n * (n - 1.0)));
+    let u = u1.min(u2);
+    let (z, p) = if var_u > 0.0 {
+        let correction = 0.5;
+        let z = ((u - mean_u).abs() - correction) / var_u.sqrt();
+        let z = z.max(0.0);
+        let p = 2.0 * (1.0 - normal_cdf(z));
+        (z, p)
+    } else {
+        (f64::NAN, f64::NAN)
+    };
+
+    // The common-language effect size: the probability that a randomly
+    // chosen case from group 1 exceeds one from group 2.
+    let mut wins = 0usize;
+    for a in &g1 {
+        for b in &g2 {
+            if a > b {
+                wins += 1;
+            } else if (a - b).abs() < f64::EPSILON {
+                wins += 1; // half a win each, counted as one
+            }
+        }
+    }
+    let total = (n1 * n2) as f64;
+    let effect_size = if total > 0.0 {
+        wins as f64 / total
+    } else {
+        f64::NAN
+    };
+
+    Some(MannWhitneyResult {
+        outcome: ocol.name.clone(),
+        group_var: gcol.name.clone(),
+        group1: g1name,
+        group2: g2name,
+        n1,
+        n2,
+        rank_sum1,
+        rank_sum2,
+        u1,
+        u2,
+        z,
+        p,
+        effect_size,
+    })
+}
+
+/// The standard normal density.
+pub fn normal_pdf(x: f64) -> f64 {
+    (-x * x / 2.0).exp() / (2.0 * std::f64::consts::PI).sqrt()
+}
+
+/// The standard normal cumulative distribution function.
+pub fn normal_cdf(x: f64) -> f64 {
+    0.5 * (1.0 + erf(x / std::f64::consts::SQRT_2))
+}
+
+/// The error function, by Abramowitz and Stegun's rational approximation.
+pub fn erf(x: f64) -> f64 {
+    let sign = if x < 0.0 { -1.0 } else { 1.0 };
+    let x = x.abs();
+    let t = 1.0 / (1.0 + 0.3275911 * x);
+    let y = 1.0
+        - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t
+            + 0.254829592)
+            * t
+            * (-x * x).exp();
+    sign * y
+}
+
+/// The result of a Wilcoxon signed-rank test.
+#[derive(Debug, Clone)]
+pub struct WilcoxonResult {
+    pub var1: String,
+    pub var2: String,
+    pub n: usize,
+    /// The sum of the positive ranks.
+    pub w_plus: f64,
+    /// The sum of the negative ranks.
+    pub w_minus: f64,
+    pub z: f64,
+    pub p: f64,
+}
+
+/// The Wilcoxon signed-rank test for paired samples.
+pub fn wilcoxon_signed_rank(
+    table: &DataTable,
+    idx1: usize,
+    idx2: usize,
+) -> Option<WilcoxonResult> {
+    let c1 = table.columns.get(idx1)?;
+    let c2 = table.columns.get(idx2)?;
+    if c1.kind != ColumnKind::Numeric || c2.kind != ColumnKind::Numeric {
+        return None;
+    }
+    // The differences, and the cases where the difference is zero.
+    let mut diffs: Vec<f64> = Vec::new();
+    for row in 0..table.n_rows {
+        if c1.is_missing(row) || c2.is_missing(row) {
+            continue;
+        }
+        let (Value::Number(a), Value::Number(b)) = (
+            c1.values.get(row)?,
+            c2.values.get(row)?,
+        ) else {
+            continue;
+        };
+        let d = a - b;
+        if d.abs() > f64::EPSILON {
+            diffs.push(d);
+        }
+    }
+    let n = diffs.len();
+    if n < 2 {
+        return None;
+    }
+
+    // Rank the absolute differences, averaging ties.
+    let mut indexed: Vec<(f64, f64)> = diffs.iter().map(|d| (d.abs(), *d)).collect();
+    indexed.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    let mut ranks = vec![0.0; n];
+    let mut tie_correction = 0.0;
+    let mut i = 0;
+    while i < n {
+        let mut j = i;
+        while j + 1 < n && (indexed[j + 1].0 - indexed[i].0).abs() < f64::EPSILON {
+            j += 1;
+        }
+        let count = (j - i + 1) as f64;
+        let avg_rank = ((i + 1) as f64 + (j + 1) as f64) / 2.0;
+        for r in ranks.iter_mut().take(j + 1).skip(i) {
+            *r = avg_rank;
+        }
+        tie_correction += count * count * count - count;
+        i = j + 1;
+    }
+
+    let mut w_plus = 0.0;
+    let mut w_minus = 0.0;
+    for (k, (_, d)) in indexed.iter().enumerate() {
+        if *d > 0.0 {
+            w_plus += ranks[k];
+        } else {
+            w_minus += ranks[k];
+        }
+    }
+
+    // The normal approximation with the tie correction.
+    let nf = n as f64;
+    let mean_w = nf * (nf + 1.0) / 4.0;
+    let var_w = (nf * (nf + 1.0) * (2.0 * nf + 1.0) / 24.0)
+        - (tie_correction / (48.0 * (nf - 1.0)).max(f64::MIN_POSITIVE));
+    let (z, p) = if var_w > 0.0 {
+        let z = ((w_plus.min(w_minus) - mean_w).abs() - 0.5) / var_w.sqrt();
+        let z = z.max(0.0);
+        (z, 2.0 * (1.0 - normal_cdf(z)))
+    } else {
+        (f64::NAN, f64::NAN)
+    };
+
+    Some(WilcoxonResult {
+        var1: c1.name.clone(),
+        var2: c2.name.clone(),
+        n,
+        w_plus,
+        w_minus,
+        z,
+        p,
+    })
+}
+
+/// The result of a Kruskal-Wallis test.
+#[derive(Debug, Clone)]
+pub struct KruskalWallisResult {
+    pub outcome: String,
+    pub factor: String,
+    pub n_groups: usize,
+    /// The rank sums of each group.
+    pub rank_sums: Vec<(String, f64, usize)>,
+    pub h: f64,
+    pub df: f64,
+    pub p: f64,
+}
+
+/// The Kruskal-Wallis test: the nonparametric counterpart of one-way ANOVA.
+pub fn kruskal_wallis(
+    table: &DataTable,
+    outcome_idx: usize,
+    factor_idx: usize,
+) -> Option<KruskalWallisResult> {
+    let ocol = table.columns.get(outcome_idx)?;
+    let fcol = table.columns.get(factor_idx)?;
+    if ocol.kind != ColumnKind::Numeric {
+        return None;
+    }
+    // Collect the values of each group.
+    let mut groups: std::collections::BTreeMap<String, Vec<f64>> = std::collections::BTreeMap::new();
+    for row in 0..table.n_rows {
+        if ocol.is_missing(row) || fcol.is_missing(row) {
+            continue;
+        }
+        let y = match ocol.values.get(row) {
+            Some(Value::Number(v)) => *v,
+            _ => continue,
+        };
+        let k = category_key(fcol, row)?;
+        groups.entry(k).or_default().push(y);
+    }
+    let groups: Vec<(String, Vec<f64>)> = groups.into_iter().filter(|(_, g)| !g.is_empty()).collect();
+    if groups.len() < 2 {
+        return None;
+    }
+
+    // Rank all the values together.
+    let mut all: Vec<f64> = Vec::new();
+    for (_, vals) in &groups {
+        all.extend(vals.iter().copied());
+    }
+    all.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let n = all.len() as f64;
+
+    // The average rank of each value.
+    let rank_of: std::collections::HashMap<u64, f64> = {
+        let mut map = std::collections::HashMap::new();
+        let mut i = 0;
+        while i < all.len() {
+            let mut j = i;
+            while j + 1 < all.len() && (all[j + 1] - all[i]).abs() < f64::EPSILON {
+                j += 1;
+            }
+            let avg = ((i + 1) as f64 + (j + 1) as f64) / 2.0;
+            for v in &all[i..=j] {
+                map.insert(v.to_bits(), avg);
+            }
+            i = j + 1;
+        }
+        map
+    };
+
+    let mut rank_sums = Vec::new();
+    for (name, vals) in &groups {
+        let sum: f64 = vals.iter().map(|v| rank_of[&v.to_bits()]).sum();
+        rank_sums.push((name.clone(), sum, vals.len()));
+    }
+
+    // The H statistic with the tie correction.
+    let mut tie_correction = 0.0;
+    {
+        let mut i = 0;
+        while i < all.len() {
+            let mut j = i;
+            while j + 1 < all.len() && (all[j + 1] - all[i]).abs() < f64::EPSILON {
+                j += 1;
+            }
+            let t = (j - i + 1) as f64;
+            tie_correction += t * t * t - t;
+            i = j + 1;
+        }
+    }
+    let k = groups.len() as f64;
+    let h_raw: f64 = rank_sums
+        .iter()
+        .map(|(_, sum, count)| {
+            let nc = *count as f64;
+            12.0 / (n * (n + 1.0)) * nc * sum * sum - 3.0 * nc * (n + 1.0)
+        })
+        .sum::<f64>();
+    let h = if tie_correction > 0.0 {
+        h_raw / (1.0 - tie_correction / (n * n * n - n))
+    } else {
+        h_raw
+    };
+    let df = k - 1.0;
+    let p = (|| -> Option<f64> {
+        let dist = statrs::distribution::ChiSquared::new(df).ok()?;
+        Some(1.0 - dist.cdf(h))
+    })()
+    .unwrap_or(f64::NAN);
+
+    Some(KruskalWallisResult {
+        outcome: ocol.name.clone(),
+        factor: fcol.name.clone(),
+        n_groups: groups.len(),
+        rank_sums,
+        h,
+        df,
+        p,
+    })
+}
+
+/// The result of a Friedman test.
+#[derive(Debug, Clone)]
+pub struct FriedmanResult {
+    pub var1: String,
+    pub var2: String,
+    pub n: usize,
+    pub k: usize,
+    pub chi_square: f64,
+    pub df: f64,
+    pub p: f64,
+    /// The mean rank of each variable.
+    pub mean_ranks: Vec<(String, f64)>,
+}
+
+/// The Friedman test for k related samples.
+pub fn friedman(table: &DataTable, idxs: &[usize]) -> Option<FriedmanResult> {
+    if idxs.len() < 3 {
+        return None;
+    }
+    let cols: Vec<&crate::data::Column> = idxs
+        .iter()
+        .map(|i| table.columns.get(*i))
+        .collect::<Option<Vec<_>>>()?;
+    if cols.iter().any(|c| c.kind != ColumnKind::Numeric) {
+        return None;
+    }
+
+    // The cases where every variable has a value.
+    let mut rows: Vec<Vec<f64>> = Vec::new();
+    for row in 0..table.n_rows {
+        let mut vals = Vec::new();
+        let mut ok = true;
+        for c in &cols {
+            if c.is_missing(row) {
+                ok = false;
+                break;
+            }
+            match c.values.get(row) {
+                Some(Value::Number(v)) => vals.push(*v),
+                _ => {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        if ok {
+            rows.push(vals);
+        }
+    }
+    let n = rows.len();
+    let k = cols.len();
+    if n < 2 {
+        return None;
+    }
+
+    // Rank within each case.
+    let mut rank_sums = vec![0.0; k];
+    for r in &rows {
+        let mut idx: Vec<usize> = (0..k).collect();
+        idx.sort_by(|a, b| r[*a].partial_cmp(&r[*b]).unwrap_or(std::cmp::Ordering::Equal));
+        let mut i = 0;
+        while i < k {
+            let mut j = i;
+            while j + 1 < k && (r[idx[j + 1]] - r[idx[i]]).abs() < f64::EPSILON {
+                j += 1;
+            }
+            let avg = ((i + 1) as f64 + (j + 1) as f64) / 2.0;
+            for t in i..=j {
+                rank_sums[idx[t]] += avg;
+            }
+            i = j + 1;
+        }
+    }
+
+    let nf = n as f64;
+    let chi_square = 12.0 / (nf * k as f64) * rank_sums.iter().map(|s| s * s).sum::<f64>()
+        - 3.0 * nf * (k as f64 + 1.0);
+    let df = (k - 1) as f64;
+    let p = (|| -> Option<f64> {
+        let dist = statrs::distribution::ChiSquared::new(df).ok()?;
+        Some(1.0 - dist.cdf(chi_square))
+    })()
+    .unwrap_or(f64::NAN);
+
+    let mean_ranks = cols
+        .iter()
+        .enumerate()
+        .map(|(i, c)| (c.name.clone(), rank_sums[i] / nf))
+        .collect();
+
+    Some(FriedmanResult {
+        var1: cols[0].name.clone(),
+        var2: cols[k - 1].name.clone(),
+        n,
+        k,
+        chi_square,
+        df,
+        p,
+        mean_ranks,
+    })
+}
+
+/// The result of a group-means table (the MEANS procedure).
+#[derive(Debug, Clone)]
+pub struct MeansResult {
+    pub outcome: String,
+    pub group_var: String,
+    /// One entry per group: the name, N, mean, standard deviation and the
+    /// standard error of the mean.
+    pub groups: Vec<MeanGroup>,
+    /// The grand mean and the count.
+    pub total_n: usize,
+    pub grand_mean: f64,
+}
+
+/// The statistics of one group in a means table.
+#[derive(Debug, Clone)]
+pub struct MeanGroup {
+    pub name: String,
+    pub n: usize,
+    pub mean: f64,
+    pub std_dev: f64,
+    pub std_error: f64,
+}
+
+/// The MEANS procedure: the group means with their counts and standard
+/// deviations.
+pub fn means_by_group(
+    table: &DataTable,
+    outcome_idx: usize,
+    group_idx: usize,
+) -> Option<MeansResult> {
+    let ocol = table.columns.get(outcome_idx)?;
+    let fcol = table.columns.get(group_idx)?;
+    if ocol.kind != ColumnKind::Numeric {
+        return None;
+    }
+    let mut groups: std::collections::BTreeMap<String, Vec<f64>> = std::collections::BTreeMap::new();
+    for row in 0..table.n_rows {
+        if ocol.is_missing(row) || fcol.is_missing(row) {
+            continue;
+        }
+        let y = match ocol.values.get(row) {
+            Some(Value::Number(v)) => *v,
+            _ => continue,
+        };
+        let k = category_key(fcol, row)?;
+        groups.entry(k).or_default().push(y);
+    }
+    if groups.is_empty() {
+        return None;
+    }
+    let mut out = Vec::new();
+    let mut total_n = 0usize;
+    let mut sum = 0.0;
+    for (name, vals) in groups {
+        let n = vals.len();
+        if n == 0 {
+            continue;
+        }
+        let mean = vals.iter().sum::<f64>() / n as f64;
+        let std_dev = if n > 1 {
+            (vals.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (n as f64 - 1.0)).sqrt()
+        } else {
+            0.0
+        };
+        let std_error = if n > 0 {
+            std_dev / (n as f64).sqrt()
+        } else {
+            0.0
+        };
+        total_n += n;
+        sum += vals.iter().sum::<f64>();
+        out.push(MeanGroup {
+            name,
+            n,
+            mean,
+            std_dev,
+            std_error,
+        });
+    }
+    if out.is_empty() {
+        return None;
+    }
+    let grand_mean = sum / total_n as f64;
+    Some(MeansResult {
+        outcome: ocol.name.clone(),
+        group_var: fcol.name.clone(),
+        groups: out,
+        total_n,
+        grand_mean,
+    })
+}
+
+/// The result of an Explore procedure: descriptives and a normality test
+/// per group.
+#[derive(Debug, Clone)]
+pub struct ExploreResult {
+    pub outcome: String,
+    pub group_var: Option<String>,
+    /// One block per group.
+    pub groups: Vec<ExploreGroup>,
+}
+
+/// The summary of one group in an Explore table.
+#[derive(Debug, Clone)]
+pub struct ExploreGroup {
+    pub name: String,
+    pub n: usize,
+    pub mean: f64,
+    pub std_dev: f64,
+    pub std_error: f64,
+    pub median: f64,
+    pub min: f64,
+    pub max: f64,
+    pub range: f64,
+    /// The interquartile range.
+    pub iqr: f64,
+    /// The trimmed mean, with 5% trimmed at each end.
+    pub trimmed_mean: f64,
+    /// The Kolmogorov-Smirnov statistic for normality, and its p-value.
+    pub ks_stat: f64,
+    pub ks_p: f64,
+}
+
+/// The EXPLORE procedure: descriptives per group plus a normality test.
+pub fn explore(
+    table: &DataTable,
+    outcome_idx: usize,
+    group_idx: Option<usize>,
+) -> Option<ExploreResult> {
+    let ocol = table.columns.get(outcome_idx)?;
+    if ocol.kind != ColumnKind::Numeric {
+        return None;
+    }
+
+    // Split the values by group, or keep them together.
+    let mut buckets: Vec<(String, Vec<f64>)> = Vec::new();
+    match group_idx {
+        Some(gi) => {
+            let fcol = table.columns.get(gi)?;
+            let mut groups: std::collections::BTreeMap<String, Vec<f64>> =
+                std::collections::BTreeMap::new();
+            for row in 0..table.n_rows {
+                if ocol.is_missing(row) || fcol.is_missing(row) {
+                    continue;
+                }
+                let y = match ocol.values.get(row) {
+                    Some(Value::Number(v)) => *v,
+                    _ => continue,
+                };
+                let k = category_key(fcol, row)?;
+                groups.entry(k).or_default().push(y);
+            }
+            buckets = groups.into_iter().collect();
+        }
+        None => {
+            let mut vals = Vec::new();
+            for row in 0..table.n_rows {
+                if ocol.is_missing(row) {
+                    continue;
+                }
+                if let Some(Value::Number(v)) = ocol.values.get(row) {
+                    vals.push(*v);
+                }
+            }
+            buckets.push(("Overall".to_string(), vals));
+        }
+    }
+    if buckets.is_empty() {
+        return None;
+    }
+
+    let groups = buckets
+        .into_iter()
+        .map(|(name, mut vals)| {
+            vals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let n = vals.len();
+            if n == 0 {
+                return None;
+            }
+            let mean = vals.iter().sum::<f64>() / n as f64;
+            let std_dev = if n > 1 {
+                (vals.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / (n as f64 - 1.0)).sqrt()
+            } else {
+                0.0
+            };
+            let std_error = if n > 0 { std_dev / (n as f64).sqrt() } else { 0.0 };
+            let median = percentile_of(&vals, 50.0);
+            let min = vals[0];
+            let max = vals[n - 1];
+            let range = max - min;
+            let iqr = percentile_of(&vals, 75.0) - percentile_of(&vals, 25.0);
+            // The 5% trimmed mean, as SPSS reports it.
+            let trim = (n as f64 * 0.05).floor() as usize;
+            let trimmed: Vec<f64> = if trim * 2 < n {
+                vals[trim..n - trim].to_vec()
+            } else {
+                vals.clone()
+            };
+            let trimmed_mean = if trimmed.is_empty() {
+                mean
+            } else {
+                trimmed.iter().sum::<f64>() / trimmed.len() as f64
+            };
+            let (ks_stat, ks_p) = ks_normality(&vals, mean, std_dev);
+            Some(ExploreGroup {
+                name,
+                n,
+                mean,
+                std_dev,
+                std_error,
+                median,
+                min,
+                max,
+                range,
+                iqr,
+                trimmed_mean,
+                ks_stat,
+                ks_p,
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+
+    Some(ExploreResult {
+        outcome: ocol.name.clone(),
+        group_var: group_idx.map(|gi| table.columns[gi].name.clone()),
+        groups,
+    })
+}
+
+/// The Kolmogorov-Smirnov statistic for normality.
+fn ks_normality(sorted: &[f64], mean: f64, std_dev: f64) -> (f64, f64) {
+    let n = sorted.len();
+    if n < 3 || std_dev <= 0.0 {
+        return (f64::NAN, f64::NAN);
+    }
+    // The largest difference between the observed and the expected
+    // cumulative distribution.
+    let mut d = 0.0f64;
+    for (i, v) in sorted.iter().enumerate() {
+        let f_i = (i + 1) as f64 / n as f64;
+        let f_prev = i as f64 / n as f64;
+        let z = (v - mean) / std_dev;
+        let cdf = normal_cdf(z);
+        d = d.max((f_i - cdf).abs()).max((cdf - f_prev).abs());
+    }
+    // The Kolmogorov-Smirnov p-value for a normal distribution.
+    let sqrt_n = (n as f64).sqrt();
+    let p = ks_p_value(d, sqrt_n);
+    (d, p)
+}
+
+/// The p-value of the Kolmogorov-Smirnov statistic, using the asymptotic
+/// expansion of the Kolmogorov distribution.
+fn ks_p_value(d: f64, sqrt_n: f64) -> f64 {
+    if !d.is_finite() || d <= 0.0 {
+        return 1.0;
+    }
+    let lambda = (sqrt_n + 0.12 + 0.11 / sqrt_n) * d;
+    let mut sum = 0.0;
+    for k in 1..100 {
+        let term = (-2.0 * k as f64 * k as f64 * lambda * lambda).exp();
+        sum += term;
+        if term < 1e-10 {
+            break;
+        }
+    }
+    (2.0 * sum).clamp(0.0, 1.0)
+}
+
+#[cfg(test)]
+mod phase3_tests {
+    use super::*;
+    use crate::data::DataTable;
+
+    /// A dataset with three groups of clearly different means, so the
+    /// tests have a known answer.
+    ///
+    /// The file name is unique per test: the test harness runs the tests
+    /// in parallel, and a shared path means they overwrite each other's
+    /// data.
+    fn three_groups(tag: &str) -> DataTable {
+        let mut csv = String::from("group,score\n");
+        for i in 0..10 {
+            csv.push_str(&format!("A,{}\n", 10 + i));
+        }
+        for i in 0..10 {
+            csv.push_str(&format!("B,{}\n", 20 + i));
+        }
+        for i in 0..10 {
+            csv.push_str(&format!("C,{}\n", 30 + i));
+        }
+        let path = std::env::temp_dir().join(format!("statscraft_p3_groups_{}.csv", tag));
+        std::fs::write(&path, csv).unwrap();
+        DataTable::from_csv_path(&path).unwrap()
+    }
+
+    /// A helper for the other fixtures: write a CSV to a unique file and
+    /// read it back.
+    fn read_csv(tag: &str, csv: &str) -> DataTable {
+        let path = std::env::temp_dir().join(format!("statscraft_p3_{}.csv", tag));
+        std::fs::write(&path, csv).unwrap();
+        DataTable::from_csv_path(&path).unwrap()
+    }
+
+    #[test]
+    fn mann_whitney_finds_a_clear_separation() {
+        let t = three_groups("mw");
+        let g = t.column_index("group").unwrap();
+        let y = t.column_index("score").unwrap();
+        let r = mann_whitney(&t, y, g).expect("result");
+        // Group A is entirely below group B, so the test must be
+        // significant at any conventional level.
+        assert!(r.p < 0.001, "p was {}", r.p);
+        assert!(r.z > 3.0, "z was {}", r.z);
+        assert_eq!(r.n1, 10);
+        assert_eq!(r.n2, 10);
+        // The common-language effect size is the probability that a case
+        // from group 1 exceeds one from group 2. Group A is entirely
+        // below group B, so that probability is 0.
+        assert!((r.effect_size - 0.0).abs() < 1e-9, "effect was {}", r.effect_size);
+    }
+
+    #[test]
+    fn kruskal_wallis_matches_the_one_way_anova_conclusion() {
+        let t = three_groups("kw");
+        let g = t.column_index("group").unwrap();
+        let y = t.column_index("score").unwrap();
+        let r = kruskal_wallis(&t, y, g).expect("result");
+        assert_eq!(r.n_groups, 3);
+        // Three completely separated groups: the p-value must be tiny.
+        assert!(r.p < 0.001, "p was {}", r.p);
+        // The mean ranks should be 5.5, 15.5 and 25.5.
+        let means: Vec<f64> = r.rank_sums.iter().map(|(_, s, n)| s / *n as f64).collect();
+        assert!((means[0] - 5.5).abs() < 1e-9, "mean rank 0 was {}", means[0]);
+        assert!((means[1] - 15.5).abs() < 1e-9, "mean rank 1 was {}", means[1]);
+        assert!((means[2] - 25.5).abs() < 1e-9, "mean rank 2 was {}", means[2]);
+    }
+
+    #[test]
+    fn the_wilcoxon_test_detects_a_consistent_shift() {
+        let mut csv = String::from("before,after\n");
+        for i in 0..12 {
+            csv.push_str(&format!("{},{}\n", 10 + i, 20 + i));
+        }
+        let t = read_csv("paired", &csv);
+        let a = t.column_index("before").unwrap();
+        let b = t.column_index("after").unwrap();
+        let r = wilcoxon_signed_rank(&t, a, b).expect("result");
+        assert_eq!(r.n, 12);
+        // The normal approximation gives 0.0025 here; the exact test
+        // would give 0.00049. Both are clearly significant.
+        assert!(r.p < 0.05, "p was {}", r.p);
+        // The difference is computed as before - after, and "after" is
+        // always larger here, so every difference is negative: the whole
+        // rank sum falls in W- and W+ is zero. 1 + 2 + ... + 12 = 78.
+        assert_eq!(r.w_plus, 0.0);
+        assert!((r.w_minus - 78.0).abs() < 1e-9, "w- was {}", r.w_minus);
+    }
+
+    #[test]
+    fn the_friedman_test_works_over_three_related_variables() {
+        let mut csv = String::from("a,b,c\n");
+        for i in 0..10 {
+            csv.push_str(&format!("{},{},{}\n", i, i + 1, i + 2));
+        }
+        let t = read_csv("friedman", &csv);
+        let idxs: Vec<usize> = ["a", "b", "c"]
+            .iter()
+            .map(|n| t.column_index(n).unwrap())
+            .collect();
+        let r = friedman(&t, &idxs).expect("result");
+        assert_eq!(r.k, 3);
+        assert_eq!(r.n, 10);
+        assert!(r.p < 0.001, "p was {}", r.p);
+    }
+
+    #[test]
+    fn the_means_procedure_groups_correctly() {
+        let t = three_groups("means");
+        let g = t.column_index("group").unwrap();
+        let y = t.column_index("score").unwrap();
+        let m = means_by_group(&t, y, g).expect("result");
+        assert_eq!(m.groups.len(), 3);
+        assert_eq!(m.total_n, 30);
+        // Group A is 10..19, so its mean is 14.5.
+        assert!((m.groups[0].mean - 14.5).abs() < 1e-9);
+        assert!((m.grand_mean - 24.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn explore_reports_the_descriptives_and_a_normality_test() {
+        let t = three_groups("explore");
+        let y = t.column_index("score").unwrap();
+        let e = explore(&t, y, None).expect("result");
+        assert_eq!(e.groups.len(), 1);
+        let g = &e.groups[0];
+        assert_eq!(g.n, 30);
+        assert!((g.mean - 24.5).abs() < 1e-9);
+        // The median of 10..39 is 24.5.
+        assert!((g.median - 24.5).abs() < 1e-9);
+        assert!((g.min - 10.0).abs() < 1e-9);
+        assert!((g.max - 39.0).abs() < 1e-9);
+        assert!(g.ks_stat.is_finite());
+    }
+
+    #[test]
+    fn the_levene_test_detects_unequal_variances() {
+        // Group A is tight, group B is spread out.
+        let mut csv = String::from("group,score\n");
+        for v in [10.0, 10.1, 9.9, 10.05, 9.95] {
+            csv.push_str(&format!("A,{}\n", v));
+        }
+        for v in [0.0, 50.0, 100.0, 10.0, 90.0] {
+            csv.push_str(&format!("B,{}\n", v));
+        }
+        let t = read_csv("levene", &csv);
+        let g = t.column_index("group").unwrap();
+        let y = t.column_index("score").unwrap();
+        let groups = collect_groups(&t, y, g).unwrap();
+        let l = levene_test(&groups).expect("result");
+        assert!(l.p < 0.05, "p was {}", l.p);
+    }
+
+    #[test]
+    fn the_tukey_post_hoc_finds_the_different_pair() {
+        let t = three_groups("posthoc");
+        let g = t.column_index("group").unwrap();
+        let y = t.column_index("score").unwrap();
+        let a = one_way_anova_with(&t, y, g, &PostHocSet { tukey: true, ..Default::default() }, true)
+            .expect("result");
+        assert_eq!(a.groups.len(), 3);
+        assert!(a.levene.is_some());
+        assert_eq!(a.posthoc.len(), 3);
+        // Every pair is separated, so every comparison is significant.
+        for ph in &a.posthoc {
+            assert!(ph.p < 0.05, "{} p was {}", ph.test, ph.p);
+        }
+    }
+
+    #[test]
+    fn the_regression_reports_a_significant_slope() {
+        let mut csv = String::from("x,y\n");
+        for i in 0..20 {
+            csv.push_str(&format!("{},{}\n", i, 3 * i + 5));
+        }
+        let t = read_csv("reg", &csv);
+        let x = t.column_index("x").unwrap();
+        let y = t.column_index("y").unwrap();
+        let r = linear_regression_xy(&t, y, x).expect("result");
+        assert!((r.slope - 3.0).abs() < 1e-9, "slope was {}", r.slope);
+        assert!((r.intercept - 5.0).abs() < 1e-9, "intercept was {}", r.intercept);
+        assert!((r.r2 - 1.0).abs() < 1e-9, "r2 was {}", r.r2);
+        assert!(r.p < 0.001, "p was {}", r.p);
+    }
+
+    #[test]
+    fn a_perfect_correlation_gets_significance_stars() {
+        let mut csv = String::from("a,b\n");
+        for i in 0..20 {
+            csv.push_str(&format!("{},{}\n", i, i * 2));
+        }
+        let t = read_csv("corr", &csv);
+        let a = t.column_index("a").unwrap();
+        let b = t.column_index("b").unwrap();
+        let c = correlations_in(&t, &[a, b]);
+        assert_eq!(c.len(), 1);
+        assert!((c[0].r - 1.0).abs() < 1e-12);
+        assert!(c[0].p < 0.001, "p was {}", c[0].p);
+    }
+
+    #[test]
+    fn the_post_hoc_p_values_are_ordered_by_conservatism() {
+        // LSD is the most permissive, then Tukey, then Bonferroni, then
+        // Scheffe. Their p-values must follow that order for the same
+        // comparison, and all must be sensible probabilities.
+        let t = three_groups("posthoc_order");
+        let g = t.column_index("group").unwrap();
+        let y = t.column_index("score").unwrap();
+        let sel = PostHocSet {
+            lsd: true,
+            tukey: true,
+            bonferroni: true,
+            scheffe: true,
+            ..Default::default()
+        };
+        let a = one_way_anova_with(&t, y, g, &sel, false).expect("result");
+        assert!(!a.posthoc.is_empty());
+
+        for ph in &a.posthoc {
+            assert!(
+                ph.p >= 0.0 && ph.p <= 1.0,
+                "{} gave p={}",
+                ph.test,
+                ph.p
+            );
+        }
+        // The same comparison under different tests.
+        let find = |name: &str| -> f64 {
+            a.posthoc
+                .iter()
+                .find(|p| p.test == name && p.group1 == "A" && p.group2 == "B")
+                .map(|p| p.p)
+                .unwrap_or(f64::NAN)
+        };
+        let lsd = find("LSD");
+        let tukey = find("Tukey");
+        let bonf = find("Bonferroni");
+        let scheff = find("Scheffe");
+        assert!(lsd.is_finite(), "no LSD row");
+        assert!(tukey.is_finite(), "no Tukey row");
+        assert!(bonf.is_finite(), "no Bonferroni row");
+        assert!(scheff.is_finite(), "no Scheffe row");
+        // Bonferroni is the unadjusted p multiplied by the number of
+        // comparisons, so it must be at least as large as the unadjusted
+        // p-value of the same comparison.
+        assert!(
+            bonf >= lsd - 1e-12,
+            "Bonferroni {} < the unadjusted {}",
+            bonf,
+            lsd
+        );
+        // The Tukey and Scheffe p-values are computed from different
+        // statistics, so no ordering between them is guaranteed - but
+        // both must be larger than the raw t-test p-value, because both
+        // are more conservative than an unadjusted comparison.
+        assert!(
+            tukey >= lsd - 1e-12,
+            "Tukey {} < the unadjusted {}",
+            tukey,
+            lsd
+        );
+        // Scheffe's F statistic is the square of the t statistic, so its
+        // p-value is the same as the unadjusted one - it is not a
+        // *pairwise* correction, it protects against the family of all
+        // possible contrasts rather than the pairs that were compared.
+        assert!(
+            (scheff - lsd).abs() < 1e-9,
+            "Scheffe {} and the unadjusted {} should agree",
+            scheff,
+            lsd
+        );
+    }
+
+    #[test]
+    fn the_studentized_range_cdf_is_monotonic() {
+        // The CDF must increase with q, or the p-value it produces is
+        // meaningless.
+        let k = 2.0;
+        let df = 178.0;
+        let mut prev = 0.0;
+        for i in 1..=20 {
+            let q = i as f64 * 0.5;
+            let c = studentized_range_cdf(q, k, df);
+            assert!(
+                c >= prev - 1e-9,
+                "CDF fell at q={}: {} then {}",
+                q,
+                prev,
+                c
+            );
+            prev = c;
+        }
+        // The 95% critical value.
+        let crit = studentized_range_critical(k, df, 0.05);
+        let at_crit = studentized_range_cdf(crit, k, df);
+        assert!(
+            (at_crit - 0.95).abs() < 0.01,
+            "CDF at the critical value was {}, expected 0.95",
+            at_crit
+        );
+        // A large q must be significant.
+        let far = studentized_range_cdf(crit * 2.0, k, df);
+        assert!(far > 0.99, "CDF at 2x the critical value was {}", far);
+    }
+
+    #[test]
+    fn the_studentized_range_matches_the_published_tukey_table() {
+        // The 95% critical values of the studentized range, from the
+        // standard Tukey table.
+        let table: [(f64, f64, f64); 12] = [
+            (2.0, 10.0, 3.151),
+            (3.0, 10.0, 3.877),
+            (4.0, 10.0, 4.327),
+            (5.0, 10.0, 4.654),
+            (2.0, 20.0, 2.950),
+            (3.0, 20.0, 3.578),
+            (4.0, 20.0, 3.958),
+            (5.0, 20.0, 4.232),
+            (3.0, 30.0, 3.486),
+            (4.0, 30.0, 3.845),
+            (2.0, 120.0, 2.800),
+            (3.0, 120.0, 3.356),
+        ];
+        for (k, df, expected) in table {
+            let got = studentized_range_critical(k, df, 0.05);
+            assert!(
+                (got - expected).abs() < 0.01,
+                "k={} df={}: got {:.3}, published {:.3}",
+                k,
+                df,
+                got,
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn the_fisher_exact_test_works_on_a_two_by_two_table() {
+        let mut csv = String::from("smoke,cancer\n");
+        for _ in 0..10 {
+            csv.push_str("yes,yes\n");
+        }
+        for _ in 0..2 {
+            csv.push_str("yes,no\n");
+        }
+        for _ in 0..3 {
+            csv.push_str("no,yes\n");
+        }
+        for _ in 0..15 {
+            csv.push_str("no,no\n");
+        }
+        let t = read_csv("fisher", &csv);
+        let a = t.column_index("smoke").unwrap();
+        let b = t.column_index("cancer").unwrap();
+        let mut ct = crosstabs_chi2(&t, a, b).expect("result");
+        let sel = CrosstabStats {
+            fisher_exact: true,
+            ..Default::default()
+        };
+        crosstabs_extra(&mut ct, &sel);
+        let (p, odds) = ct.fisher_exact.expect("fisher");
+        assert!(p < 0.05, "p was {}", p);
+        assert!(odds > 1.0, "odds was {}", odds);
+    }
+}
+
+/// A histogram of a numeric variable, with the counts per bin.
+pub fn histogram(table: &DataTable, col_idx: usize, bins: usize) -> Option<Histogram> {
+    let col = table.columns.get(col_idx)?;
+    if col.kind != ColumnKind::Numeric {
+        return None;
+    }
+    let mut vals: Vec<f64> = Vec::new();
+    for row in 0..table.n_rows {
+        if col.is_missing(row) {
+            continue;
+        }
+        if let Some(Value::Number(v)) = col.values.get(row) {
+            vals.push(*v);
+        }
+    }
+    if vals.len() < 2 {
+        return None;
+    }
+    vals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let min = vals[0];
+    let max = vals[vals.len() - 1];
+    if (max - min).abs() < f64::EPSILON {
+        return None;
+    }
+    let bins = bins.clamp(1, 60);
+    let width = (max - min) / bins as f64;
+    let mut counts = vec![0usize; bins];
+    for v in &vals {
+        let i = (((v - min) / width).floor() as usize).min(bins - 1);
+        counts[i] += 1;
+    }
+    Some(Histogram {
+        variable: col.name.clone(),
+        min,
+        max,
+        width,
+        centres: (0..bins)
+            .map(|i| min + (i as f64 + 0.5) * width)
+            .collect(),
+        counts: counts.iter().map(|c| *c as f64).collect(),
+    })
+}
+
+/// The bins of a histogram.
+#[derive(Debug, Clone)]
+pub struct Histogram {
+    pub variable: String,
+    pub min: f64,
+    pub max: f64,
+    pub width: f64,
+    /// The centre of each bin.
+    pub centres: Vec<f64>,
+    /// The count in each bin.
+    pub counts: Vec<f64>,
+}
+
+/// A bar chart of the counts of a categorical variable.
+pub fn bar_chart(table: &DataTable, col_idx: usize) -> Option<BarChart> {
+    let col = table.columns.get(col_idx)?;
+    let mut counts: Vec<(String, usize)> = Vec::new();
+    for row in 0..table.n_rows {
+        let key = if col.is_missing(row) {
+            "(missing)".to_string()
+        } else {
+            match col.values.get(row) {
+                Some(Value::Number(n)) => format!("{}", n),
+                Some(Value::Text(s)) => s.clone(),
+                _ => "(missing)".to_string(),
+            }
+        };
+        match counts.iter_mut().find(|(k, _)| *k == key) {
+            Some(e) => e.1 += 1,
+            None => counts.push((key, 1)),
+        }
+    }
+    if counts.is_empty() {
+        return None;
+    }
+    counts.sort_by(|a, b| b.1.cmp(&a.1));
+    Some(BarChart {
+        variable: col.name.clone(),
+        categories: counts.iter().map(|(k, _)| k.clone()).collect(),
+        counts: counts.iter().map(|(_, c)| *c as f64).collect(),
+    })
+}
+
+/// The categories and counts of a bar chart.
+#[derive(Debug, Clone)]
+pub struct BarChart {
+    pub variable: String,
+    pub categories: Vec<String>,
+    pub counts: Vec<f64>,
+}
+
+/// A scatter plot of two numeric variables.
+pub fn scatter_points(
+    table: &DataTable,
+    x_idx: usize,
+    y_idx: usize,
+) -> Option<Scatter> {
+    let cx = table.columns.get(x_idx)?;
+    let cy = table.columns.get(y_idx)?;
+    if cx.kind != ColumnKind::Numeric || cy.kind != ColumnKind::Numeric {
+        return None;
+    }
+    let mut xs = Vec::new();
+    let mut ys = Vec::new();
+    for row in 0..table.n_rows {
+        if cx.is_missing(row) || cy.is_missing(row) {
+            continue;
+        }
+        if let (Value::Number(x), Value::Number(y)) =
+            (cx.values.get(row)?, cy.values.get(row)?)
+        {
+            xs.push(*x);
+            ys.push(*y);
+        }
+    }
+    if xs.len() < 2 {
+        return None;
+    }
+    Some(Scatter {
+        x_var: cx.name.clone(),
+        y_var: cy.name.clone(),
+        x: xs,
+        y: ys,
+    })
+}
+
+/// The points of a scatter plot.
+#[derive(Debug, Clone)]
+pub struct Scatter {
+    pub x_var: String,
+    pub y_var: String,
+    pub x: Vec<f64>,
+    pub y: Vec<f64>,
 }

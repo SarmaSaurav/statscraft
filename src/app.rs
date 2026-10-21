@@ -560,6 +560,9 @@ impl eframe::App for StatsCraftApp {
                                             ));
                                             ui.add_space(8.0);
                                             render_output_table(ui, t);
+                                            if let Some(chart) = &t.chart {
+                                                render_output_chart(ui, chart);
+                                            }
                                         });
                                 });
                             });
@@ -841,6 +844,12 @@ impl eframe::App for StatsCraftApp {
                         ui.menu_button("Regression", |ui| {
                             if crate::icon::menu_item(ui, crate::theme::Icon::Regression, "Linear…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Regression); }
                             if ui.button("Curve Estimation…").clicked() { ui.close_menu(); self.status = "Curve Estimation: not implemented yet.".to_string(); }
+                        });
+                        ui.menu_button("Nonparametric Tests", |ui| {
+                            if crate::icon::menu_item(ui, crate::theme::Icon::TTest, "Mann-Whitney U…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::MannWhitney); }
+                            if crate::icon::menu_item(ui, crate::theme::Icon::TTest, "Kruskal-Wallis H…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::KruskalWallis); }
+                            if crate::icon::menu_item(ui, crate::theme::Icon::TTest, "Wilcoxon Signed-Rank…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Wilcoxon); }
+                            if crate::icon::menu_item(ui, crate::theme::Icon::TTest, "Friedman…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Friedman); }
                         });
                         ui.separator();
                         if crate::icon::menu_item(ui, crate::theme::Icon::Output, "Reports").clicked() { ui.close_menu(); self.status = "Reports: not implemented yet.".to_string(); }
@@ -1534,6 +1543,7 @@ mod tests {
             headers: vec!["A".into(), "B".into()],
             rows: vec![vec!["x".into(), "1.5".into()]],
             note: "n".into(),
+            chart: None,
         });
         let path = std::env::temp_dir().join("sc_out.html");
         app.export_output_html_to(&path);
@@ -1547,6 +1557,210 @@ mod tests {
 
 /// SPSS pivot-table look: bordered cells, shaded header band, right-aligned
 /// numerics, footnote note beneath the table.
+
+/// Draw a chart in the Output Viewer, under the pivot table.
+///
+/// The chart is painted directly rather than through a plotting library,
+/// so it always fits the space it is given and the axis labels can be
+/// the category names.
+fn render_output_chart(ui: &mut egui::Ui, chart: &crate::output::Chart) {
+    use crate::theme;
+    use crate::output::ChartKind;
+
+    ui.add_space(6.0);
+    ui.label(
+        egui::RichText::new(&chart.title)
+            .font(theme::semibold(13.0))
+            .color(theme::TEXT),
+    );
+    ui.add_space(4.0);
+
+    let width = ui.available_width().min(720.0).max(320.0);
+    let height = 240.0;
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    let painter = ui.painter();
+
+    // A light card behind the plot.
+    painter.rect_filled(rect, theme::RADIUS, theme::SURFACE);
+    painter.rect_stroke(rect, theme::RADIUS, egui::Stroke::new(1.0, theme::BORDER));
+
+    // The plot area inside the card, leaving room for the axis labels.
+    let left = rect.left() + 52.0;
+    let right = rect.right() - 12.0;
+    let top = rect.top() + 12.0;
+    let bottom = rect.bottom() - 34.0;
+    let plot_rect = egui::Rect::from_min_max(
+        egui::pos2(left, top),
+        egui::pos2(right, bottom),
+    );
+
+    // The data range.
+    let mut max_y = 0.0f64;
+    let mut min_y = 0.0f64;
+    let mut max_x = 0.0f64;
+    for s in &chart.series {
+        for y in &s.y {
+            if *y > max_y {
+                max_y = *y;
+            }
+            if *y < min_y {
+                min_y = *y;
+            }
+        }
+        for x in &s.x {
+            if *x > max_x {
+                max_x = *x;
+            }
+        }
+    }
+    if max_y <= min_y {
+        max_y = min_y + 1.0;
+    }
+    if max_x <= 0.0 {
+        max_x = 1.0;
+    }
+    // A little headroom above the tallest bar.
+    let y_max = max_y * 1.1;
+
+    let to_px = |x: f64, y: f64| -> egui::Pos2 {
+        egui::pos2(
+            plot_rect.left() + ((x / max_x) * plot_rect.width() as f64) as f32,
+            plot_rect.bottom() - (((y - min_y) / (y_max - min_y)) * plot_rect.height() as f64) as f32,
+        )
+    };
+
+    // ---- The grid and the y axis ----
+    let grid = egui::Stroke::new(0.5, theme::BORDER);
+    let y_ticks = 5;
+    for i in 0..=y_ticks {
+        let t = i as f64 / y_ticks as f64;
+        let y = plot_rect.bottom() - (t * plot_rect.height() as f64) as f32;
+        painter.line_segment(
+            [egui::pos2(plot_rect.left(), y), egui::pos2(plot_rect.right(), y)],
+            grid,
+        );
+        let value = min_y + t * (y_max - min_y);
+        painter.text(
+            egui::pos2(plot_rect.left() - 6.0, y),
+            egui::Align2::RIGHT_CENTER,
+            format!("{:.0}", value),
+            theme::body(10.5),
+            theme::TEXT_FAINT,
+        );
+    }
+    // The x axis line.
+    painter.line_segment(
+        [
+            egui::pos2(plot_rect.left(), plot_rect.bottom()),
+            egui::pos2(plot_rect.right(), plot_rect.bottom()),
+        ],
+        egui::Stroke::new(1.0, theme::BORDER_STRONG),
+    );
+
+    // ---- The series ----
+    let labels: Vec<String> = chart
+        .series
+        .first()
+        .map(|s| s.x_labels.clone())
+        .unwrap_or_default();
+
+    for (si, s) in chart.series.iter().enumerate() {
+        let color = series_color(si);
+
+        match chart.kind {
+            ChartKind::Bar | ChartKind::Histogram => {
+                // The bars are spread across the plot area.
+                let n = s.x.len().max(1) as f64;
+                let slot = plot_rect.width() as f64 / n;
+                let bar_w = (slot * 0.62).min(70.0) as f32;
+                for (i, (&x, &y)) in s.x.iter().zip(s.y.iter()).enumerate() {
+                    // The bar is centred on its slot.
+                    let centre = plot_rect.left() + ((i as f64 + 0.5) * slot) as f32;
+                    let top_y = to_px(x, y).y;
+                    let base_y = to_px(x, min_y).y;
+                    let bar_rect = egui::Rect::from_min_max(
+                        egui::pos2(centre - bar_w / 2.0, top_y.min(base_y)),
+                        egui::pos2(centre + bar_w / 2.0, base_y),
+                    );
+                    painter.rect_filled(bar_rect, 3.0, color);
+
+                    // The category label under the bar.
+                    if let Some(label) = labels.get(i) {
+                        painter.text(
+                            egui::pos2(centre, plot_rect.bottom() + 6.0),
+                            egui::Align2::CENTER_TOP,
+                            label,
+                            theme::body(10.5),
+                            theme::TEXT_MUTED,
+                        );
+                    }
+                }
+            }
+            ChartKind::Scatter => {
+                for (&x, &y) in s.x.iter().zip(s.y.iter()) {
+                    let p = to_px(x, y);
+                    painter.circle_filled(p, 3.5, color);
+                }
+            }
+            ChartKind::BoxPlot => {
+                for (i, (&x, &y)) in s.x.iter().zip(s.y.iter()).enumerate() {
+                    let p = to_px(x, y);
+                    painter.circle_filled(p, 2.5, color.gamma_multiply(0.5));
+                }
+                if let Some((q1, med, q3, _)) = s.quartiles {
+                    let centre = plot_rect.left() + plot_rect.width() / 2.0;
+                    let w = 44.0;
+                    let p1 = egui::pos2(centre, to_px(0.0, q1).y);
+                    let p2 = egui::pos2(centre, to_px(0.0, q3).y);
+                    let p3 = egui::pos2(centre, to_px(0.0, med).y);
+                    let stroke = egui::Stroke::new(1.5, color);
+                    painter.line_segment([p1, p2], stroke);
+                    painter.line_segment(
+                        [egui::pos2(centre - w / 2.0, p1.y), egui::pos2(centre + w / 2.0, p1.y)],
+                        stroke,
+                    );
+                    painter.line_segment(
+                        [egui::pos2(centre - w / 2.0, p2.y), egui::pos2(centre + w / 2.0, p2.y)],
+                        stroke,
+                    );
+                    painter.line_segment(
+                        [egui::pos2(centre - w / 2.0, p3.y), egui::pos2(centre + w / 2.0, p3.y)],
+                        egui::Stroke::new(2.0, color),
+                    );
+                }
+            }
+        }
+    }
+
+    // The axis titles.
+    painter.text(
+        egui::pos2((plot_rect.left() + plot_rect.right()) / 2.0, rect.bottom() - 8.0),
+        egui::Align2::CENTER_BOTTOM,
+        &chart.x_label,
+        theme::medium(10.5),
+        theme::TEXT_MUTED,
+    );
+    painter.text(
+        egui::pos2(rect.left() + 6.0, (plot_rect.top() + plot_rect.bottom()) / 2.0),
+        egui::Align2::LEFT_CENTER,
+        &chart.y_label,
+        theme::medium(10.5),
+        theme::TEXT_MUTED,
+    );
+}
+
+/// The colour of the nth series.
+fn series_color(i: usize) -> egui::Color32 {
+    const PALETTE: [egui::Color32; 5] = [
+        crate::theme::ACCENT,
+        crate::theme::TEAL,
+        crate::theme::AMBER,
+        egui::Color32::from_rgb(140, 110, 220),
+        egui::Color32::from_rgb(220, 110, 140),
+    ];
+    PALETTE[i % PALETTE.len()]
+}
+
 fn render_output_table(ui: &mut egui::Ui, t: &OutputTable) {
     use crate::theme;
     let header_fill = theme::HEADER;
@@ -1914,7 +2128,7 @@ fn app_icon() -> egui::IconData {
 }
 
 pub fn run(initial_path: Option<String>) -> eframe::Result<()> {
-    run_with(initial_path, None)
+    run_with(initial_path, None, None)
 }
 
 /// Run the app, optionally opening a procedure dialog on start.
@@ -1925,6 +2139,7 @@ pub fn run(initial_path: Option<String>) -> eframe::Result<()> {
 pub fn run_with(
     initial_path: Option<String>,
     initial_dialog: Option<crate::dialog::Procedure>,
+    initial_script: Option<String>,
 ) -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -1951,6 +2166,18 @@ pub fn run_with(
             }
             if let Some(proc) = initial_dialog {
                 app.dialog = Some(crate::dialog::DialogState::new(proc));
+            }
+            // A syntax file to run at start-up.
+            if let Some(script_path) = initial_script {
+                match std::fs::read_to_string(&script_path) {
+                    Ok(text) => {
+                        app.syntax_text = text.clone();
+                        crate::syntax::run(&mut app, &text);
+                    }
+                    Err(e) => {
+                        app.status = format!("Could not read {}: {}", script_path, e);
+                    }
+                }
             }
             Ok(Box::new(app))
         }),

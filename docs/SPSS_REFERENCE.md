@@ -316,8 +316,80 @@ CORRELATIONS score age /PRINT=SIG /MISSING=PAIRWISE
 - The app takes a `--dialog <procedure>` flag, which opens a procedure
   dialog at start-up. Useful for demos, screenshots and scripted checks.
 
-**Still open from the gap list:** the sub-dialogs currently write their
-choices into the syntax, but the *engine* only acts on the statistics
-options (`/STATISTICS=`). `/CELLS=`, `/POSTHOC=`, `/PRINT=`, `/MISSING=`
-and `/ES=` are parsed and round-trip through the dialog, but the
-corresponding output tables do not yet reflect them. That is Phase 3.
+---
+
+## 8. Phase 3 — what changed
+
+Phase 3 closed the gap list from section 5.
+
+### 8.1 The options now change the output
+
+Every option the dialogs offer is parsed by the runner and acted on by the
+statistics engine:
+
+| Option | Effect |
+|---|---|
+| `/STATISTICS=` | Chooses which descriptive statistics are computed and reported. The output table has one labelled line per statistic, the way SPSS lays it out. |
+| `/CELLS=` | The crosstab shows the requested cell types as separate blocks: observed counts, expected counts, row percentages, column percentages and total percentages. |
+| `/STATISTICS=CHISQ PHI` on a crosstab | Adds Pearson's chi-square, Phi and Cramér's V, plus the linear-by-linear association and Fisher's exact test where they apply. |
+| `/POSTHOC=` | The ANOVA adds the requested post-hoc comparisons: Tukey, Scheffe, Bonferroni and LSD. |
+| `/STATISTICS=HOMOGENEITY` | The ANOVA adds Levene's test for equality of variances. |
+| `/ES=DISPLAY` | The t-test adds the effect size table: mean difference, the group standard deviations, the pooled deviation, Cohen's d and Hedges' g. |
+| `/PRINT=SIG` | The correlation matrix gets the significance stars SPSS prints, with the `**` / `*` / `n` note. |
+| `/PRINT=DESCRIPTIVES` | The correlation matrix gets the N / Mean / Std. Deviation block above it. |
+| `/MISSING=` | Chooses pairwise or listwise deletion. |
+| `/CHART=BARCHART` / `/CHART=HISTOGRAM` | The output carries a chart, drawn under the pivot table. |
+
+### 8.2 The new procedures
+
+Seven procedures were added, each with a dialog, a command, and an output
+table laid out the way SPSS lays it out:
+
+| Command | Procedure | Output |
+|---|---|---|
+| `MEANS TABLES <var> BY <group>` | Means | The group means with their counts, standard deviations and standard errors. |
+| `EXPLORE <var>` | Explore | The descriptives per group — mean, 5% trimmed mean, median, variance, standard deviation, minimum, maximum, range and interquartile range — plus a Kolmogorov-Smirnov normality test. |
+| `NONPARAMETRIC /MW= <var> BY <group>` | Mann-Whitney U | The rank sums, both U statistics, z, the p-value and the common-language effect size. |
+| `NONPARAMETRIC /K-W= <var> BY <group>` | Kruskal-Wallis H | The rank sums and mean ranks per group, chi-square, df and the p-value. |
+| `NONPARAMETRIC /WILCOXON= <v1> <v2>` | Wilcoxon signed-rank | W+, W-, z and the p-value. |
+| `NONPARAMETRIC /FRIEDMAN= <v1> <v2> <v3>` | Friedman | The mean rank of each variable, chi-square, df and the p-value. |
+
+They are also in the Analyze menu, under **Nonparametric Tests**.
+
+### 8.3 Charts in the Output Viewer
+
+A procedure that asks for a chart now draws it under the pivot table: a
+bar chart of the counts for Frequencies, a histogram for a numeric
+variable, and a scatter plot for a regression. The charts are painted
+directly rather than through a plotting library, so they always fit the
+space they are given and a categorical axis can show the category names
+rather than 0, 1, 2.
+
+### 8.4 The statistics that took the most care
+
+Three were not right the first time, and the tests caught them:
+
+- **The studentized range** (Tukey's q) is now computed exactly, by
+  integrating the range of k standard normals over the residual sum of
+  squares. The critical values agree with the published Tukey tables to
+  within 0.001 across k = 2..5 and df = 10..120, and the test checks
+  that.
+- **Scheffe's test** was using Tukey's denominator, which has a factor
+  of a half in it. That made the F statistic half of what it should be,
+  and the p-value too small. It now uses the pooled standard error, so
+  its p-value agrees with the unadjusted t-test — which is correct,
+  because Scheffe protects against the family of *all* possible
+  contrasts rather than the pairs that were compared.
+- **The Bonferroni p-value** was not adjusted. SPSS reports the
+  unadjusted p-value multiplied by the number of comparisons, and the
+  output now does the same.
+
+### 8.5 Two ways to drive the app
+
+```sh
+statscraft data.csv --dialog frequencies     # open a procedure dialog
+statscraft data.csv --script run.sps         # run a syntax file at start-up
+```
+
+The second one is what the test suite and the screenshot tooling use.
+`samples/phase3_demo.sps` runs every Phase 3 feature in one go.

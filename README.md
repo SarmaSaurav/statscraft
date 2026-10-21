@@ -37,14 +37,24 @@ the Syntax Editor without running it, so you can edit the command by hand
 first. That is the whole dialog → syntax → output pipeline, and it is why
 the two editors and the menus behave identically.
 
-Ten procedures have dialogs: Frequencies, Descriptives, Crosstabs,
+Sixteen procedures have dialogs: Frequencies, Descriptives, Crosstabs,
 Independent-Samples T Test, Paired-Samples T Test, One-Way ANOVA, Bivariate
-Correlations, Linear Regression, Means and Explore.
+Correlations, Linear Regression, Means, Explore, and the nonparametric
+family — Mann-Whitney U, Kruskal-Wallis H, Wilcoxon signed-rank and
+Friedman.
 
-To launch straight into one:
+The dialogs' options reach the statistics engine, not just the syntax:
+`/STATISTICS=` chooses which descriptives are computed, `/CELLS=` gives
+the crosstab its row, column and expected counts, `/POSTHOC=` adds the
+ANOVA's Tukey, Scheffe, Bonferroni and LSD comparisons, `/ES=DISPLAY`
+adds the t-test's effect sizes (Cohen's d, Hedges' g), and `/PRINT=SIG`
+puts the significance stars on the correlation matrix.
+
+To launch straight into a dialog, or to run a syntax file at start-up:
 
 ```sh
 statscraft data.csv --dialog frequencies
+statscraft data.csv --script run.sps
 ```
 
 `docs/SPSS_REFERENCE.md` records the observed behaviour of IBM SPSS

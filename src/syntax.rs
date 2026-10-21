@@ -172,13 +172,50 @@ fn execute_line(app: &mut StatsCraftApp, line: &str) {
                     .sub("FORMAT")
                     .map(|kw| !kw.iter().any(|k| k == "NOTABLE"))
                     .unwrap_or(true);
+                // /CHART=BARCHART or /CHART=HISTOGRAM adds a chart.
+                let chart_kind = cmd.sub("CHART").and_then(|kw| {
+                    kw.iter()
+                        .find(|k| k.eq_ignore_ascii_case("BARCHART") || k.eq_ignore_ascii_case("HISTOGRAM"))
+                        .cloned()
+                });
                 if let Some(t) = &app.table {
                     let mut n = 0usize;
                     for &ci in &res {
                         let name = t.columns[ci].name.clone();
                         if show_tables {
                             let rows = stats::frequencies(t, ci);
-                            app.outputs.push(OutputTable::from_frequencies(&name, &rows));
+                            let chart = if chart_kind.is_some() {
+                                Some(crate::output::bar_chart_from_frequencies(&name, &rows))
+                            } else {
+                                None
+                            };
+                            app.outputs.push(OutputTable::frequencies_with_chart(&name, &rows, chart));
+                        }
+                        // A histogram of a numeric variable.
+                        if let Some(kind) = &chart_kind {
+                            if kind.eq_ignore_ascii_case("HISTOGRAM")
+                                && t.columns[ci].kind == crate::data::ColumnKind::Numeric
+                            {
+                                if let Some(h) = stats::histogram(t, ci, 20) {
+                                    app.outputs.push(OutputTable {
+                                        title: format!("Histogram: {}", name),
+                                        headers: vec!["Bin".into(), "Count".into()],
+                                        rows: h
+                                            .counts
+                                            .iter()
+                                            .zip(h.centres.iter())
+                                            .map(|(c, x)| {
+                                                vec![
+                                                    format!("{:.2} - {:.2}", x - h.width / 2.0, x + h.width / 2.0),
+                                                    format!("{:.0}", c),
+                                                ]
+                                            })
+                                            .collect(),
+                                        note: String::new(),
+                                        chart: Some(crate::output::histogram_chart(&h)),
+                                    });
+                                }
+                            }
                         }
                         if let Some(s) = &set {
                             if t.columns[ci].kind == crate::data::ColumnKind::Numeric {
@@ -197,15 +234,38 @@ fn execute_line(app: &mut StatsCraftApp, line: &str) {
             }
         }
         "CORRELATIONS" | "CORR" => {
-            let vars = resolve_vars(app, &tokens[1..], true);
+            let cmd = Command::parse(line);
+            let vars = resolve_vars(app, &cmd.args, true);
             if let Some(res) = vars {
                 if res.len() < 2 {
                     app.status = "CORRELATIONS: need at least two numeric variables.".to_string();
                     return;
                 }
+                // /PRINT=SIG asks for the significance stars; the
+                // DESCRIPTIVES statistic adds the summary block.
+                let print_words = cmd.sub("PRINT").unwrap_or(&[]);
+                let show_stars = print_words.iter().any(|k| k.eq_ignore_ascii_case("SIG"));
+                let show_descriptives = print_words
+                    .iter()
+                    .any(|k| k.eq_ignore_ascii_case("DESCRIPTIVES"))
+                    || cmd
+                        .sub("STATISTICS")
+                        .map(|kw| kw.iter().any(|k| k.eq_ignore_ascii_case("DESCRIPTIVES")))
+                        .unwrap_or(false);
                 if let Some(t) = &app.table {
                     let c = stats::correlations_in(t, &res);
-                    app.outputs.push(OutputTable::from_correlations(&c));
+                    let descs = if show_descriptives {
+                        let set = stats::StatSet::defaults();
+                        stats::descriptives_with(t, &res, &set)
+                    } else {
+                        Vec::new()
+                    };
+                    app.outputs.push(OutputTable::correlations_with(
+                        &c,
+                        show_stars,
+                        show_descriptives,
+                        &descs,
+                    ));
                     app.status = format!("CORRELATIONS executed: {} pair(s).", c.len());
                     if !app.outputs.is_empty() {
                         app.show_output_window = true;
@@ -241,7 +301,12 @@ fn execute_line(app: &mut StatsCraftApp, line: &str) {
                 let mut ok = false;
                 if let Some(&x) = xs.first() {
                     if let Some(r) = stats::linear_regression_xy(t, yi, x) {
-                        app.outputs.push(OutputTable::from_regression(&r));
+                        // A scatter plot with the fitted line, as SPSS draws
+                        // it in the regression output.
+                        let chart = stats::scatter_points(t, x, yi).map(|s| {
+                            crate::output::scatter_chart(&s)
+                        });
+                        app.outputs.push(OutputTable::regression_with_chart(&r, chart));
                         app.status = format!(
                             "REGRESSION executed: {} on {}.",
                             t.columns[yi].name, t.columns[x].name
@@ -259,8 +324,9 @@ fn execute_line(app: &mut StatsCraftApp, line: &str) {
             }
         }
         "CROSSTABS" | "CROSSTAB" => {
-            // CROSSTABS <var1> BY <var2>
-            let rest: Vec<String> = tokens[1..].to_vec();
+            // CROSSTABS <var1> BY <var2> [/CELLS=... /STATISTICS=...]
+            let cmd = Command::parse(line);
+            let rest: Vec<String> = cmd.args.clone();
             let Some(bi) = rest.iter().position(|t| t.eq_ignore_ascii_case("BY")) else {
                 app.status = "CROSSTABS: expected 'CROSSTABS var1 BY var2'.".to_string();
                 return;
@@ -275,9 +341,21 @@ fn execute_line(app: &mut StatsCraftApp, line: &str) {
                     app.status = "CROSSTABS: unknown variable name.".to_string();
                     return;
                 };
+                // The cell counts and statistics the user chose.
+                let cells = cmd
+                    .sub("CELLS")
+                    .filter(|kw| !kw.is_empty())
+                    .map(stats::CellCounts::parse)
+                    .unwrap_or_default();
+                let stats_sel = cmd
+                    .sub("STATISTICS")
+                    .filter(|kw| !kw.is_empty())
+                    .map(stats::CrosstabStats::parse)
+                    .unwrap_or_default();
                 match stats::crosstabs_chi2(t, i, j) {
-                    Some(ct) => {
-                        app.outputs.push(OutputTable::from_crosstabs(&ct));
+                    Some(mut ct) => {
+                        stats::crosstabs_extra(&mut ct, &stats_sel);
+                        app.outputs.push(OutputTable::crosstabs_with(&ct, &cells, &stats_sel));
                         app.status = format!(
                             "CROSSTABS executed: chi2={:.3} df={} p={:.4}",
                             ct.chi2, ct.df, ct.p
@@ -292,8 +370,9 @@ fn execute_line(app: &mut StatsCraftApp, line: &str) {
             }
         }
         "ONEWAY" | "ANOVA" => {
-            // ONEWAY <y> BY <factor>
-            let rest: Vec<String> = tokens[1..].to_vec();
+            // ONEWAY <y> BY <factor> [/POSTHOC=... /STATISTICS=...]
+            let cmd = Command::parse(line);
+            let rest: Vec<String> = cmd.args.clone();
             let Some(bi) = rest.iter().position(|t| t.eq_ignore_ascii_case("BY")) else {
                 app.status = "ONEWAY: expected 'ONEWAY y BY factor'.".to_string();
                 return;
@@ -308,9 +387,20 @@ fn execute_line(app: &mut StatsCraftApp, line: &str) {
                     app.status = "ONEWAY: unknown variable name.".to_string();
                     return;
                 };
-                match stats::one_way_anova_in(t, yi, fi) {
+                // The post-hoc comparisons the user chose, and whether
+                // Levene's test was asked for.
+                let posthoc = cmd
+                    .sub("POSTHOC")
+                    .filter(|kw| !kw.is_empty())
+                    .map(stats::PostHocSet::parse)
+                    .unwrap_or_default();
+                let stat_words = cmd.sub("STATISTICS").unwrap_or(&[]);
+                let with_levene = stat_words
+                    .iter()
+                    .any(|k| k.eq_ignore_ascii_case("HOMOGENEITY") || k.eq_ignore_ascii_case("ALL"));
+                match stats::one_way_anova_with(t, yi, fi, &posthoc, with_levene) {
                     Some(a) => {
-                        app.outputs.push(OutputTable::from_anova(&a));
+                        app.outputs.push(OutputTable::anova_with(&a));
                         app.status = format!("ONEWAY executed: F={:.3} p={:.4}", a.f, a.p);
                         app.show_output_window = true;
                     }
@@ -324,7 +414,13 @@ fn execute_line(app: &mut StatsCraftApp, line: &str) {
         "T-TEST" | "TTEST" | "T" => {
             // T-TEST <y> BY <group>            (independent samples)
             // T-TEST PAIRED <v1> <v2>          (paired samples)
-            let rest: Vec<String> = tokens[1..].to_vec();
+            let cmd = Command::parse(line);
+            let rest: Vec<String> = cmd.args.clone();
+            // /ES=DISPLAY asks for the effect size table.
+            let show_effects = cmd
+                .sub("ES")
+                .map(|kw| kw.iter().any(|k| k.eq_ignore_ascii_case("DISPLAY")))
+                .unwrap_or(false);
             if rest.first().map(|t| t.eq_ignore_ascii_case("PAIRED")).unwrap_or(false) {
                 let vars = &rest[1..];
                 if vars.len() != 2 {
@@ -371,7 +467,7 @@ fn execute_line(app: &mut StatsCraftApp, line: &str) {
                 };
                 match stats::independent_ttest_vars(t, yi, gi) {
                     Some(r) => {
-                        app.outputs.push(OutputTable::from_ttest(&r));
+                        app.outputs.push(OutputTable::ttest_with(&r, show_effects));
                         app.status = format!("T-TEST executed: {} BY {}.", t.columns[yi].name, t.columns[gi].name);
                         if !app.outputs.is_empty() {
                             app.show_output_window = true;
@@ -379,6 +475,196 @@ fn execute_line(app: &mut StatsCraftApp, line: &str) {
                     }
                     None => {
                         app.status = "T-TEST failed (group must have exactly 2 levels).".to_string();
+                    }
+                }
+            }
+        }
+        "MEANS" => {
+            // MEANS TABLES <vars> BY <group> [/CELLS=...]
+            let cmd = Command::parse(line);
+            let rest: Vec<String> = cmd.args.clone();
+            let Some(bi) = rest.iter().position(|t| t.eq_ignore_ascii_case("BY")) else {
+                app.status = "MEANS: expected 'MEANS TABLES var BY group'.".to_string();
+                return;
+            };
+            // Skip the optional "TABLES" keyword.
+            let y_args: Vec<String> = rest[..bi]
+                .iter()
+                .filter(|t| !t.eq_ignore_ascii_case("TABLES"))
+                .cloned()
+                .collect();
+            let Some(group) = rest.get(bi + 1).cloned() else {
+                app.status = "MEANS: expected 'MEANS TABLES var BY group'.".to_string();
+                return;
+            };
+            if y_args.len() != 1 {
+                app.status = "MEANS: expected one variable before BY.".to_string();
+                return;
+            }
+            if let Some(t) = &app.table {
+                let (Some(yi), Some(gi)) = (t.column_index(&y_args[0]), t.column_index(&group))
+                else {
+                    app.status = "MEANS: unknown variable name.".to_string();
+                    return;
+                };
+                match stats::means_by_group(t, yi, gi) {
+                    Some(m) => {
+                        app.outputs.push(OutputTable::from_means(&m));
+                        app.status = format!(
+                            "MEANS executed: {} BY {} ({} groups).",
+                            m.outcome,
+                            m.group_var,
+                            m.groups.len()
+                        );
+                        app.show_output_window = true;
+                    }
+                    None => {
+                        app.status = "MEANS failed (no valid cases).".to_string();
+                    }
+                }
+            }
+        }
+        "EXPLORE" => {
+            // EXPLORE <vars> [/GROUP BY <factor>]
+            let cmd = Command::parse(line);
+            let vars: Vec<String> = cmd
+                .args
+                .iter()
+                .filter(|t| !t.eq_ignore_ascii_case("BY"))
+                .cloned()
+                .collect();
+            // The grouping variable, if one was given.
+            let group = cmd
+                .sub("GROUP")
+                .map(|kw| kw.first().cloned())
+                .unwrap_or(None);
+            if let Some(t) = &app.table {
+                let mut n = 0usize;
+                for v in &vars {
+                    let Some(yi) = t.column_index(v) else {
+                        app.status = format!("EXPLORE: unknown variable '{}'.", v);
+                        return;
+                    };
+                    let gi = match &group {
+                        Some(g) => match t.column_index(g) {
+                            Some(i) => Some(i),
+                            None => {
+                                app.status = format!("EXPLORE: unknown variable '{}'.", g);
+                                return;
+                            }
+                        },
+                        None => None,
+                    };
+                    match stats::explore(t, yi, gi) {
+                        Some(e) => {
+                            app.outputs.push(OutputTable::from_explore(&e));
+                            app.outputs.push(OutputTable::explore_normality(&e));
+                            n += 1;
+                        }
+                        None => {
+                            app.status = "EXPLORE failed (need a numeric variable).".to_string();
+                            return;
+                        }
+                    }
+                }
+                app.status = format!("EXPLORE executed for {} variable(s).", n);
+                app.show_output_window = true;
+            }
+        }
+        "NONPARAMETRIC" | "NPAR" => {
+            // NPAR TESTS /MW= <y> BY <group>
+            // NPAR TESTS /WILCOXON = <v1> <v2>
+            // NPAR TESTS /K-W = <y> BY <group>
+            // NPAR TESTS /FRIEDMAN = <v1> <v2> <v3>
+            let cmd = Command::parse(line);
+            let mw = cmd.sub("MW").map(|kw| kw.to_vec());
+            let wilcoxon = cmd.sub("WILCOXON").map(|kw| kw.to_vec());
+            let kw_test = cmd.sub("K-W").map(|kw| kw.to_vec());
+            let friedman = cmd.sub("FRIEDMAN").map(|kw| kw.to_vec());
+            if let Some(words) = mw {
+                run_by_group(app, &words, "Mann-Whitney", |t, yi, gi| {
+                    stats::mann_whitney(t, yi, gi).map(|r| OutputTable::from_mann_whitney(&r))
+                });
+                return;
+            }
+            if let Some(words) = wilcoxon {
+                run_pairwise(app, &words, "Wilcoxon", |t, a, b| {
+                    stats::wilcoxon_signed_rank(t, a, b).map(|r| OutputTable::from_wilcoxon(&r))
+                });
+                return;
+            }
+            if let Some(words) = kw_test {
+                run_by_group(app, &words, "Kruskal-Wallis", |t, yi, gi| {
+                    stats::kruskal_wallis(t, yi, gi).map(|r| OutputTable::from_kruskal_wallis(&r))
+                });
+                return;
+            }
+            if let Some(words) = friedman {
+                if let Some(t) = &app.table {
+                    let idxs: Vec<usize> = words
+                        .iter()
+                        .filter_map(|n| t.column_index(n))
+                        .collect();
+                    match stats::friedman(t, &idxs) {
+                        Some(r) => {
+                            app.outputs.push(OutputTable::from_friedman(&r));
+                            app.status = format!(
+                                "FRIEDMAN executed: chi2={:.3} p={:.4}",
+                                r.chi_square, r.p
+                            );
+                            app.show_output_window = true;
+                        }
+                        None => {
+                            app.status =
+                                "FRIEDMAN failed (need 3 or more related variables).".to_string();
+                        }
+                    }
+                }
+                return;
+            }
+            app.status = "NONPARAMETRIC: expected /MW=, /WILCOXON=, /K-W= or /FRIEDMAN=."
+                .to_string();
+        }
+        "MANN-WHITNEY" | "MW" => {
+            // The shortcut form: MANN-WHITNEY <y> BY <group>
+            let cmd = Command::parse(line);
+            let words = cmd.args.clone();
+            run_by_group(app, &words, "Mann-Whitney", |t, yi, gi| {
+                stats::mann_whitney(t, yi, gi).map(|r| OutputTable::from_mann_whitney(&r))
+            });
+        }
+        "WILCOXON" => {
+            // WILCOXON <v1> <v2>
+            let cmd = Command::parse(line);
+            let words = cmd.args.clone();
+            run_pairwise(app, &words, "Wilcoxon", |t, a, b| {
+                stats::wilcoxon_signed_rank(t, a, b).map(|r| OutputTable::from_wilcoxon(&r))
+            });
+        }
+        "KRUSKAL-WALLIS" | "K-W" => {
+            let cmd = Command::parse(line);
+            let words = cmd.args.clone();
+            run_by_group(app, &words, "Kruskal-Wallis", |t, yi, gi| {
+                stats::kruskal_wallis(t, yi, gi).map(|r| OutputTable::from_kruskal_wallis(&r))
+            });
+        }
+        "FRIEDMAN" => {
+            let cmd = Command::parse(line);
+            let words = cmd.args.clone();
+            if let Some(t) = &app.table {
+                let idxs: Vec<usize> = words.iter().filter_map(|n| t.column_index(n)).collect();
+                match stats::friedman(t, &idxs) {
+                    Some(r) => {
+                        app.outputs.push(OutputTable::from_friedman(&r));
+                        app.status = format!(
+                            "FRIEDMAN executed: chi2={:.3} p={:.4}",
+                            r.chi_square, r.p
+                        );
+                        app.show_output_window = true;
+                    }
+                    None => {
+                        app.status =
+                            "FRIEDMAN failed (need 3 or more related variables).".to_string();
                     }
                 }
             }
@@ -482,6 +768,86 @@ fn extract_path(line: &str) -> String {
     line.split_whitespace().last().unwrap_or("").to_string()
 }
 
+/// Run a nonparametric test that takes one variable split by a group.
+fn run_by_group<F>(
+    app: &mut StatsCraftApp,
+    words: &[String],
+    name: &str,
+    f: F,
+) where
+    F: Fn(&crate::data::DataTable, usize, usize) -> Option<OutputTable>,
+{
+    let Some(bi) = words.iter().position(|t| t.eq_ignore_ascii_case("BY")) else {
+        app.status = format!("{}: expected '{} var BY group'.", name, name);
+        return;
+    };
+    let y_args: Vec<String> = words[..bi]
+        .iter()
+        .filter(|t| !t.eq_ignore_ascii_case("TESTS"))
+        .cloned()
+        .collect();
+    let Some(group) = words.get(bi + 1).cloned() else {
+        app.status = format!("{}: expected '{} var BY group'.", name, name);
+        return;
+    };
+    if y_args.len() != 1 {
+        app.status = format!("{}: expected one variable before BY.", name);
+        return;
+    }
+    if let Some(t) = &app.table {
+        let (Some(yi), Some(gi)) = (t.column_index(&y_args[0]), t.column_index(&group)) else {
+            app.status = format!("{}: unknown variable name.", name);
+            return;
+        };
+        match f(t, yi, gi) {
+            Some(out) => {
+                app.outputs.push(out);
+                app.status = format!("{} executed for {} BY {}.", name, y_args[0], group);
+                app.show_output_window = true;
+            }
+            None => {
+                app.status = format!("{} failed (not enough valid cases).", name);
+            }
+        }
+    }
+}
+
+/// Run a nonparametric test that compares two variables directly.
+fn run_pairwise<F>(
+    app: &mut StatsCraftApp,
+    words: &[String],
+    name: &str,
+    f: F,
+) where
+    F: Fn(&crate::data::DataTable, usize, usize) -> Option<OutputTable>,
+{
+    let vars: Vec<String> = words
+        .iter()
+        .filter(|t| !t.eq_ignore_ascii_case("TESTS"))
+        .cloned()
+        .collect();
+    if vars.len() != 2 {
+        app.status = format!("{}: expected two variables.", name);
+        return;
+    }
+    if let Some(t) = &app.table {
+        let (Some(a), Some(b)) = (t.column_index(&vars[0]), t.column_index(&vars[1])) else {
+            app.status = format!("{}: unknown variable name.", name);
+            return;
+        };
+        match f(t, a, b) {
+            Some(out) => {
+                app.outputs.push(out);
+                app.status = format!("{} executed for {} and {}.", name, vars[0], vars[1]);
+                app.show_output_window = true;
+            }
+            None => {
+                app.status = format!("{} failed (not enough valid pairs).", name);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -524,6 +890,114 @@ mod tests {
         assert!(s.mean && s.median && s.stddev);
         assert!(!s.variance);
         assert!(!s.is_empty());
+    }
+
+    #[test]
+    fn the_whole_phase_three_script_runs() {
+        let dir = std::env::temp_dir();
+        let csv = dir.join("statscraft_p3_script.csv");
+        std::fs::write(
+            &csv,
+            "id,region,group,age,satisfaction,score,response_time\n\
+             1,North,A,25,High,72,120\n\
+             2,North,B,31,Low,68,145\n\
+             3,South,A,28,High,75,110\n\
+             4,South,B,45,Med,61,190\n\
+             5,East,A,22,High,80,95\n\
+             6,East,B,38,Low,55,205\n\
+             7,West,A,29,Med,70,130\n\
+             8,West,B,41,High,66,175\n\
+             9,North,A,33,Low,58,160\n\
+             10,South,B,27,High,85,88\n\
+             11,East,A,36,Med,73,120\n\
+             12,West,B,24,High,90,100\n",
+        )
+        .unwrap();
+        let mut app = StatsCraftApp::default();
+        app.path_input = csv.display().to_string();
+        app.load();
+
+        let script = "\
+FREQUENCIES region /CHART=BARCHART
+FREQUENCIES score /CHART=HISTOGRAM
+DESCRIPTIVES score age response_time /STATISTICS=MEAN MEDIAN STDDEV VARIANCE
+CROSSTABS region BY group /CELLS=COUNT ROW COLUMN EXPECTED /STATISTICS=CHISQ PHI
+ONEWAY score BY group /POSTHOC=TUKEY SCHEFFE /STATISTICS=HOMOGENEITY
+T-TEST score BY group /ES=DISPLAY
+CORRELATIONS score age response_time /PRINT=SIG DESCRIPTIVES
+REGRESSION score WITH age
+MEANS TABLES score BY group
+EXPLORE score
+NONPARAMETRIC /MW= score BY group
+NONPARAMETRIC /K-W= score BY group
+NONPARAMETRIC /WILCOXON= score age
+NONPARAMETRIC /FRIEDMAN= score age response_time
+";
+        run(&mut app, script);
+
+        // Every command should have produced output, and no status should
+        // report a failure.
+        assert!(
+            !app.status.to_lowercase().contains("failed"),
+            "a command failed: {}",
+            app.status
+        );
+        assert!(
+            !app.status.to_lowercase().contains("unknown"),
+            "a command was unknown: {}",
+            app.status
+        );
+        assert!(app.outputs.len() >= 14, "only {} outputs", app.outputs.len());
+
+        // The crosstab must carry the extra cell counts.
+        let crosstab = app
+            .outputs
+            .iter()
+            .find(|o| o.title.starts_with("Crosstabulation"))
+            .expect("a crosstab");
+        assert!(
+            crosstab.rows.iter().any(|r| r[0].contains("row %")),
+            "no row percentages: {:?}",
+            crosstab.rows
+        );
+        assert!(crosstab.note.contains("Phi"), "no Phi: {}", crosstab.note);
+
+        // The ANOVA must carry the post-hoc comparisons.
+        let anova = app
+            .outputs
+            .iter()
+            .find(|o| o.title.starts_with("ANOVA"))
+            .expect("an ANOVA");
+        assert!(
+            anova.rows.iter().any(|r| r[0].contains("Tukey")),
+            "no Tukey rows"
+        );
+        assert!(anova.note.contains("Levene"), "no Levene: {}", anova.note);
+
+        // The t-test must carry the effect size table.
+        let ttest = app
+            .outputs
+            .iter()
+            .find(|o| o.title.contains("T-Test"))
+            .expect("a t-test");
+        assert!(
+            ttest.rows.iter().any(|r| r[0].contains("Cohen")),
+            "no Cohen's d"
+        );
+
+        // The correlation matrix must carry the significance stars.
+        let corr = app
+            .outputs
+            .iter()
+            .find(|o| o.title == "Correlations")
+            .expect("the correlations");
+        assert!(corr.note.contains("0.01 level"));
+
+        // The chart must be attached to at least one output.
+        assert!(
+            app.outputs.iter().any(|o| o.chart.is_some()),
+            "no chart was produced"
+        );
     }
 
     #[test]

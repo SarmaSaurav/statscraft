@@ -17,6 +17,7 @@ fn main() -> eframe::Result<()> {
     // is handy for demos and for driving the app from a script.
     let mut path: Option<String> = None;
     let mut procedure: Option<Procedure> = None;
+    let mut script: Option<String> = None;
     let mut i = 0;
     while i < args.len() {
         let a = args[i].to_ascii_lowercase();
@@ -32,13 +33,19 @@ fn main() -> eframe::Result<()> {
                 }
                 i += 1;
             }
+        } else if a == "--script" || a == "-s" {
+            // A syntax file to run at start-up.
+            if i + 1 < args.len() {
+                script = Some(args[i + 1].clone());
+                i += 1;
+            }
         } else if path.is_none() {
             path = Some(args[i].clone());
         }
         i += 1;
     }
 
-    app::run_with(path, procedure)
+    app::run_with(path, procedure, script)
 }
 
 /// Parse a procedure name into the matching dialog.
@@ -55,6 +62,10 @@ fn parse_procedure(name: &str) -> Option<Procedure> {
         "regression" | "linear_regression" => Some(Procedure::Regression),
         "means" => Some(Procedure::Means),
         "explore" => Some(Procedure::Explore),
+        "mann_whitney" | "mannwhitney" | "mw" => Some(Procedure::MannWhitney),
+        "wilcoxon" => Some(Procedure::Wilcoxon),
+        "kruskal_wallis" | "kruskalwallis" | "kruskal" => Some(Procedure::KruskalWallis),
+        "friedman" => Some(Procedure::Friedman),
         _ => None,
     }
 }
@@ -71,5 +82,9 @@ fn known_procedures() -> Vec<&'static str> {
         "regression",
         "means",
         "explore",
+        "mann_whitney",
+        "wilcoxon",
+        "kruskal_wallis",
+        "friedman",
     ]
 }

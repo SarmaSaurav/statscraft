@@ -5,6 +5,49 @@ pub struct OutputTable {
     pub rows: Vec<Vec<String>>,
     /// Footnote rendered beneath the pivot table (SPSS "Notes").
     pub note: String,
+    /// An optional chart drawn under the table, as SPSS draws one when
+    /// the procedure asks for it.
+    pub chart: Option<Chart>,
+}
+
+/// A chart to draw in the Output Viewer.
+#[derive(Debug, Clone)]
+pub struct Chart {
+    pub kind: ChartKind,
+    pub title: String,
+    pub x_label: String,
+    pub y_label: String,
+    /// The series, one per named group.
+    pub series: Vec<ChartSeries>,
+}
+
+/// The kind of chart.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChartKind {
+    /// A bar chart of counts or percentages.
+    Bar,
+    /// A histogram of a numeric variable.
+    Histogram,
+    /// A scatter plot of two numeric variables.
+    Scatter,
+    /// A box plot of a numeric variable, with the quartiles marked.
+    BoxPlot,
+}
+
+/// One series of a chart: a name and a set of points.
+#[derive(Debug, Clone)]
+pub struct ChartSeries {
+    pub name: String,
+    /// The x values.
+    pub x: Vec<f64>,
+    /// The y values.
+    pub y: Vec<f64>,
+    /// The minimum, lower quartile, median and upper quartile, for a box
+    /// plot.
+    pub quartiles: Option<(f64, f64, f64, f64)>,
+    /// The label for each x value, so a bar chart can show the category
+    /// names rather than 0, 1, 2.
+    pub x_labels: Vec<String>,
 }
 
 impl OutputTable {
@@ -122,6 +165,105 @@ impl OutputTable {
             headers,
             rows,
             note: "a. Counts exclude system- and user-missing cases.".to_string(),
+            chart: None,
+        }
+    }
+
+    /// The correlation matrix, with the significance stars SPSS prints
+    /// when `Print > Sig.` is on.
+    pub fn correlations_with(
+        rows_in: &[crate::stats::Correlation],
+        show_stars: bool,
+        show_descriptives: bool,
+        descriptives: &[crate::stats::Descriptive],
+    ) -> Self {
+        // Build the symmetric matrix the way SPSS does.
+        let mut names: Vec<String> = Vec::new();
+        for r in rows_in {
+            if !names.contains(&r.var1) {
+                names.push(r.var1.clone());
+            }
+            if !names.contains(&r.var2) {
+                names.push(r.var2.clone());
+            }
+        }
+        let n = names.len();
+        let mut matrix = vec![vec![f64::NAN; n]; n];
+        for r in rows_in {
+            let i = names.iter().position(|x| *x == r.var1);
+            let j = names.iter().position(|x| *x == r.var2);
+            if let (Some(i), Some(j)) = (i, j) {
+                matrix[i][j] = r.r;
+                matrix[j][i] = r.r;
+            }
+        }
+
+        let mut headers = vec![String::new()];
+        headers.extend(names.iter().cloned());
+        let mut rows = Vec::new();
+
+        if show_descriptives {
+            // The "Descriptive Statistics" block: N, mean and standard
+            // deviation for each variable.
+            let mut n_row = vec!["N".to_string()];
+            let mut mean_row = vec!["Mean".to_string()];
+            let mut sd_row = vec!["Std. Deviation".to_string()];
+            for name in &names {
+                match descriptives.iter().find(|d| d.variable == *name) {
+                    Some(d) => {
+                        n_row.push(d.n.to_string());
+                        mean_row.push(format!("{:.4}", d.mean));
+                        sd_row.push(format!("{:.4}", d.std_dev));
+                    }
+                    None => {
+                        n_row.push(String::new());
+                        mean_row.push(String::new());
+                        sd_row.push(String::new());
+                    }
+                }
+            }
+            rows.push(n_row);
+            rows.push(mean_row);
+            rows.push(sd_row);
+            rows.push(vec![String::new()]);
+        }
+
+        for (i, name) in names.iter().enumerate() {
+            let mut row = vec![name.clone()];
+            for j in 0..n {
+                let v = matrix[i][j];
+                if i == j {
+                    row.push("1.000".to_string());
+                } else if v.is_nan() {
+                    row.push(String::new());
+                } else {
+                    let mut cell = format!("{:.3}", v);
+                    if show_stars {
+                        // The p-value for this pair.
+                        let p = rows_in
+                            .iter()
+                            .find(|r| {
+                                (r.var1 == *name && r.var2 == names[j])
+                                    || (r.var2 == *name && r.var1 == names[j])
+                            })
+                            .map(|r| r.p)
+                            .unwrap_or(f64::NAN);
+                        cell.push_str(significance_star(p));
+                    }
+                    row.push(cell);
+                }
+            }
+            rows.push(row);
+        }
+
+        let note = "**. Correlation is significant at the 0.01 level (2-tailed).\n*. Correlation is significant at the 0.05 level (2-tailed).\nn = Correlation is not significant at the 0.05 level (2-tailed).".to_string();
+
+        Self {
+            title: "Correlations".to_string(),
+            headers,
+            rows,
+            note,
+            chart: None,
         }
     }
 
@@ -232,6 +374,7 @@ impl OutputTable {
                 "Dependent Variable: {}. N = {}. Method: Least Squares.",
                 r.outcome, r.n
             ),
+            chart: None,
         }
     }
 
@@ -256,6 +399,98 @@ impl OutputTable {
             ],
             rows,
             ..Default::default()
+        }
+    }
+
+    /// The t-test output, with the effect size table SPSS shows when
+    /// `Options... > Effect size` is ticked.
+    pub fn ttest_with(r: &crate::stats::TTestResult, show_effects: bool) -> Self {
+        let mut headers = vec![
+            "Outcome".into(),
+            "Group var".into(),
+            "Group 1".into(),
+            "Group 2".into(),
+            "N1".into(),
+            "N2".into(),
+            "Mean1".into(),
+            "Mean2".into(),
+            "t".into(),
+            "df".into(),
+            "p (2-tail)".into(),
+        ];
+        let mut rows = vec![vec![
+            r.outcome.clone(),
+            r.group_var.clone(),
+            r.group1.clone(),
+            r.group2.clone(),
+            r.n1.to_string(),
+            r.n2.to_string(),
+            format!("{:.4}", r.mean1),
+            format!("{:.4}", r.mean2),
+            format!("{:.4}", r.t),
+            format!("{:.4}", r.df),
+            format!("{:.4}", r.p),
+        ]];
+
+        if show_effects {
+            // The "Effect Size" table, as SPSS writes it.
+            rows.push(vec![String::new()]);
+            rows.push(vec!["Effect Size".into()]);
+            rows.push(vec![
+                "".into(),
+                "Value".into(),
+                "Std. Error".into(),
+                "Sig.".into(),
+            ]);
+            rows.push(vec![
+                "Mean difference".into(),
+                format!("{:.4}", r.mean_diff),
+                format!("{:.4}", r.std_error_diff),
+                String::new(),
+            ]);
+            rows.push(vec![
+                "Std. dev. group 1".into(),
+                format!("{:.4}", r.std1),
+                String::new(),
+                String::new(),
+            ]);
+            rows.push(vec![
+                "Std. dev. group 2".into(),
+                format!("{:.4}", r.std2),
+                String::new(),
+                String::new(),
+            ]);
+            let n_total = (r.n1 + r.n2) as f64;
+            let pooled_var = ((r.n1 as f64 - 1.0) * r.std1.powi(2)
+                + (r.n2 as f64 - 1.0) * r.std2.powi(2))
+                / (n_total - 2.0).max(1.0);
+            let pooled_sd = pooled_var.sqrt();
+            rows.push(vec![
+                "Std. dev. pooled".into(),
+                format!("{:.4}", pooled_sd),
+                String::new(),
+                String::new(),
+            ]);
+            rows.push(vec![
+                "Cohen's d".into(),
+                format!("{:.4}", r.cohens_d),
+                String::new(),
+                String::new(),
+            ]);
+            rows.push(vec![
+                "Hedges' g".into(),
+                format!("{:.4}", r.hedges_g),
+                String::new(),
+                String::new(),
+            ]);
+        }
+
+        Self {
+            title: "Independent Samples T-Test".to_string(),
+            headers,
+            rows,
+            note: String::new(),
+            chart: None,
         }
     }
 
@@ -310,6 +545,7 @@ impl OutputTable {
             headers: vec!["Value".into(), "Count".into(), "Percent".into()],
             rows,
             note: "a. Counts exclude system- and user-missing cases.".to_string(),
+            chart: None,
         }
     }
 
@@ -500,6 +736,7 @@ impl OutputTable {
             headers,
             rows,
             note: note_lines.join("\n"),
+            chart: None,
         }
     }
 
@@ -531,10 +768,149 @@ impl OutputTable {
             note: format!(
                 "Pearson Chi-Square = {:.3}, df = {}, Asymp. Sig. (2-sided) = {:.4}; N = {} (missing excluded pairwise)." , ct.chi2, ct.df, ct.p, ct.n
             ),
+            chart: None,
         }
     }
 
     /// SPSS ANOVA table: Between/Within/Total rows with SS, df, MS, F, Sig.
+    /// The full ANOVA output: descriptives per group, the ANOVA table,
+    /// Levene's test and the post-hoc comparisons.
+    pub fn anova_with(a: &crate::stats::AnovaResult) -> Self {
+        let total_ss = a.ss_between + a.ss_within;
+        let total_df = a.df_between + a.df_within;
+
+        let mut headers = vec![
+            String::new(),
+            "N".into(),
+            "Mean".into(),
+            "Std. Dev.".into(),
+        ];
+        let mut rows: Vec<Vec<String>> = Vec::new();
+
+        // ---- Descriptives per group ----
+        if !a.groups.is_empty() {
+            for g in &a.groups {
+                rows.push(vec![
+                    g.name.clone(),
+                    g.n.to_string(),
+                    format!("{:.4}", g.mean),
+                    format!("{:.4}", g.std_dev),
+                ]);
+            }
+            let total_n: usize = a.groups.iter().map(|g| g.n).sum();
+            let grand = a.groups.iter().map(|g| g.mean * g.n as f64).sum::<f64>()
+                / total_n.max(1) as f64;
+            rows.push(vec![
+                "Total".into(),
+                total_n.to_string(),
+                format!("{:.4}", grand),
+                String::new(),
+            ]);
+            rows.push(vec![String::new()]);
+        }
+
+        // ---- The ANOVA table ----
+        let anova_rows = vec![
+            vec![
+                "Between Groups".into(),
+                format!("{:.3}", a.ss_between),
+                format!("{:.0}", a.df_between),
+                format!("{:.3}", a.ms_between),
+                format!("{:.3}", a.f),
+                format!("{:.4}", a.p),
+            ],
+            vec![
+                "Within Groups".into(),
+                format!("{:.3}", a.ss_within),
+                format!("{:.0}", a.df_within),
+                format!("{:.3}", a.ms_within),
+                String::new(),
+                String::new(),
+            ],
+            vec![
+                "Total".into(),
+                format!("{:.3}", total_ss),
+                format!("{:.0}", total_df),
+                String::new(),
+                String::new(),
+                String::new(),
+            ],
+        ];
+
+        // ---- Levene's test ----
+        let mut note_lines: Vec<String> = Vec::new();
+        if let Some(l) = &a.levene {
+            note_lines.push(format!(
+                "Levene's Test: F({:.0}, {:.0}) = {:.3}, Sig. = {:.4}",
+                l.df1, l.df2, l.f, l.p
+            ));
+        }
+
+        // ---- Post-hoc comparisons ----
+        if !a.posthoc.is_empty() {
+            let mut ph_rows: Vec<Vec<String>> = Vec::new();
+            let mut last_test = String::new();
+            for ph in &a.posthoc {
+                if ph.test != last_test {
+                    ph_rows.push(vec![format!("{} comparisons", ph.test)]);
+                    last_test = ph.test.clone();
+                }
+                ph_rows.push(vec![
+                    format!("{} - {}", ph.group1, ph.group2),
+                    format!("{:.4}", ph.mean_diff),
+                    format!("{:.4}", ph.std_error),
+                    format!("{:.3}", ph.statistic),
+                    format!("{:.4}", ph.p),
+                ]);
+            }
+            for h in ["Mean Difference", "Std. Error", "Statistic", "Sig."] {
+                if !headers.contains(&h.to_string()) {
+                    headers.push(h.to_string());
+                }
+            }
+            for r in ph_rows {
+                let mut row = vec![r[0].clone()];
+                row.extend(r[1..].iter().cloned());
+                while row.len() < headers.len() {
+                    row.push(String::new());
+                }
+                row.truncate(headers.len());
+                rows.push(row);
+            }
+        }
+
+        // Merge the ANOVA table columns in.
+        for h in ["Sum of Squares", "df", "Mean Square", "F", "Sig."] {
+            if !headers.contains(&h.to_string()) {
+                headers.push(h.to_string());
+            }
+        }
+        for r in anova_rows {
+            let mut row = vec![r[0].clone()];
+            row.extend(r[1..].iter().cloned());
+            while row.len() < headers.len() {
+                row.push(String::new());
+            }
+            row.truncate(headers.len());
+            rows.push(row);
+        }
+
+        if note_lines.is_empty() {
+            note_lines.push(format!(
+                "F({:.0}, {:.0}) = {:.3}, Sig. = {:.4}",
+                a.df_between, a.df_within, a.f, a.p
+            ));
+        }
+
+        Self {
+            title: format!("ANOVA — {} by {}", a.outcome, a.factor),
+            headers,
+            rows,
+            note: note_lines.join("\n"),
+            chart: None,
+        }
+    }
+
     pub fn from_anova(a: &crate::stats::AnovaResult) -> Self {
         let total_ss = a.ss_between + a.ss_within;
         let total_df = a.df_between + a.df_within;
@@ -575,6 +951,7 @@ impl OutputTable {
                 ],
             ],
             note: String::new(),
+            chart: None,
         }
     }
 
@@ -608,6 +985,308 @@ impl OutputTable {
             ]],
             ..Default::default()
         }
+    }
+
+    // ---- The procedures added in Phase 3 ----
+
+    /// The MEANS output: the group means with their counts, standard
+    /// deviations and standard errors.
+    pub fn from_means(m: &crate::stats::MeansResult) -> Self {
+        let headers = vec![
+            String::new(),
+            "N".into(),
+            "Mean".into(),
+            "Std. Deviation".into(),
+            "Std. Error of Mean".into(),
+        ];
+        let mut rows = Vec::new();
+        for g in &m.groups {
+            rows.push(vec![
+                g.name.clone(),
+                g.n.to_string(),
+                format!("{:.4}", g.mean),
+                format!("{:.4}", g.std_dev),
+                format!("{:.4}", g.std_error),
+            ]);
+        }
+        rows.push(vec![
+            "Total".to_string(),
+            m.total_n.to_string(),
+            format!("{:.4}", m.grand_mean),
+            String::new(),
+            String::new(),
+        ]);
+        Self {
+            title: format!("Report: {} by {}", m.outcome, m.group_var),
+            headers,
+            rows,
+            note: String::new(),
+            chart: None,
+        }
+    }
+
+    /// The EXPLORE output: the descriptives for each group, laid out as
+    /// SPSS lays it out.
+    pub fn from_explore(e: &crate::stats::ExploreResult) -> Self {
+        let headers = vec![String::new(), "Statistic".into(), "Std. Error".into()];
+        let mut rows = Vec::new();
+
+        for g in &e.groups {
+            rows.push(vec![g.name.clone()]);
+            rows.push(vec![
+                String::new(),
+                "Mean".into(),
+                format!("{:.4}", g.mean),
+                format!("{:.5}", g.std_error),
+            ]);
+            rows.push(vec![
+                String::new(),
+                "5% Trimmed Mean".into(),
+                format!("{:.4}", g.trimmed_mean),
+                String::new(),
+            ]);
+            rows.push(vec![
+                String::new(),
+                "Median".into(),
+                format!("{:.4}", g.median),
+                String::new(),
+            ]);
+            rows.push(vec![
+                String::new(),
+                "Variance".into(),
+                format!("{:.4}", g.std_dev * g.std_dev),
+                String::new(),
+            ]);
+            rows.push(vec![
+                String::new(),
+                "Std. Deviation".into(),
+                format!("{:.4}", g.std_dev),
+                String::new(),
+            ]);
+            rows.push(vec![
+                String::new(),
+                "Minimum".into(),
+                format!("{:.4}", g.min),
+                String::new(),
+            ]);
+            rows.push(vec![
+                String::new(),
+                "Maximum".into(),
+                format!("{:.4}", g.max),
+                String::new(),
+            ]);
+            rows.push(vec![
+                String::new(),
+                "Range".into(),
+                format!("{:.4}", g.range),
+                String::new(),
+            ]);
+            rows.push(vec![
+                String::new(),
+                "Interquartile Range".into(),
+                format!("{:.4}", g.iqr),
+                String::new(),
+            ]);
+        }
+
+        let note = "a. Based on the trimmed mean.".to_string();
+        Self {
+            title: format!("Explore: {}", e.outcome),
+            headers,
+            rows,
+            note,
+            chart: None,
+        }
+    }
+
+    /// The normality-test table of the EXPLORE output.
+    pub fn explore_normality(e: &crate::stats::ExploreResult) -> Self {
+        let mut headers = vec![String::new(), "Statistic".into()];
+        for g in &e.groups {
+            headers.push(g.name.clone());
+        }
+        let mut rows = Vec::new();
+        rows.push(vec![
+            String::new(),
+            "Statistic".into(),
+            e.groups
+                .iter()
+                .map(|g| format!("{:.3}", g.ks_stat))
+                .collect::<Vec<_>>()
+                .join(" | "),
+        ]);
+        rows.push(vec![
+            String::new(),
+            "df".into(),
+            e.groups
+                .iter()
+                .map(|g| (g.n.saturating_sub(1)).to_string())
+                .collect::<Vec<_>>()
+                .join(" | "),
+        ]);
+        rows.push(vec![
+            String::new(),
+            "Sig.".into(),
+            e.groups
+                .iter()
+                .map(|g| format!("{:.4}", g.ks_p))
+                .collect::<Vec<_>>()
+                .join(" | "),
+        ]);
+        Self {
+            title: format!("Normality Test: {}", e.outcome),
+            headers,
+            rows,
+            note: "a. Kolmogorov-Smirnov test for normality.".to_string(),
+            chart: None,
+        }
+    }
+
+    /// The Mann-Whitney U output.
+    pub fn from_mann_whitney(r: &crate::stats::MannWhitneyResult) -> Self {
+        Self {
+            title: format!("Mann-Whitney Test: {} by {}", r.outcome, r.group_var),
+            headers: vec![
+                "Outcome".into(),
+                "Group var".into(),
+                "Group 1".into(),
+                "Group 2".into(),
+                "N1".into(),
+                "N2".into(),
+                "Rank Sum 1".into(),
+                "Rank Sum 2".into(),
+                "U1".into(),
+                "U2".into(),
+                "z".into(),
+                "p (2-tailed)".into(),
+            ],
+            rows: vec![vec![
+                r.outcome.clone(),
+                r.group_var.clone(),
+                r.group1.clone(),
+                r.group2.clone(),
+                r.n1.to_string(),
+                r.n2.to_string(),
+                format!("{:.1}", r.rank_sum1),
+                format!("{:.1}", r.rank_sum2),
+                format!("{:.3}", r.u1),
+                format!("{:.3}", r.u2),
+                format!("{:.3}", r.z),
+                format!("{:.4}", r.p),
+            ]],
+            note: format!(
+                "a. Based on the normal approximation with tie and continuity correction. Common-language effect size = {:.4}.",
+                r.effect_size
+            ),
+            chart: None,
+        }
+    }
+
+    /// The Wilcoxon signed-rank output.
+    pub fn from_wilcoxon(r: &crate::stats::WilcoxonResult) -> Self {
+        Self {
+            title: format!("Wilcoxon Signed-Rank Test: {} - {}", r.var1, r.var2),
+            headers: vec![
+                "Variable 1".into(),
+                "Variable 2".into(),
+                "N".into(),
+                "Sum of Ranks (W+)".into(),
+                "Sum of Ranks (W-)".into(),
+                "z".into(),
+                "p (2-tailed)".into(),
+            ],
+            rows: vec![vec![
+                r.var1.clone(),
+                r.var2.clone(),
+                r.n.to_string(),
+                format!("{:.1}", r.w_plus),
+                format!("{:.1}", r.w_minus),
+                format!("{:.3}", r.z),
+                format!("{:.4}", r.p),
+            ]],
+            note: "a. Based on the normal approximation with tie correction.".to_string(),
+            chart: None,
+        }
+    }
+
+    /// The Kruskal-Wallis output.
+    pub fn from_kruskal_wallis(r: &crate::stats::KruskalWallisResult) -> Self {
+        let mut rows: Vec<Vec<String>> = Vec::new();
+        for (name, sum, n) in &r.rank_sums {
+            rows.push(vec![
+                name.clone(),
+                n.to_string(),
+                format!("{:.1}", sum),
+                format!("{:.4}", *sum / *n as f64),
+            ]);
+        }
+        rows.push(vec![String::new()]);
+        rows.push(vec![
+            "Chi-Square".into(),
+            format!("{:.3}", r.h),
+            String::new(),
+            String::new(),
+        ]);
+        rows.push(vec![
+            "df".into(),
+            format!("{:.0}", r.df),
+            String::new(),
+            String::new(),
+        ]);
+        rows.push(vec![
+            "Sig.".into(),
+            format!("{:.4}", r.p),
+            String::new(),
+            String::new(),
+        ]);
+        Self {
+            title: format!("Kruskal-Wallis Test: {} by {}", r.outcome, r.factor),
+            headers: vec![String::new(), "N".into(), "Rank Sum".into(), "Mean Rank".into()],
+            rows,
+            note: "a. Based on the chi-square approximation.".to_string(),
+            chart: None,
+        }
+    }
+
+    /// The Friedman output.
+    pub fn from_friedman(r: &crate::stats::FriedmanResult) -> Self {
+        let mut rows: Vec<Vec<String>> = Vec::new();
+        for (name, mr) in &r.mean_ranks {
+            rows.push(vec![name.clone(), format!("{:.4}", mr)]);
+        }
+        rows.push(vec![String::new()]);
+        rows.push(vec!["Chi-Square".into(), format!("{:.3}", r.chi_square)]);
+        rows.push(vec!["df".into(), format!("{:.0}", r.df)]);
+        rows.push(vec!["Sig.".into(), format!("{:.4}", r.p)]);
+        Self {
+            title: format!("Friedman Test: {}", r.var1),
+            headers: vec![String::new(), "Mean Rank".into()],
+            rows,
+            note: "a. Based on the chi-square approximation.".to_string(),
+            chart: None,
+        }
+    }
+
+    /// The frequencies table with a bar chart of the counts, the way
+    /// SPSS draws one when `Charts > Bar chart` is asked for.
+    pub fn frequencies_with_chart(
+        var: &str,
+        rows_in: &[crate::stats::FreqRow],
+        chart: Option<crate::output::Chart>,
+    ) -> Self {
+        let mut t = Self::from_frequencies(var, rows_in);
+        t.chart = chart;
+        t
+    }
+
+    /// The regression output with a scatter plot of the fit.
+    pub fn regression_with_chart(
+        r: &crate::stats::RegressionResult,
+        chart: Option<crate::output::Chart>,
+    ) -> Self {
+        let mut t = Self::regression_with(r);
+        t.chart = chart;
+        t
     }
 }
 
@@ -684,4 +1363,77 @@ fn merge_row(all: &[String], row: &[String]) -> Vec<String> {
         }
     }
     out
+}
+
+/// The significance star SPSS prints next to a correlation.
+pub fn significance_star(p: f64) -> &'static str {
+    if !p.is_finite() {
+        return "";
+    }
+    if p < 0.01 {
+        "**"
+    } else if p < 0.05 {
+        "*"
+    } else {
+        ""
+    }
+}
+
+/// Build a bar chart of the counts from a set of frequency rows.
+pub fn bar_chart_from_frequencies(
+    var: &str,
+    rows_in: &[crate::stats::FreqRow],
+) -> crate::output::Chart {
+    // Skip the "Total" row, which the table adds separately.
+    let data: Vec<&crate::stats::FreqRow> = rows_in
+        .iter()
+        .filter(|r| r.value != "Total")
+        .collect();
+    crate::output::Chart {
+        kind: crate::output::ChartKind::Bar,
+        title: format!("Bar Chart: {}", var),
+        x_label: var.to_string(),
+        y_label: "Count".to_string(),
+        series: vec![crate::output::ChartSeries {
+            name: var.to_string(),
+            x: (0..data.len()).map(|i| i as f64).collect(),
+            y: data.iter().map(|r| r.count as f64).collect(),
+            quartiles: None,
+            x_labels: data.iter().map(|r| r.value.clone()).collect(),
+        }],
+    }
+}
+
+/// Build a histogram chart from a histogram's bins.
+pub fn histogram_chart(h: &crate::stats::Histogram) -> crate::output::Chart {
+    crate::output::Chart {
+        kind: crate::output::ChartKind::Histogram,
+        title: format!("Histogram: {}", h.variable),
+        x_label: h.variable.clone(),
+        y_label: "Count".to_string(),
+        series: vec![crate::output::ChartSeries {
+            name: h.variable.clone(),
+            x: h.centres.clone(),
+            y: h.counts.clone(),
+            quartiles: None,
+            x_labels: Vec::new(),
+        }],
+    }
+}
+
+/// Build a scatter chart from a set of points.
+pub fn scatter_chart(s: &crate::stats::Scatter) -> crate::output::Chart {
+    crate::output::Chart {
+        kind: crate::output::ChartKind::Scatter,
+        title: format!("Scatter Plot: {} by {}", s.y_var, s.x_var),
+        x_label: s.x_var.clone(),
+        y_label: s.y_var.clone(),
+        series: vec![crate::output::ChartSeries {
+            name: format!("{} / {}", s.x_var, s.y_var),
+            x: s.x.clone(),
+            y: s.y.clone(),
+            quartiles: None,
+            x_labels: Vec::new(),
+        }],
+    }
 }
