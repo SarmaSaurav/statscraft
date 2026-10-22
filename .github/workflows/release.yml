@@ -1,0 +1,160 @@
+name: release
+
+# Publishing a release.
+#
+# A tag of the form v<version> builds every artifact - the Windows
+# installer, the Windows portable binary, the Debian package and the
+# Linux portable binary - and attaches them to a GitHub release.
+#
+# The build workflow still runs on the tag as well; this one is the
+# one that writes the release.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The tag to publish"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  # ---- The version ----
+  # The tag names the version, and the version in Cargo.toml has to
+  # agree with it, or the package would carry a version the release
+  # does not claim.
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.read.outputs.tag }}
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          CARGO_VERSION=$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' Cargo.toml | head -1)
+          if [ "$CARGO_VERSION" != "$VERSION" ]; then
+            echo "the tag says $VERSION but Cargo.toml says $CARGO_VERSION" >&2
+            exit 1
+          fi
+          echo "publishing $TAG"
+
+  # ---- The Windows artifacts ----
+  windows:
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the app (release)
+        run: cargo build --release
+
+      - name: Build the silent installer (embeds the app exe)
+        run: |
+          cd installer
+          cargo build --release
+
+      - name: Collect the Windows artifacts
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          cp installer/target/release/StatsCraftSetup.exe release-assets/
+          cp target/release/statscraft.exe release-assets/statscraft-windows-x86_64.exe
+          ls -la release-assets/
+
+      - name: Upload the Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: release-assets/
+          if-no-files-found: error
+
+  # ---- The Linux artifacts ----
+  linux:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev \
+            libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev fontconfig
+
+      - name: Run the tests
+        run: cargo test
+
+      - name: Build the .deb package
+        run: bash packaging/linux/build_deb.sh
+
+      - name: Collect the Linux artifacts
+        run: |
+          mkdir -p release-assets
+          cp statscraft_*.deb release-assets/
+          cp target/release/statscraft release-assets/statscraft-linux-x86_64
+          ls -la release-assets/
+
+      - name: Upload the Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: release-assets/
+          if-no-files-found: error
+
+  # ---- The release ----
+  publish:
+    needs: [version, windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: assets
+          merge-multiple: true
+
+      - name: List the assets
+        run: ls -la assets/
+
+      - name: Write the release notes
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          # The section of the changelog for this version.
+          awk -v v="$VERSION" '
+            /^## / { in_section = (index($0, v) > 0) }
+            in_section { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "no changelog section for $VERSION" >&2
+            exit 1
+          fi
+          cat notes.md
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          gh release create "$TAG" \
+            --title "StatsCraft $TAG" \
+            --notes-file notes.md \
+            assets/*
+
+      - name: Upload the release notes alongside the binaries
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          cp notes.md assets/CHANGELOG-${TAG}.md
+          gh release upload "$TAG" assets/CHANGELOG-${TAG}.md --clobber

@@ -4,6 +4,9 @@ Lightweight SPSS-like statistical workbench written in Rust (native desktop app)
 
 ![StatsCraft product showcase](docs/showcase/showcase.png)
 
+[![CI](https://github.com/SarmaSaurav/statscraft/actions/workflows/build.yml/badge.svg)](https://github.com/SarmaSaurav/statscraft/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/SarmaSaurav/statscraft?label=release)](https://github.com/SarmaSaurav/statscraft/releases/latest)
+
 ## Interface
 
 The UI is a modern take on the SPSS workbench, not a pixel copy of it:
@@ -80,7 +83,19 @@ statscraft data.csv --script run.sps
 `docs/SPSS_REFERENCE.md` records the observed behaviour of IBM SPSS
 Statistics 27 that the dialogs are modelled on.
 
-## Install (Windows)
+## Install
+
+Download the latest release from
+**[GitHub Releases](https://github.com/SarmaSaurav/statscraft/releases/latest)**:
+
+| Asset | What it is |
+|---|---|
+| `StatsCraftSetup.exe` | The Windows installer. One file, no prompts, no admin. |
+| `statscraft-windows-x86_64.exe` | The Windows portable binary. |
+| `statscraft_<version>_amd64.deb` | The Debian/Ubuntu package. |
+| `statscraft-linux-x86_64` | The Linux portable binary. |
+
+### Install (Windows)
 Run `StatsCraftSetup.exe` — a single native installer (no archives, no prompts):
 installs to `%LOCALAPPDATA%\Programs\StatsCraft` (no admin) and creates
 Start Menu shortcuts: **StatsCraft** and **Uninstall StatsCraft**.
@@ -180,4 +195,5 @@ UI structure, menus, and analysis flow are cloned from IBM SPSS Statistics
 catalog, engine IPC). Numbers are validated against SPSS sample datasets.
 
 ## Roadmap
-See `PLAN.md`.
+See `PLAN.md`. The changes of each release are in
+[`CHANGELOG.md`](CHANGELOG.md).
