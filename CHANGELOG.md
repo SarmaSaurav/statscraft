@@ -85,8 +85,8 @@ data editor that edits, and a chart builder.
 
 **The procedures**
 
-Frequencies, Descriptives, Crosstabs, one-sample and independent and
-paired t-tests, One-Way ANOVA, the **General Linear Model** (a
+Frequencies, Descriptives, Crosstabs, independent and paired t-tests,
+One-Way ANOVA, the **General Linear Model** (a
 factorial ANOVA with any number of factors, a covariate, and the three
 types of sums of squares, checked against statsmodels), Correlations,
 Linear Regression, Mean Tables, Explore, Reliability (Cronbach's
