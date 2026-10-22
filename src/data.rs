@@ -464,6 +464,18 @@ impl DataTable {
             .unwrap_or_else(|| name.to_string())
     }
 
+    /// Remove a variable and all of its values.
+    ///
+    /// Deleting a variable never changes the number of cases; the
+    /// remaining columns keep their values row for row.
+    pub fn remove_variable(&mut self, index: usize) -> bool {
+        if index >= self.columns.len() {
+            return false;
+        }
+        self.columns.remove(index);
+        true
+    }
+
     /// Add a case at the end of the table.
     ///
     /// SPSS's "Add Cases" adds empty cases at the end; the new case
@@ -955,6 +967,23 @@ mod tests {
         // The first case is now the old second one.
         assert_eq!(t.cell_text(0, 0), "2");
         assert_eq!(t.columns[0].values.len(), 2);
+    }
+
+    #[test]
+    fn a_variable_can_be_removed_without_touching_the_cases() {
+        let mut t = editable();
+        assert!(t.remove_variable(0));
+        assert_eq!(t.columns.len(), 1);
+        assert_eq!(t.columns[0].name, "g");
+        assert_eq!(t.n_rows, 3);
+        assert_eq!(t.cell_text(0, 0), "A");
+        // The old index is gone, and an out-of-range delete is a no-op.
+        assert!(!t.remove_variable(1));
+        assert_eq!(t.columns.len(), 1);
+        // Removing the final variable leaves an empty table with its rows.
+        assert!(t.remove_variable(0));
+        assert!(t.columns.is_empty());
+        assert_eq!(t.n_rows, 3);
     }
 
     #[test]

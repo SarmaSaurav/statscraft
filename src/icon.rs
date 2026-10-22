@@ -61,24 +61,25 @@ fn icon_texture(ctx: &egui::Context, icon: Icon) -> Option<egui::TextureId> {
     Some(tex_id)
 }
 
-/// A flat, modern toolbar button: no chrome until hover.
+/// A ribbon button: a large line icon with its label underneath.
 ///
-/// The icons carry their own colour - each one is a coloured tile with
-/// a near-white glyph - so they are drawn at full colour. A tint would
-/// multiply the colour and wash the tile out, so a disabled button is
-/// dimmed by drawing the icon with a reduced alpha instead.
-pub fn icon_button(ui: &mut egui::Ui, icon: Icon, tip: &str) -> egui::Response {
-    icon_button_enabled(ui, icon, tip, true)
+/// The icon is a monochrome line drawing tinted from the active theme,
+/// so it reads cleanly in both the light and the dark palette. The label
+/// is part of the button, not just the tooltip, which is what makes the
+/// ribbon understandable at a glance.
+pub fn icon_button(ui: &mut egui::Ui, icon: Icon, label: &str, tip: &str) -> egui::Response {
+    icon_button_enabled(ui, icon, label, tip, true)
 }
 
-/// A toolbar button that can be disabled (rendered dimmed, not clickable).
+/// A ribbon button that can be disabled (rendered dimmed, not clickable).
 pub fn icon_button_enabled(
     ui: &mut egui::Ui,
     icon: Icon,
+    label: &str,
     tip: &str,
     enabled: bool,
 ) -> egui::Response {
-    let size = egui::vec2(theme::TOOLBAR_H, theme::TOOLBAR_H);
+    let size = egui::vec2(theme::TOOLBAR_BTN_W, theme::TOOLBAR_H);
     let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
 
     let hovered = resp.hovered() && enabled;
@@ -95,18 +96,21 @@ pub fn icon_button_enabled(
         p.rect_filled(rect.shrink(2.0), theme::RADIUS_SM, theme::accent_soft());
     }
 
-    // The icon's own colour, with a dimmed version for a disabled
-    // button.
-    let tint = if enabled {
-        egui::Color32::WHITE
+    let active_colour = if hovered || pressed {
+        theme::accent()
     } else {
-        egui::Color32::from_white_alpha(82)
+        theme::text_muted()
+    };
+    let tint = if enabled {
+        active_colour
+    } else {
+        theme::text_faint().gamma_multiply(0.55)
     };
 
     let ctx = ui.ctx().clone();
     if let Some(tex) = icon_texture(&ctx, icon) {
         let inner = egui::Rect::from_center_size(
-            rect.center(),
+            egui::pos2(rect.center().x, rect.top() + 22.0),
             egui::vec2(theme::ICON_SIZE, theme::ICON_SIZE),
         );
         p.image(
@@ -117,7 +121,16 @@ pub fn icon_button_enabled(
         );
     }
 
-    let resp = resp.on_hover_text(format!("{}\n{}", icon.label(), tip));
+    let label_colour = if enabled { active_colour } else { tint };
+    p.text(
+        egui::pos2(rect.center().x, rect.bottom() - 9.0),
+        egui::Align2::CENTER_CENTER,
+        label,
+        theme::medium(10.5),
+        label_colour,
+    );
+
+    let resp = resp.on_hover_text(format!("{}\n{}", label, tip));
     if enabled {
         resp
     } else {
@@ -128,10 +141,10 @@ pub fn icon_button_enabled(
 
 /// A vertical separator between groups of toolbar buttons.
 pub fn separator(ui: &mut egui::Ui) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(9.0, 24.0), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(11.0, theme::TOOLBAR_H), egui::Sense::hover());
     let p = ui.painter();
     p.rect_filled(
-        egui::Rect::from_center_size(rect.center(), egui::vec2(1.0, 20.0)),
+        egui::Rect::from_center_size(rect.center(), egui::vec2(1.0, theme::TOOLBAR_H - 16.0)),
         0.5,
         theme::border(),
     );
@@ -172,14 +185,14 @@ pub fn menu_item(ui: &mut egui::Ui, icon: Icon, label: &str) -> egui::Response {
         egui::pos2(rect.left() + 14.0, rect.center().y),
         egui::vec2(16.0, 16.0),
     );
-    // The icon carries its own colour, so it is drawn at full colour.
-    paint_icon(p, &ctx, icon, icon_rect, egui::Color32::WHITE);
-
+    // The line glyph is tinted from the theme so it stays legible on
+    // both the light and the dark palette.
     let text_color = if resp.hovered() {
         theme::accent()
     } else {
         theme::text()
     };
+    paint_icon(p, &ctx, icon, icon_rect, text_color);
     let galley = p.layout_no_wrap(label.to_owned(), theme::medium(12.5), text_color);
     p.galley(
         egui::pos2(

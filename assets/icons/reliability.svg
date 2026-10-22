@@ -1,8 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none">
-  <!-- reliability: a #50FA7B tile with a near-white glyph. -->
-  <rect x="1" y="1" width="22" height="22" rx="5.5" fill="#50FA7B"/>
-  <rect x="1" y="1" width="22" height="11" rx="5.5" fill="#FFFFFF" fill-opacity="0.16"/>
-  <rect x="1" y="1" width="22" height="22" rx="5.5" fill="none" stroke="#000000" stroke-opacity="0.16" stroke-width="0.75"/>
+  <!-- Line glyph; the app tints it to the active theme. -->
   <g stroke="#F8F8F2" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" fill="none">
     <path d="M12 3 L14.2 9.2 L21 9.2 L15.8 13.1 L18 19.6 L12 15.6 L6 19.6 L8.2 13.1 L3 9.2 L9.8 9.2 Z"/>
   </g>

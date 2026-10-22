@@ -1501,6 +1501,7 @@ impl eframe::App for StatsCraftApp {
                     if crate::icon::icon_button(
                         ui,
                         crate::theme::Icon::Open,
+                        "Open",
                         "Open data file (CSV / SPSS .sav)",
                     )
                     .clicked()
@@ -1516,6 +1517,7 @@ impl eframe::App for StatsCraftApp {
                     if crate::icon::icon_button(
                         ui,
                         crate::theme::Icon::Save,
+                        "Save",
                         "Save data (CSV or SPSS .sav)",
                     )
                     .clicked()
@@ -1534,6 +1536,7 @@ impl eframe::App for StatsCraftApp {
                     if crate::icon::icon_button(
                         ui,
                         crate::theme::Icon::Export,
+                        "Export",
                         "Export output (Markdown / HTML)",
                     )
                     .clicked()
@@ -1545,31 +1548,52 @@ impl eframe::App for StatsCraftApp {
                         }
                     }
                     crate::icon::separator(ui);
-                    if crate::icon::icon_button(ui, crate::theme::Icon::Undo, "Undo").clicked() {
+                    if crate::icon::icon_button(
+                        ui,
+                        crate::theme::Icon::Undo,
+                        "Undo",
+                        "Undo the last edit",
+                    )
+                    .clicked()
+                    {
                         self.status = "Undo: not implemented yet.".to_string();
                     }
-                    if crate::icon::icon_button(ui, crate::theme::Icon::Redo, "Redo").clicked() {
+                    if crate::icon::icon_button(
+                        ui,
+                        crate::theme::Icon::Redo,
+                        "Redo",
+                        "Redo the last edit",
+                    )
+                    .clicked()
+                    {
                         self.status = "Redo: not implemented yet.".to_string();
                     }
                     crate::icon::separator(ui);
                     if crate::icon::icon_button(
                         ui,
                         crate::theme::Icon::InsertVariable,
-                        "Insert Variable",
+                        "Variable",
+                        "Insert a new variable",
                     )
                     .clicked()
                     {
                         self.status = "Insert Variable: not implemented yet.".to_string();
                     }
-                    if crate::icon::icon_button(ui, crate::theme::Icon::InsertCase, "Insert Cases")
-                        .clicked()
+                    if crate::icon::icon_button(
+                        ui,
+                        crate::theme::Icon::InsertCase,
+                        "Add Case",
+                        "Insert a new case (row)",
+                    )
+                    .clicked()
                     {
                         self.status = "Insert Cases: not implemented yet.".to_string();
                     }
                     if crate::icon::icon_button(
                         ui,
                         crate::theme::Icon::ValueLabels,
-                        "Value Labels",
+                        "Labels",
+                        "Define value labels",
                     )
                     .clicked()
                     {
@@ -1579,25 +1603,41 @@ impl eframe::App for StatsCraftApp {
                     if crate::icon::icon_button(
                         ui,
                         crate::theme::Icon::Find,
-                        "Go to Variable (Variable View)",
+                        "Find",
+                        "Go to Variable View",
                     )
                     .clicked()
                     {
                         self.view = View::Variables;
                     }
-                    if crate::icon::icon_button(ui, crate::theme::Icon::Chart, "Chart Builder")
-                        .clicked()
+                    if crate::icon::icon_button(
+                        ui,
+                        crate::theme::Icon::Chart,
+                        "Chart",
+                        "Open Chart Builder",
+                    )
+                    .clicked()
                     {
                         self.view = View::Charts;
                     }
                     crate::icon::separator(ui);
-                    if crate::icon::icon_button(ui, crate::theme::Icon::Output, "Output Viewer")
-                        .clicked()
+                    if crate::icon::icon_button(
+                        ui,
+                        crate::theme::Icon::Output,
+                        "Output",
+                        "Open Output Viewer",
+                    )
+                    .clicked()
                     {
                         self.show_output_window = true;
                     }
-                    if crate::icon::icon_button(ui, crate::theme::Icon::Syntax, "Syntax Editor")
-                        .clicked()
+                    if crate::icon::icon_button(
+                        ui,
+                        crate::theme::Icon::Syntax,
+                        "Syntax",
+                        "Open Syntax Editor",
+                    )
+                    .clicked()
                     {
                         self.show_syntax_window = true;
                     }
@@ -1765,6 +1805,7 @@ impl eframe::App for StatsCraftApp {
 
         egui::CentralPanel::default().show(ctx, |ui| {
         let mut add_variable = false;
+        let mut delete_variable = None;
         match self.view {
             View::Data => {
                 let vis: Vec<usize> = match &self.table {
@@ -1791,7 +1832,7 @@ impl eframe::App for StatsCraftApp {
             }
             View::Variables => {
                 if let Some(table) = &mut self.table {
-                    render_variables(ui, table, &mut add_variable);
+                    render_variables(ui, table, &mut add_variable, &mut delete_variable);
                 } else {
                     // A fresh session has no dataset yet. SPSS lets the
                     // reader start from Variable View; an empty screen
@@ -1984,6 +2025,24 @@ impl eframe::App for StatsCraftApp {
                 "Added {}. Edit its name, label and measure in Variable View.",
                 table.columns[idx].name
             );
+        }
+        if let Some(idx) = delete_variable {
+            if let Some(table) = self.table.as_mut() {
+                let name = table
+                    .columns
+                    .get(idx)
+                    .map(|c| c.name.clone())
+                    .unwrap_or_default();
+                if table.remove_variable(idx) {
+                    self.status = format!("Deleted variable {}.", name);
+                    if self.sel_cell.is_some_and(|(col, _)| col >= idx) {
+                        self.sel_cell = None;
+                    }
+                    if self.editing_cell.is_some_and(|(col, _)| col >= idx) {
+                        self.editing_cell = None;
+                    }
+                }
+            }
         }
         });
     }
@@ -3353,7 +3412,12 @@ fn render_charts(ui: &mut egui::Ui, table: &DataTable) {
     }
 }
 
-fn render_variables(ui: &mut egui::Ui, table: &mut DataTable, add_variable: &mut bool) {
+fn render_variables(
+    ui: &mut egui::Ui,
+    table: &mut DataTable,
+    add_variable: &mut bool,
+    delete_variable: &mut Option<usize>,
+) {
     use crate::data::{Measure, VarAlign, ColumnKind};
     use crate::theme;
     let header_fill = theme::header();
@@ -3367,7 +3431,7 @@ fn render_variables(ui: &mut egui::Ui, table: &mut DataTable, add_variable: &mut
         if ui
             .add(
                 egui::Button::new(
-                    egui::RichText::new("＋ New Variable")
+                    egui::RichText::new("+ New Variable")
                         .font(theme::medium(12.0))
                         .color(theme::text_on_accent()),
                 )
@@ -3415,7 +3479,7 @@ fn render_variables(ui: &mut egui::Ui, table: &mut DataTable, add_variable: &mut
             });
     };
 
-    egui::ScrollArea::vertical()
+    egui::ScrollArea::both()
         .auto_shrink([false, false])
         .show(ui, |ui| {
             egui::Grid::new("var_grid")
@@ -3424,7 +3488,7 @@ fn render_variables(ui: &mut egui::Ui, table: &mut DataTable, add_variable: &mut
                 .show(ui, |ui| {
                     // ---- header row (SPSS Variable View columns) ----
                     for h in ["Name", "Type", "Width", "Decimals", "Label", "Values",
-                              "Missing", "Columns", "Align", "Measure", "Role"] {
+                              "Missing", "Columns", "Align", "Measure", "Role", "Delete"] {
                         block(ui, 92.0, header_fill, &mut |inner: &mut egui::Ui| {
                             inner.label(
                                 egui::RichText::new(h)
@@ -3556,6 +3620,25 @@ fn render_variables(ui: &mut egui::Ui, table: &mut DataTable, add_variable: &mut
                         // Role
                         block(ui, 70.0, cell_fill, &mut |inner: &mut egui::Ui| {
                             inner.label(egui::RichText::new("Input").size(12.0));
+                        });
+                        // Delete
+                        block(ui, 66.0, cell_fill, &mut |inner: &mut egui::Ui| {
+                            let colour = inner.visuals().error_fg_color;
+                            if inner
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new("Delete")
+                                            .font(theme::medium(11.0))
+                                            .color(colour),
+                                    )
+                                    .frame(false)
+                                    .min_size(egui::vec2(54.0, 18.0)),
+                                )
+                                .on_hover_text("Delete this variable and all of its values.")
+                                .clicked()
+                            {
+                                *delete_variable = Some(ci);
+                            }
                         });
                         ui.end_row();
                     }

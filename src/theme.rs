@@ -168,8 +168,12 @@ colour_accessors!(
 
 pub const RADIUS: f32 = 6.0;
 pub const RADIUS_SM: f32 = 4.0;
-pub const TOOLBAR_H: f32 = 44.0;
-pub const ICON_SIZE: f32 = 20.0;
+/// Height of a ribbon button, including the icon and its label.
+pub const TOOLBAR_H: f32 = 62.0;
+/// Width of one ribbon button.
+pub const TOOLBAR_BTN_W: f32 = 60.0;
+/// The icon inside a ribbon button.
+pub const ICON_SIZE: f32 = 32.0;
 
 /// Row height of the data grid.
 pub const ROW_H: f32 = 22.0;
