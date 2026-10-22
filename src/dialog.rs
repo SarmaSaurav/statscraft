@@ -591,15 +591,25 @@ pub fn render(
                     .color(theme::text_muted()),
             );
             ui.add_space(2.0);
+            let selected_source = d.selected_source.clone();
             let mut list = UiList::new(
                 ui,
                 &vars,
-                d.selected_source.as_deref(),
+                selected_source.as_deref(),
                 d.procedure.numeric_only(),
+                true,
             );
             list.show();
             if let Some(sel) = list.take_picked() {
                 d.selected_source = Some(sel);
+            }
+            // Double-clicking a source variable moves it across, the way
+            // SPSS's variable lists do.
+            if let Some(sel) = list.take_activated() {
+                if !d.targets.iter().any(|t| *t == sel) {
+                    d.targets.push(sel);
+                }
+                d.recompute_numeric_targets(&vars);
             }
         });
 
@@ -698,11 +708,32 @@ pub fn render(
                         .cloned()
                 })
                 .collect();
-            let mut tlist = UiList::new(ui, &target_rows, None, false);
-            tlist.show();
-            // Clicking a target removes it (SPSS's behaviour).
-            if let Some(sel) = tlist.take_picked() {
+            // The target list is a drop zone for variables dragged out of
+            // the source list. Its frame changes while a compatible drag
+            // is over it.
+            let mut picked_target = None;
+            let mut activated_target = None;
+            let mut dropped_target = None;
+            let (_, payload) = ui.dnd_drop_zone::<String, _>(egui::Frame::none(), |ui| {
+                let mut tlist = UiList::new(ui, &target_rows, None, false, false);
+                tlist.show();
+                picked_target = tlist.take_picked();
+                activated_target = tlist.take_activated();
+            });
+            if let Some(name) = payload {
+                dropped_target = Some((*name).clone());
+            }
+            // Clicking or double-clicking a target removes it (SPSS's
+            // behaviour).
+            if let Some(sel) = picked_target.or(activated_target) {
                 d.targets.retain(|t| *t != sel);
+                d.recompute_numeric_targets(&vars);
+            }
+            // A drop onto the target list moves the variable in.
+            if let Some(sel) = dropped_target {
+                if !d.targets.iter().any(|t| *t == sel) {
+                    d.targets.push(sel);
+                }
                 d.recompute_numeric_targets(&vars);
             }
 
@@ -1137,8 +1168,12 @@ struct UiList<'a> {
     vars: &'a [(String, ColumnKind)],
     selected: Option<&'a str>,
     numeric_only: bool,
+    /// Whether the rows can be dragged into a target list.
+    draggable: bool,
     /// The variable the user just clicked, reported back to the caller.
     picked: Option<String>,
+    /// The variable the user double-clicked, reported back separately.
+    activated: Option<String>,
 }
 
 impl<'a> UiList<'a> {
@@ -1147,18 +1182,22 @@ impl<'a> UiList<'a> {
         vars: &'a [(String, ColumnKind)],
         selected: Option<&'a str>,
         numeric_only: bool,
+        draggable: bool,
     ) -> Self {
         Self {
             ui,
             vars,
             selected,
             numeric_only,
+            draggable,
             picked: None,
+            activated: None,
         }
     }
 
     fn show(&mut self) {
         let mut picked = None;
+        let mut activated = None;
         egui::ScrollArea::vertical()
             .max_height(210.0)
             .auto_shrink([false, false])
@@ -1166,58 +1205,94 @@ impl<'a> UiList<'a> {
                 for (name, kind) in self.vars {
                     let dim = self.numeric_only && *kind != ColumnKind::Numeric;
                     let is_sel = self.selected == Some(name.as_str());
-                    let text_col = if dim {
-                        theme::text_faint()
-                    } else if is_sel {
-                        theme::accent()
+                    let resp = if self.draggable && !dim {
+                        // The whole row is the drag handle. egui paints the
+                        // row under the pointer while it is dragged.
+                        let id = ui.make_persistent_id(("variable-drag", name));
+                        ui.dnd_drag_source(id, name.clone(), |ui| {
+                            variable_row(ui, name, *kind, is_sel, dim)
+                        })
+                        .response
                     } else {
-                        theme::text()
-                    };
-                    let galley = ui.painter().layout_no_wrap(
-                        name.clone(),
-                        theme::medium(12.0),
-                        text_col,
-                    );
-                    let (rect, resp) =
-                        ui.allocate_exact_size(egui::vec2(ui.available_width(), 21.0), egui::Sense::click());
-                    let p = ui.painter();
-                    if is_sel {
-                        p.rect_filled(rect, theme::RADIUS_SM, theme::accent_soft());
-                    } else if resp.hovered() {
-                        p.rect_filled(rect, theme::RADIUS_SM, theme::surface_alt());
+                        variable_row(ui, name, *kind, is_sel, dim)
                     }
-                    // The measure-level icon SPSS puts beside each variable:
-                    // a ruler for numeric/scale, a pencil for string/nominal.
-                    let icon = if *kind == ColumnKind::Numeric {
-                        Icon::MeasureScale
-                    } else {
-                        Icon::MeasureNominal
-                    };
-                    let icon_rect = egui::Rect::from_min_size(
-                        egui::pos2(rect.left() + 4.0, rect.center().y - 6.0),
-                        egui::vec2(12.0, 12.0),
-                    );
-                    crate::icon::paint_icon(p, ui.ctx(), icon, icon_rect, text_col);
-                    p.galley(
-                        egui::pos2(
-                            rect.left() + 20.0,
-                            rect.center().y - galley.size().y / 2.0,
-                        ),
-                        galley,
-                        text_col,
-                    );
-                    if resp.clicked() {
+                    .on_hover_cursor(egui::CursorIcon::PointingHand);
+                    if resp.double_clicked() {
+                        activated = Some(name.clone());
+                    } else if resp.clicked() {
                         picked = Some(name.clone());
                     }
                 }
             });
         self.picked = picked;
+        self.activated = activated;
     }
 
     /// The variable clicked since the last call.
     fn take_picked(&mut self) -> Option<String> {
         self.picked.take()
     }
+
+    /// The variable double-clicked since the last call.
+    fn take_activated(&mut self) -> Option<String> {
+        self.activated.take()
+    }
+}
+
+/// One row of a variable list.
+///
+/// The interaction rect is the whole row, not just the text, so a click
+/// anywhere across the list selects the variable. This is the hit area
+/// SPSS gives its variable lists.
+fn variable_row(
+    ui: &mut egui::Ui,
+    name: &str,
+    kind: ColumnKind,
+    is_sel: bool,
+    dim: bool,
+) -> egui::Response {
+    let text_col = if dim {
+        theme::text_faint()
+    } else if is_sel {
+        theme::accent()
+    } else {
+        theme::text()
+    };
+    let galley = ui
+        .painter()
+        .layout_no_wrap(name.to_string(), theme::medium(12.0), text_col);
+    let width = ui.available_width().max(120.0);
+    let (rect, resp) = ui.allocate_exact_size(
+        egui::vec2(width, 21.0),
+        egui::Sense::click_and_drag(),
+    );
+    let p = ui.painter();
+    if is_sel {
+        p.rect_filled(rect, theme::RADIUS_SM, theme::accent_soft());
+    } else if resp.hovered() {
+        p.rect_filled(rect, theme::RADIUS_SM, theme::surface_alt());
+    }
+    // The measure-level icon SPSS puts beside each variable: a ruler for
+    // numeric/scale, a pencil for string/nominal.
+    let icon = if kind == ColumnKind::Numeric {
+        Icon::MeasureScale
+    } else {
+        Icon::MeasureNominal
+    };
+    let icon_rect = egui::Rect::from_min_size(
+        egui::pos2(rect.left() + 4.0, rect.center().y - 6.0),
+        egui::vec2(12.0, 12.0),
+    );
+    crate::icon::paint_icon(p, ui.ctx(), icon, icon_rect, text_col);
+    p.galley(
+        egui::pos2(
+            rect.left() + 20.0,
+            rect.center().y - galley.size().y / 2.0,
+        ),
+        galley,
+        text_col,
+    );
+    resp
 }
 
 #[cfg(test)]

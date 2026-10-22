@@ -198,7 +198,9 @@ fn execute_line(app: &mut StatsCraftApp, line: &str) {
                 if let Some(t) = &app.table {
                     let mut n = 0usize;
                     for &ci in &res {
-                        let name = t.columns[ci].name.clone();
+                        // The output uses the variable label when there is
+                        // one; the syntax still resolved the machine name.
+                        let name = t.columns[ci].display_name().to_string();
                         if show_tables {
                             let rows = stats::frequencies(t, ci);
                             let chart = if chart_kind.is_some() {

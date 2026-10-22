@@ -1,3 +1,8 @@
+// A release build is a GUI application: it must not open a console window
+// behind the data editor. Debug builds keep the console so `cargo run` shows
+// diagnostics.
+#![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
+
 mod app;
 mod chartbuilder;
 mod data;
@@ -6,6 +11,7 @@ mod glm;
 mod icon;
 mod output;
 mod pivot;
+mod settings;
 mod stats;
 mod syntax;
 mod theme;

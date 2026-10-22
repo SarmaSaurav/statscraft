@@ -167,6 +167,18 @@ impl Column {
         self.meta.label = label;
     }
 
+    /// The name SPSS shows for a variable: its label when it has one,
+    /// otherwise its name. Calculations and output use this, while the
+    /// syntax and the data model keep using the machine name.
+    pub fn display_name(&self) -> &str {
+        let label = self.meta.label.trim();
+        if label.is_empty() {
+            &self.name
+        } else {
+            label
+        }
+    }
+
     /// Value label for a numeric value, if any.
     pub fn value_label_for(&self, v: f64) -> Option<&str> {
         self.meta
@@ -414,6 +426,42 @@ impl DataTable {
         }
         self.columns[col].name = name.to_string();
         true
+    }
+
+    /// Add a variable at the end, the way Variable View's "New Variable"
+    /// row does.
+    ///
+    /// The name is the first free `VAR00001`, `VAR00002`, ... so a new
+    /// variable is valid before the user types anything. The values are
+    /// system-missing for every existing case.
+    pub fn add_variable(&mut self, kind: ColumnKind) -> usize {
+        let mut n = self.columns.len() + 1;
+        let name = loop {
+            let candidate = format!("VAR{:05}", n);
+            if !self
+                .columns
+                .iter()
+                .any(|c| c.name.eq_ignore_ascii_case(&candidate))
+            {
+                break candidate;
+            }
+            n += 1;
+        };
+        let values = vec![Value::Missing; self.n_rows];
+        self.columns.push(Column {
+            name,
+            kind,
+            values,
+            meta: VariableMeta::default_for(kind),
+        });
+        self.columns.len() - 1
+    }
+
+    /// The display name of a variable, looked up by machine name.
+    pub fn display_name_for(&self, name: &str) -> String {
+        self.column_index(name)
+            .map(|ci| self.columns[ci].display_name().to_string())
+            .unwrap_or_else(|| name.to_string())
     }
 
     /// Add a case at the end of the table.
@@ -976,6 +1024,32 @@ mod tests {
         let mut t = editable();
         let text = t.copy_rectangle(0, 0, 2, 2);
         assert_eq!(text, "1\tA\n2\tB");
+    }
+
+    #[test]
+    fn new_variables_get_a_unique_spss_name_and_missing_cells() {
+        let mut t = editable();
+        let a = t.add_variable(ColumnKind::Numeric);
+        let b = t.add_variable(ColumnKind::String);
+        assert_eq!(t.columns[a].name, "VAR00003");
+        assert_eq!(t.columns[b].name, "VAR00004");
+        assert_eq!(t.columns[a].values.len(), t.n_rows);
+        assert!(matches!(t.columns[a].values[0], Value::Missing));
+        // A name the user has already typed is not offered again.
+        t.rename_column(a, "VAR00005");
+        let c = t.add_variable(ColumnKind::Numeric);
+        assert_ne!(t.columns[c].name, "VAR00005");
+        assert_eq!(t.columns[c].name, "VAR00006");
+    }
+
+    #[test]
+    fn a_variable_shows_its_label_when_it_has_one() {
+        let mut t = editable();
+        assert_eq!(t.columns[0].display_name(), "x");
+        t.columns[0].meta.label = "Age in years".to_string();
+        assert_eq!(t.columns[0].display_name(), "Age in years");
+        assert_eq!(t.display_name_for("x"), "Age in years");
+        assert_eq!(t.display_name_for("not-a-variable"), "not-a-variable");
     }
 
 }

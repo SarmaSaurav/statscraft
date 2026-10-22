@@ -107,6 +107,9 @@ pub struct ChartBuilder {
     pub reference_label: String,
     /// Set when the user pressed OK.
     pub confirmed: bool,
+    /// Set when the user pressed Cancel or closed the window, so the
+    /// caller knows to drop the builder rather than keep it open.
+    pub cancelled: bool,
 }
 
 impl ChartBuilder {
@@ -156,8 +159,13 @@ impl ChartBuilder {
         b.y_var = cat.or_else(|| num.clone());
         b.x_var = num;
         b.summary = Some(BarSummary::Count);
-        b.title = format!("Bar Chart: {}", b.y_var.clone().unwrap_or_default());
-        b.x_label = b.y_var.clone().unwrap_or_default();
+        let shown = b
+            .y_var
+            .as_deref()
+            .map(|name| table.display_name_for(name))
+            .unwrap_or_default();
+        b.title = format!("Bar Chart: {}", shown);
+        b.x_label = shown;
         b.y_label = "Count".to_string();
         b
     }
@@ -362,7 +370,10 @@ pub fn show(ctx: &egui::Context, app: &mut crate::app::StatsCraftApp, b: &mut Ch
             render(ui, app, b);
         });
     if !open {
+        // The title-bar close button is a cancel: the caller drops the
+        // builder instead of putting it back on screen.
         b.confirmed = false;
+        b.cancelled = true;
     }
 }
 
@@ -400,14 +411,22 @@ pub fn render(ui: &mut egui::Ui, app: &mut crate::app::StatsCraftApp, b: &mut Ch
                 .clicked()
             {
                 b.chart_type = Some(t);
-                // The defaults follow the type.
+                // The defaults follow the type, and use the variable
+                // labels when the variables have them.
                 b.title = format!("{} Chart", t.title());
-                b.x_label = b.y_var.clone().unwrap_or_default();
+                b.x_label = b
+                    .y_var
+                    .as_deref()
+                    .map(|name| table.display_name_for(name))
+                    .unwrap_or_default();
                 b.y_label = match t {
                     ChartType::Bar => "Count".to_string(),
                     ChartType::Histogram => "Count".to_string(),
-                    ChartType::Scatter => b.y_var.clone().unwrap_or_default(),
-                    ChartType::BoxPlot => b.y_var.clone().unwrap_or_default(),
+                    ChartType::Scatter | ChartType::BoxPlot => b
+                        .y_var
+                        .as_deref()
+                        .map(|name| table.display_name_for(name))
+                        .unwrap_or_default(),
                 };
             }
         }
@@ -421,11 +440,11 @@ pub fn render(ui: &mut egui::Ui, app: &mut crate::app::StatsCraftApp, b: &mut Ch
     if kind == ChartType::Scatter {
         ui.horizontal(|ui| {
             ui.label("X:");
-            pick(ui, &mut b.x_var, &numeric, "cb_x");
+            pick(ui, &mut b.x_var, &numeric, "cb_x", table);
         });
         ui.horizontal(|ui| {
             ui.label("Y:");
-            pick(ui, &mut b.y_var, &numeric, "cb_y");
+            pick(ui, &mut b.y_var, &numeric, "cb_y", table);
         });
     } else {
         ui.horizontal(|ui| {
@@ -442,7 +461,7 @@ pub fn render(ui: &mut egui::Ui, app: &mut crate::app::StatsCraftApp, b: &mut Ch
             } else {
                 &numeric
             };
-            pick(ui, &mut b.y_var, list, "cb_y");
+            pick(ui, &mut b.y_var, list, "cb_y", table);
         });
     }
 
@@ -450,7 +469,7 @@ pub fn render(ui: &mut egui::Ui, app: &mut crate::app::StatsCraftApp, b: &mut Ch
     if kind == ChartType::Bar && b.summary != Some(BarSummary::Count) {
         ui.horizontal(|ui| {
             ui.label("Summarise by:");
-            pick(ui, &mut b.group_var, &categorical, "cb_g");
+            pick(ui, &mut b.group_var, &categorical, "cb_g", table);
             ui.label("Summary:");
             for s in BarSummary::all() {
                 let selected = b.summary == Some(s);
@@ -466,7 +485,7 @@ pub fn render(ui: &mut egui::Ui, app: &mut crate::app::StatsCraftApp, b: &mut Ch
     if kind == ChartType::BoxPlot {
         ui.horizontal(|ui| {
             ui.label("Group by:");
-            pick(ui, &mut b.group_var, &categorical, "cb_g");
+            pick(ui, &mut b.group_var, &categorical, "cb_g", table);
         });
     }
     if kind == ChartType::Histogram {
@@ -535,9 +554,11 @@ pub fn render(ui: &mut egui::Ui, app: &mut crate::app::StatsCraftApp, b: &mut Ch
     ui.horizontal(|ui| {
         if ui.button("OK").clicked() {
             b.confirmed = true;
+            b.cancelled = false;
         }
         if ui.button("Cancel").clicked() {
             b.confirmed = false;
+            b.cancelled = true;
         }
         if ui.button("Reset").clicked() {
             *b = ChartBuilder::for_table(table);
@@ -573,7 +594,13 @@ fn all_names(table: &DataTable) -> Vec<String> {
 }
 
 /// A drop-down of the variable names.
-fn pick(ui: &mut egui::Ui, slot: &mut Option<String>, names: &[String], id: &str) {
+fn pick(
+    ui: &mut egui::Ui,
+    slot: &mut Option<String>,
+    names: &[String],
+    id: &str,
+    table: &DataTable,
+) {
     if names.is_empty() {
         ui.label(egui::RichText::new("(none)").weak());
         return;
@@ -581,13 +608,17 @@ fn pick(ui: &mut egui::Ui, slot: &mut Option<String>, names: &[String], id: &str
     if slot.as_ref().map(|s| !names.contains(s)).unwrap_or(true) {
         *slot = Some(names[0].clone());
     }
-    let current = slot.clone().unwrap_or_default();
+    let current = slot
+        .as_deref()
+        .map(|name| table.display_name_for(name))
+        .unwrap_or_default();
     egui::ComboBox::from_id_salt(id)
         .selected_text(current)
         .show_ui(ui, |ui| {
             for name in names {
                 let selected = slot.as_deref() == Some(name.as_str());
-                if ui.selectable_label(selected, name).clicked() {
+                let shown = table.display_name_for(name);
+                if ui.selectable_label(selected, shown).clicked() {
                     *slot = Some(name.clone());
                 }
             }

@@ -244,8 +244,8 @@ pub fn crosstabs_chi2(table: &DataTable, ia: usize, ib: usize) -> Option<Crossta
     };
 
     Some(CrosstabsResult {
-        var1: ca.name.clone(),
-        var2: cb.name.clone(),
+        var1: ca.display_name().to_string(),
+        var2: cb.display_name().to_string(),
         levels1,
         levels2,
         observed,
@@ -1006,8 +1006,8 @@ pub fn one_way_anova_in(table: &DataTable, outcome_idx: usize, factor_idx: usize
     })()
     .unwrap_or(f64::NAN);
     Some(AnovaResult {
-        outcome: ocol.name.clone(),
-        factor: fcol.name.clone(),
+        outcome: ocol.display_name().to_string(),
+        factor: fcol.display_name().to_string(),
         n_groups: groups.len(),
         df_between,
         df_within,
@@ -1082,8 +1082,8 @@ pub fn paired_ttest_in(table: &DataTable, ia: usize, ib: usize) -> Option<Paired
     })()
     .unwrap_or(f64::NAN);
     Some(PairedTResult {
-        var1: ca.name.clone(),
-        var2: cb.name.clone(),
+        var1: ca.display_name().to_string(),
+        var2: cb.display_name().to_string(),
         n,
         mean1,
         mean2,
@@ -1341,7 +1341,7 @@ pub fn descriptives_with(
         }
 
         out.push(Descriptive {
-            variable: col.name.clone(),
+            variable: col.display_name().to_string(),
             n,
             mean,
             std_dev,
@@ -1519,8 +1519,8 @@ pub fn correlations_in(table: &DataTable, nums: &[usize]) -> Vec<Correlation> {
                 0.0
             };
             out.push(Correlation {
-                var1: ca.name.clone(),
-                var2: cb.name.clone(),
+                var1: ca.display_name().to_string(),
+                var2: cb.display_name().to_string(),
                 r,
                 n: xs.len(),
                 p,
@@ -1665,8 +1665,8 @@ pub fn linear_regression_xy(table: &DataTable, yi: usize, xi: usize) -> Option<R
     };
 
     Some(RegressionResult {
-        predictor: cx.name.clone(),
-        outcome: cy.name.clone(),
+        predictor: cx.display_name().to_string(),
+        outcome: cy.display_name().to_string(),
         n: xs.len(),
         slope,
         intercept,
@@ -1831,8 +1831,8 @@ pub fn independent_ttest_vars(
     let hedges_g = cohens_d * correction;
 
     Some(TTestResult {
-        outcome: ocol.name.clone(),
-        group_var: gcol.name.clone(),
+        outcome: ocol.display_name().to_string(),
+        group_var: gcol.display_name().to_string(),
         group1: g1name,
         group2: g2name,
         n1: g1.len(),
@@ -2107,8 +2107,8 @@ pub fn mann_whitney(
     };
 
     Some(MannWhitneyResult {
-        outcome: ocol.name.clone(),
-        group_var: gcol.name.clone(),
+        outcome: ocol.display_name().to_string(),
+        group_var: gcol.display_name().to_string(),
         group1: g1name,
         group2: g2name,
         n1,
@@ -2237,8 +2237,8 @@ pub fn wilcoxon_signed_rank(
     };
 
     Some(WilcoxonResult {
-        var1: c1.name.clone(),
-        var2: c2.name.clone(),
+        var1: c1.display_name().to_string(),
+        var2: c2.display_name().to_string(),
         n,
         w_plus,
         w_minus,
@@ -2356,8 +2356,8 @@ pub fn kruskal_wallis(
     .unwrap_or(f64::NAN);
 
     Some(KruskalWallisResult {
-        outcome: ocol.name.clone(),
-        factor: fcol.name.clone(),
+        outcome: ocol.display_name().to_string(),
+        factor: fcol.display_name().to_string(),
         n_groups: groups.len(),
         rank_sums,
         h,
@@ -2453,12 +2453,12 @@ pub fn friedman(table: &DataTable, idxs: &[usize]) -> Option<FriedmanResult> {
     let mean_ranks = cols
         .iter()
         .enumerate()
-        .map(|(i, c)| (c.name.clone(), rank_sums[i] / nf))
+        .map(|(i, c)| (c.display_name().to_string(), rank_sums[i] / nf))
         .collect();
 
     Some(FriedmanResult {
-        var1: cols[0].name.clone(),
-        var2: cols[k - 1].name.clone(),
+        var1: cols[0].display_name().to_string(),
+        var2: cols[k - 1].display_name().to_string(),
         n,
         k,
         chi_square,
@@ -2552,8 +2552,8 @@ pub fn means_by_group(
     }
     let grand_mean = sum / total_n as f64;
     Some(MeansResult {
-        outcome: ocol.name.clone(),
-        group_var: fcol.name.clone(),
+        outcome: ocol.display_name().to_string(),
+        group_var: fcol.display_name().to_string(),
         groups: out,
         total_n,
         grand_mean,
@@ -2691,8 +2691,8 @@ pub fn explore(
         .collect::<Option<Vec<_>>>()?;
 
     Some(ExploreResult {
-        outcome: ocol.name.clone(),
-        group_var: group_idx.map(|gi| table.columns[gi].name.clone()),
+        outcome: ocol.display_name().to_string(),
+        group_var: group_idx.map(|gi| table.columns[gi].display_name().to_string()),
         groups,
     })
 }
@@ -3136,7 +3136,7 @@ pub fn histogram(table: &DataTable, col_idx: usize, bins: usize) -> Option<Histo
         counts[i] += 1;
     }
     Some(Histogram {
-        variable: col.name.clone(),
+        variable: col.display_name().to_string(),
         min,
         max,
         width,
@@ -3184,7 +3184,7 @@ pub fn bar_chart(table: &DataTable, col_idx: usize) -> Option<BarChart> {
     }
     counts.sort_by(|a, b| b.1.cmp(&a.1));
     Some(BarChart {
-        variable: col.name.clone(),
+        variable: col.display_name().to_string(),
         categories: counts.iter().map(|(k, _)| k.clone()).collect(),
         counts: counts.iter().map(|(_, c)| *c as f64).collect(),
     })
@@ -3226,8 +3226,8 @@ pub fn scatter_points(
         return None;
     }
     Some(Scatter {
-        x_var: cx.name.clone(),
-        y_var: cy.name.clone(),
+        x_var: cx.display_name().to_string(),
+        y_var: cy.display_name().to_string(),
         x: xs,
         y: ys,
     })
@@ -3441,7 +3441,7 @@ pub fn cronbach_alpha(
         } else {
             f64::NAN
         };
-        item_total_correlations.push((cols[j].name.clone(), r_total));
+        item_total_correlations.push((cols[j].display_name().to_string(), r_total));
 
         // The correlation of item j with the total minus item j.
         let mut sum_x = 0.0;
@@ -3466,7 +3466,7 @@ pub fn cronbach_alpha(
         } else {
             f64::NAN
         };
-        corrected_item_total.push((cols[j].name.clone(), r_corrected));
+        corrected_item_total.push((cols[j].display_name().to_string(), r_corrected));
     }
 
     // Alpha with each item removed.
@@ -3492,7 +3492,7 @@ pub fn cronbach_alpha(
         } else {
             f64::NAN
         };
-        alpha_if_deleted.push((cols[skip].name.clone(), a));
+        alpha_if_deleted.push((cols[skip].display_name().to_string(), a));
     }
 
     // The items that correlate poorly with the total.
@@ -3506,7 +3506,7 @@ pub fn cronbach_alpha(
         name: name.to_string(),
         n_items,
         n_cases,
-        item_names: cols.iter().map(|c| c.name.clone()).collect(),
+        item_names: cols.iter().map(|c| c.display_name().to_string()).collect(),
         alpha,
         standardised_alpha,
         mean_item_variance: sum_variances / k,
@@ -3744,7 +3744,7 @@ pub fn factor_analysis(
         variance_percent,
         cumulative_percent: cumulative,
         loadings,
-        item_names: cols.iter().map(|c| c.name.clone()).collect(),
+        item_names: cols.iter().map(|c| c.display_name().to_string()).collect(),
         n_components: n_comp,
         communalities,
         retained_eigenvalues,
@@ -4141,8 +4141,8 @@ pub fn roc_curve(
     );
 
     Some(RocResult {
-        outcome: ocol.name.clone(),
-        group_var: gcol.name.clone(),
+        outcome: ocol.display_name().to_string(),
+        group_var: gcol.display_name().to_string(),
         positive_group: positive_group.to_string(),
         n_positive,
         n_negative,

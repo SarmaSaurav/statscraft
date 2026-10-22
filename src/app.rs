@@ -40,6 +40,15 @@ pub struct StatsCraftApp {
     pub chart_builder: Option<crate::chartbuilder::ChartBuilder>,
     /// Whether the dark theme is active.
     pub dark: bool,
+    /// The most recently opened data files, newest first.
+    pub recent_files: Vec<String>,
+    /// The rect of the last chart drawn, for a copy request.
+    pub last_chart_rect: Option<egui::Rect>,
+    /// The viewport that chart was drawn in (the Output Viewer or the
+    /// inline Output tab).
+    pub last_chart_viewport: Option<egui::ViewportId>,
+    /// The chart rect captured for a pending "Copy Chart" screenshot.
+    pub pending_screenshot_rect: Option<egui::Rect>,
     /// The egui context, so the theme can be re-applied when it
     /// changes.
     pub ctx: egui::Context,
@@ -68,6 +77,10 @@ impl Default for StatsCraftApp {
             missing_dialog: None,
             chart_builder: None,
             dark: false,
+            recent_files: Vec::new(),
+            last_chart_rect: None,
+            last_chart_viewport: None,
+            pending_screenshot_rect: None,
             // A placeholder context, replaced when the app is created.
             // The theme is applied to the real one there.
             ctx: egui::Context::default(),
@@ -77,7 +90,8 @@ impl Default for StatsCraftApp {
 
 impl StatsCraftApp {
     pub fn load(&mut self) {
-        let p = std::path::Path::new(self.path_input.trim());
+        let path_text = self.path_input.trim().to_string();
+        let p = std::path::Path::new(&path_text);
         let res = if p
             .extension()
             .and_then(|e| e.to_str())
@@ -93,12 +107,61 @@ impl StatsCraftApp {
                 self.status = format!("Loaded {} rows x {} cols.", t.n_rows, t.columns.len());
                 self.table = Some(t);
                 self.dataset_no += 1;
+                self.add_recent_file(p);
             }
             Err(e) => {
                 self.status = format!("Error: {}", e);
                 self.table = None;
             }
         }
+    }
+
+    /// Write the small preferences file (theme and recent files).
+    pub fn save_settings(&self) {
+        let settings = crate::settings::Settings {
+            dark: self.dark,
+            recent_files: self.recent_files.clone(),
+        };
+        crate::settings::save(&settings);
+    }
+
+    /// Put a successfully opened file at the top of File > Recent Files.
+    fn add_recent_file(&mut self, path: &std::path::Path) {
+        let mut settings = crate::settings::Settings {
+            dark: self.dark,
+            recent_files: self.recent_files.clone(),
+        };
+        settings.remember_file(path);
+        crate::settings::save(&settings);
+        self.recent_files = settings.recent_files;
+    }
+
+    /// File > New > Data: an empty dataset, ready for Variable View.
+    pub fn new_data(&mut self) {
+        self.table = Some(DataTable::default());
+        self.path_input.clear();
+        self.sel_cell = None;
+        self.editing_cell = None;
+        self.edit_buf.clear();
+        self.dataset_no += 1;
+        self.view = View::Data;
+        self.status =
+            "New dataset. Switch to Variable View to create the first variable.".to_string();
+    }
+
+    /// File > New > Syntax.
+    pub fn new_syntax(&mut self) {
+        self.syntax_text.clear();
+        self.show_syntax_window = true;
+        self.status = "New syntax file.".to_string();
+    }
+
+    /// File > New > Output.
+    pub fn new_output(&mut self) {
+        self.outputs.clear();
+        self.selected_output = 0;
+        self.show_output_window = true;
+        self.status = "New output document.".to_string();
     }
 
     /// SPSS-style dataset title, e.g. "bank [DataSet1]" or "Untitled1 [DataSet1]".
@@ -233,6 +296,7 @@ impl StatsCraftApp {
         } else {
             "Light theme.".to_string()
         };
+        self.save_settings();
     }
 
     /// Pivot the selected output: exchange its row and column
@@ -405,64 +469,141 @@ impl StatsCraftApp {
 
     /// SPSS-like pivot table exported as a styled HTML document.
     pub fn export_output_html_to(&mut self, path: &std::path::Path) {
+        self.export_output_document(path, false);
+    }
+
+    /// Export the output as a Microsoft Word-compatible `.doc` or an
+    /// Excel-compatible `.xls`.
+    ///
+    /// Both formats are HTML documents with the Office namespaces and a
+    /// `ProgId` hint. Word and Excel open them as editable documents, and
+    /// the pivot structure and the styling survive the round trip. This is
+    /// the same idea as SPSS's `OUTPUT EXPORT /DOC` and `/XLS`, without
+    /// carrying a full OOXML writer and a ZIP dependency.
+    pub fn export_output_office_to(&mut self, path: &std::path::Path) {
+        self.export_output_document(path, true);
+    }
+
+    fn export_output_document(&mut self, path: &std::path::Path, office: bool) {
         if self.outputs.is_empty() {
             self.status = "No output to export.".to_string();
             return;
         }
-        let mut h = String::from(
-            "<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n\
-             <title>StatsCraft Output</title>\n<style>\n\
-             body{font-family:'Segoe UI',Arial,sans-serif;margin:24px;}\n\
-             h2{font-size:14pt;margin-bottom:4px;}\n\
-             table{border-collapse:collapse;font-size:10.5pt;margin-bottom:8px;}\n\
-             th{background:#e8eef7;border:1px solid #8a8a8a;padding:3px 10px;text-align:left;}\n\
-             td{border:1px solid #b5b5b5;padding:2px 10px;}\n\
-             td.num{text-align:right;font-variant-numeric:tabular-nums;}\n\
-             td.stub{font-weight:600;background:#f6f8fb;}\n\
-             .note{color:#555;font-size:9.5pt;}\n\
-             th.corner{text-align:right;}\n\
-             .measures{color:#555;font-size:9.5pt;margin:0 0 4px 0;}\n\
-             .measures span{color:#888;}\n\
-             </style>\n</head>\n<body>\n",
-        );
-        for t in &self.outputs {
-            h.push_str(&format!("<h2>{}</h2>\n", html_escape(&t.title)));
-            // A pivot table is exported as itself, with the spanning
-            // header and the measures, so the structure survives the
-            // export rather than being flattened away.
-            match &t.pivot {
-                Some(p) => h.push_str(&pivot_to_html(p)),
-                None => {
-                    h.push_str("<table>\n<tr>");
-                    for hdr in &t.headers {
-                        h.push_str(&format!("<th>{}</th>", html_escape(hdr)));
-                    }
-                    h.push_str("</tr>\n");
-                    for row in &t.rows {
-                        h.push_str("<tr>");
-                        for (k, cell) in row.iter().enumerate() {
-                            let esc = html_escape(cell);
-                            if k > 0 && cell.trim().parse::<f64>().is_ok() {
-                                h.push_str(&format!("<td class=\"num\">{}</td>", esc));
-                            } else if k == 0 {
-                                h.push_str(&format!("<td class=\"stub\">{}</td>", esc));
-                            } else {
-                                h.push_str(&format!("<td>{}</td>", esc));
-                            }
-                        }
-                        h.push_str("</tr>\n");
-                    }
-                    h.push_str("</table>\n");
+        let prog_id = if office {
+            let is_excel = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.eq_ignore_ascii_case("xls") || e.eq_ignore_ascii_case("xlsx"))
+                .unwrap_or(false);
+            if is_excel {
+                "Excel.Sheet"
+            } else {
+                "Word.Document"
+            }
+        } else {
+            ""
+        };
+        let h = output_document_html(&self.outputs, office, prog_id);
+        match std::fs::write(path, h) {
+            Ok(_) => {
+                self.status = if office {
+                    format!("Exported output for Office to {}", path.display())
+                } else {
+                    format!("Exported output (HTML) to {}", path.display())
                 }
             }
-            if !t.note.is_empty() {
-                h.push_str(&format!("<p class=\"note\">{}</p>\n", html_escape(&t.note)));
+            Err(e) => self.status = format!("Export failed: {}", e),
+        }
+    }
+
+    /// Copy the selected output table as rich HTML, with a tab-separated
+    /// plain-text fallback. Word, Excel, PowerPoint and LibreOffice paste
+    /// the HTML as an editable table, which is what SPSS's Viewer copy
+    /// does.
+    pub fn copy_selected_table(&mut self) {
+        let Some(t) = self.outputs.get(self.selected_output) else {
+            self.status = "No output to copy.".to_string();
+            return;
+        };
+        let html = format!(
+            "<html><head><meta charset=\"utf-8\"></head><body>{}</body></html>",
+            output_table_html(t, false)
+        );
+        let alt = output_table_text(t);
+        match arboard::Clipboard::new()
+            .and_then(|mut c| c.set_html(html, Some(alt)))
+        {
+            Ok(()) => self.status = "Copied the table to the clipboard.".to_string(),
+            Err(e) => self.status = format!("Could not copy the table: {}", e),
+        }
+    }
+
+    /// Copy the selected chart as a PNG image.
+    ///
+    /// The chart is painted by egui, so the reliable way to copy exactly
+    /// what the reader sees is a viewport screenshot cropped to the chart
+    /// rectangle. The screenshot arrives as an event on the next frame.
+    pub fn copy_selected_chart(&mut self, ctx: &egui::Context) {
+        let Some(t) = self.outputs.get(self.selected_output) else {
+            self.status = "No output to copy.".to_string();
+            return;
+        };
+        if t.chart.is_none() {
+            self.status = "The selected output has no chart.".to_string();
+            return;
+        }
+        let Some(rect) = self.last_chart_rect else {
+            self.status = "The chart has not been drawn yet; try again.".to_string();
+            return;
+        };
+        self.pending_screenshot_rect = Some(rect);
+        let viewport = self.last_chart_viewport.unwrap_or_else(|| ctx.viewport_id());
+        ctx.send_viewport_cmd_to(viewport, egui::ViewportCommand::Screenshot);
+        self.status = "Copying the chart…".to_string();
+    }
+
+    /// Handle the reply to a screenshot request: crop the chart rectangle
+    /// and put it on the clipboard as RGBA image data.
+    pub fn handle_screenshot(&mut self, ctx: &egui::Context) {
+        let Some(rect) = self.pending_screenshot_rect else {
+            return;
+        };
+        let shot = ctx.input(|i| {
+            i.events.iter().find_map(|e| match e {
+                egui::Event::Screenshot { image, .. } => Some(image.clone()),
+                _ => None,
+            })
+        });
+        let Some(image) = shot else {
+            return;
+        };
+        self.pending_screenshot_rect = None;
+        let ppp = ctx.pixels_per_point();
+        let x0 = (rect.min.x * ppp).floor().max(0.0) as usize;
+        let y0 = (rect.min.y * ppp).floor().max(0.0) as usize;
+        let x1 = ((rect.max.x * ppp).ceil() as usize).min(image.width());
+        let y1 = ((rect.max.y * ppp).ceil() as usize).min(image.height());
+        if x1 <= x0 || y1 <= y0 {
+            self.status = "The chart area could not be captured.".to_string();
+            return;
+        }
+        let w = x1 - x0;
+        let h = y1 - y0;
+        let mut bytes = Vec::with_capacity(w * h * 4);
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let c = image.pixels[y * image.width() + x];
+                bytes.extend_from_slice(&[c.r(), c.g(), c.b(), c.a()]);
             }
         }
-        h.push_str("</body>\n</html>\n");
-        match std::fs::write(path, h) {
-            Ok(_) => self.status = format!("Exported output (HTML) to {}", path.display()),
-            Err(e) => self.status = format!("Export failed: {}", e),
+        let data = arboard::ImageData {
+            width: w,
+            height: h,
+            bytes: std::borrow::Cow::Owned(bytes),
+        };
+        match arboard::Clipboard::new().and_then(|mut c| c.set_image(data)) {
+            Ok(()) => self.status = "Copied the chart to the clipboard.".to_string(),
+            Err(e) => self.status = format!("Could not copy the chart: {}", e),
         }
     }
 
@@ -596,6 +737,10 @@ impl StatsCraftApp {
 
 impl eframe::App for StatsCraftApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // A chart copied as an image is captured with a screenshot; the
+        // reply arrives on the next frame.
+        self.handle_screenshot(ctx);
+
         // ---- Phase 4: real OS document windows (SPSS multi-document UX) ----
         // The Output Viewer and Syntax editor live in their own viewports;
         // the Data Editor stays the main window, like IBM SPSS.
@@ -607,6 +752,7 @@ impl eframe::App for StatsCraftApp {
                     .with_inner_size([1080.0, 720.0])
                     .with_min_inner_size([520.0, 360.0]),
                 |vctx, _class| {
+                    self.handle_screenshot(vctx);
                     egui::CentralPanel::default()
                         .frame(
                             egui::Frame::none()
@@ -727,9 +873,12 @@ impl eframe::App for StatsCraftApp {
                                             }
                                         });
                                 });
-                                // The pivot action is applied after
-                                // the table's borrow ends.
+                                // The actions are applied after the
+                                // borrow of the table ends.
                                 let mut pivot_requested = false;
+                                let mut copy_table = false;
+                                let mut copy_chart = false;
+                                let mut chart_rect = None;
                                 cols[1].group(|ui| {
                                     let t = &self.outputs[self.selected_output.min(self.outputs.len() - 1)];
                                     egui::ScrollArea::vertical()
@@ -741,16 +890,46 @@ impl eframe::App for StatsCraftApp {
                                                     .font(crate::theme::semibold(16.0)),
                                             ));
                                             ui.add_space(6.0);
-                                            // A pivot table can be
-                                            // pivoted: the row and the
-                                            // column dimensions
-                                            // exchanged, the way SPSS
-                                            // lets the reader drag one
-                                            // across.
-                                            if t.pivot.is_some() {
-                                                let mut clicked = false;
-                                                ui.horizontal(|ui| {
-                                                    if ui
+                                            ui.horizontal_wrapped(|ui| {
+                                                // SPSS's Viewer copies the
+                                                // selected object; the rich
+                                                // table survives a paste into
+                                                // Word, Excel or PowerPoint.
+                                                if ui
+                                                    .button(
+                                                        egui::RichText::new("Copy Table")
+                                                            .size(11.5)
+                                                            .color(crate::theme::text()),
+                                                    )
+                                                    .on_hover_text(
+                                                        "Copy the table as an editable Office table.",
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    copy_table = true;
+                                                }
+                                                if t.chart.is_some()
+                                                    && ui
+                                                        .button(
+                                                            egui::RichText::new("Copy Chart")
+                                                                .size(11.5)
+                                                                .color(crate::theme::text()),
+                                                        )
+                                                        .on_hover_text(
+                                                            "Copy the chart as a PNG image.",
+                                                        )
+                                                        .clicked()
+                                                {
+                                                    copy_chart = true;
+                                                }
+                                                // A pivot table can be
+                                                // pivoted: the row and the
+                                                // column dimensions
+                                                // exchanged, the way SPSS
+                                                // lets the reader drag one
+                                                // across.
+                                                if t.pivot.is_some()
+                                                    && ui
                                                         .button(
                                                             egui::RichText::new("Pivot")
                                                                 .size(11.5)
@@ -760,27 +939,29 @@ impl eframe::App for StatsCraftApp {
                                                             "Exchange the row and the column dimensions.",
                                                         )
                                                         .clicked()
-                                                    {
-                                                        clicked = true;
-                                                    }
-                                                });
-                                                ui.add_space(6.0);
-                                                if clicked {
-                                                    // The action is
-                                                    // applied after
-                                                    // the borrow of
-                                                    // the table ends.
+                                                {
                                                     pivot_requested = true;
                                                 }
-                                            }
+                                            });
+                                            ui.add_space(6.0);
                                             render_output_table(ui, t);
                                             if let Some(chart) = &t.chart {
-                                                render_output_chart(ui, chart);
+                                                chart_rect = Some(render_output_chart(ui, chart));
                                             }
                                         });
                                 });
+                                if let Some(rect) = chart_rect {
+                                    self.last_chart_rect = Some(rect);
+                                    self.last_chart_viewport = Some(vctx.viewport_id());
+                                }
                                 if pivot_requested {
                                     self.pivot_selected_output();
+                                }
+                                if copy_table {
+                                    self.copy_selected_table();
+                                }
+                                if copy_chart {
+                                    self.copy_selected_chart(vctx);
                                 }
                             });
                         });
@@ -817,11 +998,12 @@ impl eframe::App for StatsCraftApp {
                         self.status = "These choices do not make a chart.".to_string();
                     }
                 }
-            } else {
-                // The dialog was closed without a decision, so it goes
-                // back as it was.
+            } else if !cb.cancelled {
+                // The window was neither confirmed nor cancelled (for
+                // example the click happened outside it), so it stays.
                 self.chart_builder = Some(cb);
             }
+            // Cancel and the title-bar close both drop the builder.
         }
         // ---- Phase 10: the Missing Values dialog ----
         if self.missing_dialog.is_some() {
@@ -938,6 +1120,81 @@ impl eframe::App for StatsCraftApp {
                 egui::menu::bar(ui, |ui| {
                     // ---------------- File ----------------
                     ui.menu_button("File", |ui| {
+                        // SPSS's File > New has one entry per document type.
+                        ui.menu_button("New", |ui| {
+                            if crate::icon::menu_item(
+                                ui,
+                                crate::theme::Icon::DataView,
+                                "Data",
+                            )
+                            .clicked()
+                            {
+                                ui.close_menu();
+                                self.new_data();
+                            }
+                            if crate::icon::menu_item(
+                                ui,
+                                crate::theme::Icon::Syntax,
+                                "Syntax",
+                            )
+                            .clicked()
+                            {
+                                ui.close_menu();
+                                self.new_syntax();
+                            }
+                            if crate::icon::menu_item(
+                                ui,
+                                crate::theme::Icon::Output,
+                                "Output",
+                            )
+                            .clicked()
+                            {
+                                ui.close_menu();
+                                self.new_output();
+                            }
+                        });
+                        ui.separator();
+                        // Recent files are loaded when the item is chosen, just
+                        // as SPSS's File > Recently Used Data does.
+                        ui.menu_button("Recent Files", |ui| {
+                            let recent = self.recent_files.clone();
+                            if recent.is_empty() {
+                                ui.add_enabled(
+                                    false,
+                                    egui::Button::new(
+                                        egui::RichText::new("(No recent files)").weak(),
+                                    ),
+                                );
+                            } else {
+                                for path in recent {
+                                    let label = std::path::Path::new(&path)
+                                        .file_name()
+                                        .and_then(|s| s.to_str())
+                                        .unwrap_or(&path)
+                                        .to_string();
+                                    if ui
+                                        .button(label)
+                                        .on_hover_text(&path)
+                                        .clicked()
+                                    {
+                                        ui.close_menu();
+                                        self.path_input = path;
+                                        self.load();
+                                    }
+                                }
+                                ui.separator();
+                                if ui.button("Clear Recent Files").clicked() {
+                                    ui.close_menu();
+                                    self.recent_files.clear();
+                                    let settings = crate::settings::Settings {
+                                        dark: self.dark,
+                                        recent_files: Vec::new(),
+                                    };
+                                    crate::settings::save(&settings);
+                                }
+                            }
+                        });
+                        ui.separator();
                         if crate::icon::menu_item(ui, crate::theme::Icon::Open, "Open Data…").clicked() {
                             ui.close_menu();
                             if let Some(p) = rfd::FileDialog::new()
@@ -996,6 +1253,37 @@ impl eframe::App for StatsCraftApp {
                                 self.export_output_html_to(&p);
                             }
                         }
+                        ui.menu_button("Export to Microsoft Office", |ui| {
+                            if ui.button("Word Document (.doc)…").clicked() {
+                                ui.close_menu();
+                                if let Some(p) = rfd::FileDialog::new()
+                                    .add_filter("Word Document", &["doc"])
+                                    .set_file_name("StatsCraft Output.doc")
+                                    .save_file()
+                                {
+                                    self.export_output_office_to(&p);
+                                }
+                            }
+                            if ui.button("Excel Workbook (.xls)…").clicked() {
+                                ui.close_menu();
+                                if let Some(p) = rfd::FileDialog::new()
+                                    .add_filter("Excel Workbook", &["xls"])
+                                    .set_file_name("StatsCraft Output.xls")
+                                    .save_file()
+                                {
+                                    self.export_output_office_to(&p);
+                                }
+                            }
+                            ui.separator();
+                            if ui.button("Copy Selected Table").clicked() {
+                                ui.close_menu();
+                                self.copy_selected_table();
+                            }
+                            if ui.button("Copy Selected Chart as Image").clicked() {
+                                ui.close_menu();
+                                self.copy_selected_chart(ui.ctx());
+                            }
+                        });
                         ui.separator();
                         if ui.button("Exit").clicked() {
                             ui.close_menu();
@@ -1167,6 +1455,7 @@ impl eframe::App for StatsCraftApp {
                                     .unwrap_or_default(),
                             };
                             b.confirmed = false;
+                            b.cancelled = false;
                             self.chart_builder = Some(b);
                         }
                         if crate::icon::menu_item(ui, crate::theme::Icon::Histogram, "Legacy Chart View").clicked() {
@@ -1474,7 +1763,9 @@ impl eframe::App for StatsCraftApp {
                 });
             });
 
-        egui::CentralPanel::default().show(ctx, |ui| match self.view {
+        egui::CentralPanel::default().show(ctx, |ui| {
+        let mut add_variable = false;
+        match self.view {
             View::Data => {
                 let vis: Vec<usize> = match &self.table {
                     Some(table) => {
@@ -1500,7 +1791,43 @@ impl eframe::App for StatsCraftApp {
             }
             View::Variables => {
                 if let Some(table) = &mut self.table {
-                    render_variables(ui, table);
+                    render_variables(ui, table, &mut add_variable);
+                } else {
+                    // A fresh session has no dataset yet. SPSS lets the
+                    // reader start from Variable View; an empty screen
+                    // with no controls does not.
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(40.0);
+                        ui.label(
+                            egui::RichText::new("No dataset is open")
+                                .font(crate::theme::semibold(16.0))
+                                .color(crate::theme::text()),
+                        );
+                        ui.add_space(6.0);
+                        ui.label(
+                            egui::RichText::new(
+                                "Create a variable to begin, or open a data file from File > Open.",
+                            )
+                            .color(crate::theme::text_muted())
+                            .size(12.0),
+                        );
+                        ui.add_space(14.0);
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new("New Variable…")
+                                        .font(crate::theme::medium(13.0))
+                                        .color(crate::theme::text_on_accent()),
+                                )
+                                .fill(crate::theme::accent())
+                                .rounding(crate::theme::RADIUS_SM)
+                                .min_size(egui::vec2(150.0, 32.0)),
+                            )
+                            .clicked()
+                        {
+                            add_variable = true;
+                        }
+                    });
                 }
             }
             View::Output => {
@@ -1510,6 +1837,9 @@ impl eframe::App for StatsCraftApp {
                     if self.selected_output >= self.outputs.len() {
                         self.selected_output = 0;
                     }
+                    let mut copy_table = false;
+                    let mut copy_chart = false;
+                    let mut chart_rect = None;
                     ui.columns(2, |cols| {
                         // left outline (SPSS Output Viewer tree)
                         cols[0].group(|ui| {
@@ -1545,9 +1875,39 @@ impl eframe::App for StatsCraftApp {
                                     let has_pivot = self.outputs[self.selected_output]
                                         .pivot
                                         .is_some();
-                                    if has_pivot {
-                                        ui.horizontal(|ui| {
-                                            if ui
+                                    let has_chart = self.outputs[self.selected_output]
+                                        .chart
+                                        .is_some();
+                                    ui.horizontal_wrapped(|ui| {
+                                        if ui
+                                            .button(
+                                                egui::RichText::new("Copy Table")
+                                                    .size(11.5)
+                                                    .color(crate::theme::text()),
+                                            )
+                                            .on_hover_text(
+                                                "Copy the table as an editable Office table.",
+                                            )
+                                            .clicked()
+                                        {
+                                            copy_table = true;
+                                        }
+                                        if has_chart
+                                            && ui
+                                                .button(
+                                                    egui::RichText::new("Copy Chart")
+                                                        .size(11.5)
+                                                        .color(crate::theme::text()),
+                                                )
+                                                .on_hover_text(
+                                                    "Copy the chart as a PNG image.",
+                                                )
+                                                .clicked()
+                                        {
+                                            copy_chart = true;
+                                        }
+                                        if has_pivot
+                                            && ui
                                                 .button(
                                                     egui::RichText::new("Pivot")
                                                         .size(11.5)
@@ -1557,16 +1917,28 @@ impl eframe::App for StatsCraftApp {
                                                     "Exchange the row and the column dimensions.",
                                                 )
                                                 .clicked()
-                                            {
-                                                self.pivot_selected_output();
-                                            }
-                                        });
-                                        ui.add_space(4.0);
-                                    }
+                                        {
+                                            self.pivot_selected_output();
+                                        }
+                                    });
+                                    ui.add_space(4.0);
                                     render_output_table(ui, &self.outputs[self.selected_output]);
+                                    if let Some(chart) = &self.outputs[self.selected_output].chart {
+                                        chart_rect = Some(render_output_chart(ui, chart));
+                                    }
                                 });
                         });
                     });
+                    if let Some(rect) = chart_rect {
+                        self.last_chart_rect = Some(rect);
+                        self.last_chart_viewport = Some(ctx.viewport_id());
+                    }
+                    if copy_table {
+                        self.copy_selected_table();
+                    }
+                    if copy_chart {
+                        self.copy_selected_chart(ctx);
+                    }
                 }
             }
             View::Charts => {
@@ -1604,7 +1976,20 @@ impl eframe::App for StatsCraftApp {
                     }
                 });
             }
+        }
+        if add_variable {
+            let table = self.table.get_or_insert_with(DataTable::default);
+            let idx = table.add_variable(crate::data::ColumnKind::Numeric);
+            self.status = format!(
+                "Added {}. Edit its name, label and measure in Variable View.",
+                table.columns[idx].name
+            );
+        }
         });
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.save_settings();
     }
 }
 
@@ -1655,7 +2040,9 @@ fn spss_grid(
     let font = theme::body(12.5);
     let header_font = theme::medium(12.5);
 
-    egui::ScrollArea::vertical()
+    // Both axes: the data editor keeps its full column width and scrolls
+    // sideways, and egui turns Shift+wheel into horizontal scrolling.
+    egui::ScrollArea::both()
         .auto_shrink([false, false])
         .show_rows(ui, theme::ROW_H + theme::GAP, total_rows, |ui, rows| {
             for row in rows {
@@ -1874,6 +2261,251 @@ fn commit_edit(table: &mut DataTable, ci: usize, di: usize, buf: &str) {
     table.columns[ci].values[di] = v;
 }
 
+/// One output object as an Office-friendly HTML table.
+fn output_table_html(t: &OutputTable, include_chart: bool) -> String {
+    let mut h = String::new();
+    h.push_str(&format!("<h2>{}</h2>\n", html_escape(&t.title)));
+    match &t.pivot {
+        Some(p) => h.push_str(&pivot_to_html(p)),
+        None => {
+            h.push_str("<table>\n<tr>");
+            for hdr in &t.headers {
+                h.push_str(&format!("<th>{}</th>", html_escape(hdr)));
+            }
+            h.push_str("</tr>\n");
+            for row in &t.rows {
+                h.push_str("<tr>");
+                for (k, cell) in row.iter().enumerate() {
+                    let esc = html_escape(cell);
+                    if k > 0 && cell.trim().parse::<f64>().is_ok() {
+                        h.push_str(&format!("<td class=\"num\">{}</td>", esc));
+                    } else if k == 0 {
+                        h.push_str(&format!("<td class=\"stub\">{}</td>", esc));
+                    } else {
+                        h.push_str(&format!("<td>{}</td>", esc));
+                    }
+                }
+                h.push_str("</tr>\n");
+            }
+            h.push_str("</table>\n");
+        }
+    }
+    if include_chart {
+        if let Some(chart) = &t.chart {
+            h.push_str(&chart_to_svg(chart, 720.0, 300.0));
+            h.push('\n');
+        }
+    }
+    if !t.note.is_empty() {
+        h.push_str(&format!(
+            "<p class=\"note\">{}</p>\n",
+            html_escape(&t.note).replace('\n', "<br>")
+        ));
+    }
+    h
+}
+
+/// The full HTML document for HTML and Office export.
+fn output_document_html(outputs: &[OutputTable], office: bool, prog_id: &str) -> String {
+    let mut h = String::new();
+    h.push_str("<!DOCTYPE html>\n<html xmlns:o=\"urn:schemas-microsoft-com:office:office\" ");
+    h.push_str("xmlns:w=\"urn:schemas-microsoft-com:office:word\" ");
+    h.push_str("xmlns=\"http://www.w3.org/TR/REC-html40\">\n<head>\n<meta charset=\"utf-8\">\n");
+    if office {
+        h.push_str(&format!(
+            "<meta name=\"ProgId\" content=\"{}\">\n",
+            prog_id
+        ));
+        h.push_str("<meta name=\"Generator\" content=\"StatsCraft\">\n");
+    }
+    h.push_str("<title>StatsCraft Output</title>\n<style>\n");
+    h.push_str(
+        "@page{size:8.5in 11in;margin:0.6in;}\n\
+         body{font-family:'Segoe UI',Calibri,Arial,sans-serif;margin:24px;color:#1a1f2b;}\n\
+         h2{font-size:14pt;margin:18px 0 6px 0;color:#1a1f2b;}\n\
+         table{border-collapse:collapse;font-size:10.5pt;margin:0 0 10px 0;}\n\
+         th{background:#e8eef7;border:1px solid #8a8a8a;padding:3px 10px;text-align:left;}\n\
+         td{border:1px solid #b5b5b5;padding:2px 10px;}\n\
+         td.num{text-align:right;font-variant-numeric:tabular-nums;}\n\
+         td.stub{font-weight:600;background:#f6f8fb;}\n\
+         .note{color:#555;font-size:9.5pt;}\n\
+         th.corner{text-align:right;}\n\
+         .measures{color:#555;font-size:9.5pt;margin:0 0 4px 0;}\n\
+         .measures span{color:#888;}\n\
+         svg{display:block;margin:8px 0;}\n",
+    );
+    h.push_str("</style>\n</head>\n<body>\n");
+    for t in outputs {
+        h.push_str(&output_table_html(t, true));
+    }
+    h.push_str("</body>\n</html>\n");
+    h
+}
+
+/// The plain-text alternative for the clipboard: tab-separated cells,
+/// which every spreadsheet understands.
+fn output_table_text(t: &OutputTable) -> String {
+    let mut out = String::new();
+    out.push_str(&t.title);
+    out.push('\n');
+    if !t.headers.is_empty() {
+        out.push_str(&t.headers.join("\t"));
+        out.push('\n');
+    }
+    for row in &t.rows {
+        out.push_str(&row.join("\t"));
+        out.push('\n');
+    }
+    if !t.note.is_empty() {
+        out.push_str(&t.note);
+        out.push('\n');
+    }
+    out
+}
+
+/// The chart as a self-contained SVG, so an Office export keeps the
+/// picture rather than dropping it.
+fn chart_to_svg(chart: &crate::output::Chart, width: f32, height: f32) -> String {
+    use crate::output::ChartKind;
+    let (w, h) = (width.max(320.0), height.max(200.0));
+    let left = 56.0;
+    let right = w - 16.0;
+    let top = 26.0;
+    let bottom = h - 42.0;
+    let plot_w = (right - left).max(1.0);
+    let plot_h = (bottom - top).max(1.0);
+
+    let mut max_y = 0.0f64;
+    let mut min_y = 0.0f64;
+    let mut max_x = 0.0f64;
+    for s in &chart.series {
+        for y in &s.y {
+            max_y = max_y.max(*y);
+            min_y = min_y.min(*y);
+        }
+        for x in &s.x {
+            max_x = max_x.max(*x);
+        }
+    }
+    if max_y <= min_y {
+        max_y = min_y + 1.0;
+    }
+    if max_x <= 0.0 {
+        max_x = 1.0;
+    }
+    let y_max = max_y * 1.1;
+    let px = |x: f64| left + (x / max_x) as f32 * plot_w;
+    let py = |y: f64| bottom - ((y - min_y) / (y_max - min_y)) as f32 * plot_h;
+
+    let mut s = String::new();
+    s.push_str(&format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{:.0}\" height=\"{:.0}\" viewBox=\"0 0 {:.0} {:.0}\">",
+        w, h, w, h
+    ));
+    s.push_str("<rect width=\"100%\" height=\"100%\" fill=\"#ffffff\"/>");
+    s.push_str(&format!(
+        "<text x=\"{:.1}\" y=\"16\" font-family=\"Segoe UI,Arial\" font-size=\"13\" font-weight=\"600\" fill=\"#1a1f2b\">{}</text>",
+        left / 2.0,
+        xml_escape(&chart.title)
+    ));
+    // Grid and y axis labels.
+    for i in 0..=5 {
+        let t = i as f64 / 5.0;
+        let y = bottom - t as f32 * plot_h;
+        s.push_str(&format!(
+            "<line x1=\"{:.1}\" y1=\"{:.1}\" x2=\"{:.1}\" y2=\"{:.1}\" stroke=\"#dde3ed\" stroke-width=\"0.7\"/>",
+            left, y, right, y
+        ));
+        let v = min_y + t * (y_max - min_y);
+        s.push_str(&format!(
+            "<text x=\"{:.1}\" y=\"{:.1}\" font-family=\"Segoe UI,Arial\" font-size=\"9\" text-anchor=\"end\" fill=\"#939eb0\">{:.2}</text>",
+            left - 6.0,
+            y + 3.0,
+            v
+        ));
+    }
+    s.push_str(&format!(
+        "<line x1=\"{:.1}\" y1=\"{:.1}\" x2=\"{:.1}\" y2=\"{:.1}\" stroke=\"#c2ccdc\" stroke-width=\"1\"/>",
+        left, bottom, right, bottom
+    ));
+
+    let palette = ["#2f6fed", "#0fa87e", "#e08a0b", "#bd93f9"];
+    if chart.kind == ChartKind::Line || chart.kind == ChartKind::Scatter {
+        for (si, series) in chart.series.iter().enumerate() {
+            let color = palette[si % palette.len()];
+            if chart.kind == ChartKind::Line {
+                let points: Vec<String> = series
+                    .x
+                    .iter()
+                    .zip(series.y.iter())
+                    .map(|(x, y)| format!("{:.1},{:.1}", px(*x), py(*y)))
+                    .collect();
+                s.push_str(&format!(
+                    "<polyline points=\"{}\" fill=\"none\" stroke=\"{}\" stroke-width=\"2\"/>",
+                    points.join(" "),
+                    color
+                ));
+            }
+            for (x, y) in series.x.iter().zip(series.y.iter()) {
+                s.push_str(&format!(
+                    "<circle cx=\"{:.1}\" cy=\"{:.1}\" r=\"2.4\" fill=\"{}\"/>",
+                    px(*x),
+                    py(*y),
+                    color
+                ));
+            }
+        }
+    } else {
+        // Bars: one bar per x value, using the category labels when the
+        // chart has them.
+        for (si, series) in chart.series.iter().enumerate() {
+            let color = palette[si % palette.len()];
+            let n = series.y.len().max(1);
+            let bw = (plot_w / n as f32 * 0.72).max(3.0);
+            for (i, y) in series.y.iter().enumerate() {
+                let x_center = left + (i as f32 + 0.5) / n as f32 * plot_w;
+                let y0 = py(*y);
+                s.push_str(&format!(
+                    "<rect x=\"{:.1}\" y=\"{:.1}\" width=\"{:.1}\" height=\"{:.1}\" fill=\"{}\"/>",
+                    x_center - bw / 2.0,
+                    y0,
+                    bw,
+                    (bottom - y0).max(0.0),
+                    color
+                ));
+                if let Some(label) = series.x_labels.get(i) {
+                    s.push_str(&format!(
+                        "<text x=\"{:.1}\" y=\"{:.1}\" font-family=\"Segoe UI,Arial\" font-size=\"8\" text-anchor=\"middle\" fill=\"#5b6678\">{}</text>",
+                        x_center,
+                        bottom + 12.0,
+                        xml_escape(label)
+                    ));
+                }
+            }
+        }
+    }
+    s.push_str(&format!(
+        "<text x=\"{:.1}\" y=\"{:.1}\" font-family=\"Segoe UI,Arial\" font-size=\"9\" text-anchor=\"middle\" fill=\"#5b6678\">{}</text>",
+        (left + right) / 2.0,
+        h - 8.0,
+        xml_escape(&chart.x_label)
+    ));
+    s.push_str(&format!(
+        "<text transform=\"translate(10,{:.1}) rotate(-90)\" font-family=\"Segoe UI,Arial\" font-size=\"9\" text-anchor=\"middle\" fill=\"#5b6678\">{}</text>",
+        (top + bottom) / 2.0,
+        xml_escape(&chart.y_label)
+    ));
+    s.push_str("</svg>");
+    s
+}
+
+fn xml_escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
 /// A pivot table as HTML, with the spanning header and the measures.
 ///
 /// The header is one band per column dimension, and the cells of the
@@ -2080,10 +2712,10 @@ mod tests {
 /// Draw a chart. Public so the Chart Builder can show a preview of
 /// the chart the choices make.
 pub fn render_chart_preview(ui: &mut egui::Ui, chart: &crate::output::Chart) {
-    render_output_chart(ui, chart);
+    let _ = render_output_chart(ui, chart);
 }
 
-fn render_output_chart(ui: &mut egui::Ui, chart: &crate::output::Chart) {
+fn render_output_chart(ui: &mut egui::Ui, chart: &crate::output::Chart) -> egui::Rect {
     use crate::theme;
     use crate::output::ChartKind;
 
@@ -2317,6 +2949,7 @@ fn render_output_chart(ui: &mut egui::Ui, chart: &crate::output::Chart) {
         theme::medium(10.5),
         theme::text_muted(),
     );
+    rect
 }
 
 /// The colour of the nth series.
@@ -2720,12 +3353,48 @@ fn render_charts(ui: &mut egui::Ui, table: &DataTable) {
     }
 }
 
-fn render_variables(ui: &mut egui::Ui, table: &mut DataTable) {
+fn render_variables(ui: &mut egui::Ui, table: &mut DataTable, add_variable: &mut bool) {
     use crate::data::{Measure, VarAlign, ColumnKind};
     use crate::theme;
     let header_fill = theme::header();
     let cell_fill = theme::cell();
     let header_text = theme::text();
+
+    // SPSS's Variable View can always make a new row. The button sits
+    // above the grid so it is visible both for an empty dataset and for a
+    // loaded one.
+    ui.horizontal(|ui| {
+        if ui
+            .add(
+                egui::Button::new(
+                    egui::RichText::new("＋ New Variable")
+                        .font(theme::medium(12.0))
+                        .color(theme::text_on_accent()),
+                )
+                .fill(theme::accent())
+                .rounding(theme::RADIUS_SM)
+                .min_size(egui::vec2(126.0, 26.0)),
+            )
+            .on_hover_text("Add a numeric variable at the end of the dataset.")
+            .clicked()
+        {
+            *add_variable = true;
+        }
+        if table.columns.is_empty() {
+            ui.label(
+                egui::RichText::new("No variables yet — click New Variable to define the first one.")
+                    .color(theme::text_muted())
+                    .size(12.0),
+            );
+        } else {
+            ui.label(
+                egui::RichText::new(format!("{} variable(s)", table.columns.len()))
+                    .color(theme::text_faint())
+                    .size(11.5),
+            );
+        }
+    });
+    ui.add_space(5.0);
 
     let mut block = |ui: &mut egui::Ui,
                      w: f32,
@@ -3041,6 +3710,11 @@ pub fn run_with(
     initial_script: Option<String>,
     dark: bool,
 ) -> eframe::Result<()> {
+    // Load the remembered theme and recent files. `--dark` is an explicit
+    // override for demos and screenshots; otherwise the last choice wins.
+    let settings = crate::settings::load();
+    let dark = dark || settings.dark;
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_icon(app_icon())
@@ -3064,6 +3738,7 @@ pub fn run_with(
             // the user switches it.
             app.ctx = cc.egui_ctx.clone();
             app.dark = dark;
+            app.recent_files = settings.recent_files;
             if let Some(p) = initial_path {
                 app.path_input = p;
                 app.load();
