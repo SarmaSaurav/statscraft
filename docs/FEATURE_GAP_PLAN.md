@@ -280,6 +280,6 @@ Anything beyond that is a separate product decision, not a backlog item.
 
 The 0.2.0 release fixed the embarrassing parts of the metadata editor and the
 destructive-action flow. The next release must not chase the reference
-product's 27 Analyse submenus. It must make the existing editor safe, make the
+product's long Analyse menu. It must make the existing editor safe, make the
 menus truthful, and make the output reproducible. Data preparation comes after
 that; advanced modelling comes last.
