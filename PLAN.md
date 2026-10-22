@@ -215,7 +215,7 @@ now, against the design above.
 | 10 | The Data Editor's editing: add and delete cases, copy and paste cells and blocks of cells, and the Define Missing Values dialog, with the discrete values and the range kept apart. |
 | 11 | The Chart Builder: the type of the chart, the variables, how the data is summarised, the labels, a reference line, and a preview of the result. |
 
-Nineteen procedures, 103 tests, one runner behind both the menus and the
+Eighteen procedures, 107 tests, one runner behind both the menus and the
 Syntax Editor. `docs/REFERENCE.md` records what was observed in the
 reference environment and where the app deliberately differs
 from it.

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>StatsCraft — product showcase</title>
+<title>StatsCraft 0.2.0 - product showcase</title>
 <style>
   :root {
     --accent:      #2F6FED;
@@ -33,7 +33,7 @@
   }
 
   /* ---------------- header ---------------- */
-  .head { display: flex; align-items: center; gap: 20px; padding: 30px 50px 0 50px; }
+  .head { display: flex; align-items: center; gap: 20px; padding: 28px 50px 0 50px; }
   .mark {
     width: 50px; height: 50px; border-radius: 12px; background: #fff;
     border: 1px solid var(--border);
@@ -58,8 +58,8 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     grid-template-rows: 1fr 1fr;
-    gap: 16px;
-    padding: 20px 50px 0 50px;
+    gap: 14px;
+    padding: 18px 50px 0 50px;
   }
   .win {
     background: #fff; border: 1px solid var(--border-str); border-radius: 10px;
@@ -67,7 +67,7 @@
     box-shadow: 0 1px 2px rgba(20,30,60,.05), 0 10px 26px rgba(20,30,60,.10);
   }
   .win .bar {
-    padding: 7px 13px; background: var(--surface-alt);
+    padding: 6px 13px; background: var(--surface-alt);
     border-bottom: 1px solid var(--border);
     font-size: 10px; font-weight: 700; letter-spacing: .085em; text-transform: uppercase;
     color: var(--ink-faint); display: flex; align-items: center; gap: 7px; flex: 0 0 auto;
@@ -75,10 +75,10 @@
   .win .bar .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
   .win .bar .dot.t { background: var(--teal); }
   .win .bar .r { margin-left: auto; font-weight: 600; letter-spacing: .04em; color: #A8B2C2; }
-  .win .body { flex: 1; min-height: 0; overflow: hidden; display: flex; align-items: flex-start; }
+  .win .body { flex: 1; min-height: 0; overflow: hidden; background: var(--surface); }
   .win img { display: block; width: 100%; height: auto; }
   .win .foot {
-    padding: 7px 13px 9px; font-size: 11px; color: var(--ink-muted);
+    padding: 6px 13px 8px; font-size: 11px; color: var(--ink-muted);
     border-top: 1px solid var(--border); background: var(--surface); line-height: 1.35;
     flex: 0 0 auto;
   }
@@ -87,9 +87,9 @@
   /* ---------------- feature strip ---------------- */
   .features {
     display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px;
-    background: var(--border); border-top: 1px solid var(--border); margin-top: 16px;
+    background: var(--border); border-top: 1px solid var(--border); margin-top: 14px;
   }
-  .feat { background: #fff; padding: 13px 22px 15px 22px; }
+  .feat { background: #fff; padding: 12px 22px 14px 22px; }
   .feat .l em { font-style: normal; font-weight: 600; color: var(--ink-muted); }
   .feat .k { font-size: 17px; font-weight: 700; letter-spacing: -0.018em; line-height: 1.15; }
   .feat .k span { color: var(--accent); }
@@ -113,11 +113,11 @@
     </div>
     <div class="spacer"></div>
     <div class="badges">
-      <span class="badge on">Native desktop</span>
+      <span class="badge on">v0.2.0</span>
+      <span class="badge">Native desktop</span>
       <span class="badge">Rust + egui</span>
       <span class="badge">MIT</span>
       <span class="badge">Windows &amp; Linux</span>
-      <span class="badge on">Light &amp; dark</span>
     </div>
   </div>
 
@@ -126,19 +126,19 @@
     <div class="win">
       <div class="bar"><span class="dot"></span>Data Editor<span class="r">01</span></div>
       <div class="body"><img src="show1_data.png" alt="StatsCraft Data Editor"></div>
-      <div class="foot">Spreadsheet grid — click a cell, double-click to edit, Delete to clear.</div>
+      <div class="foot">Spreadsheet grid: click a cell, double-click to edit, Delete to clear.</div>
     </div>
 
     <div class="win">
       <div class="bar"><span class="dot t"></span>Variable View<span class="r">02</span></div>
       <div class="body"><img src="show2_vars.png" alt="StatsCraft Variable View"></div>
-      <div class="foot">The full variable column set: type, label, values, measure, role.</div>
+      <div class="foot">Types, labels, <b>value labels</b>, missing values, measure and role. Deleting a variable asks first.</div>
     </div>
 
     <div class="win">
       <div class="bar"><span class="dot"></span>Output Viewer<span class="r">03</span></div>
       <div class="body"><img src="show3_output.png" alt="StatsCraft Output Viewer"></div>
-      <div class="foot">Pivot tables with detailed notes, plus ROC curves and bar charts.</div>
+      <div class="foot">Pivot tables with an outline, cell statistics and a <b>Pivot</b> button.</div>
     </div>
 
     <div class="win">
@@ -147,36 +147,24 @@
       <div class="foot">Menus and dialogs emit <b>command syntax</b>; one runner executes it.</div>
     </div>
 
-    <div class="win">
-      <div class="bar"><span class="dot"></span>Pivot Table<span class="r">05</span></div>
-      <div class="body"><img src="show5_pivot.png" alt="A StatsCraft pivot table"></div>
-      <div class="foot">Cells addressed by their dimension keys. The <b>Pivot</b> button exchanges the row and the column dimensions.</div>
-    </div>
-
-    <div class="win">
-      <div class="bar"><span class="dot t"></span>Pivot Table, pivoted<span class="r">06</span></div>
-      <div class="body"><img src="show6_pivoted.png" alt="The same pivot table, pivoted"></div>
-      <div class="foot">The same cells, read the other way round — the totals travel with them.</div>
-    </div>
-
   </div>
 
   <div class="features">
     <div class="feat">
-      <div class="k"><span>19</span> procedures</div>
+      <div class="k"><span>18</span> procedures</div>
       <div class="l">Frequencies, Descriptives, Crosstabs, t-tests, ANOVA, Correlations, Regression, Means, Explore, Reliability, Factor, ROC, and the nonparametric family.</div>
     </div>
     <div class="feat">
       <div class="k">CSV &amp; <span>.sav</span></div>
-      <div class="l">Reads <em>and writes</em> `.sav` system files — labels, value labels, measures and display widths intact.</div>
+      <div class="l">Reads <em>and writes</em> system files: labels, value labels, measures and display widths intact.</div>
     </div>
     <div class="feat">
-      <div class="k"><span>87</span> tests</div>
-      <div class="l">Every procedure checked against closed-form reference values — and the GLM against statsmodels.</div>
+      <div class="k"><span>107</span> tests</div>
+      <div class="l">Every procedure checked against closed-form reference values, and the GLM against statsmodels.</div>
     </div>
     <div class="feat">
       <div class="k">Dialog → <span>syntax</span></div>
-      <div class="l">Menus and dialogs emit command syntax; one runner executes it. A light and a Dracula dark theme.</div>
+      <div class="l">Menus and dialogs emit command syntax; one runner executes it. Light and dark themes.</div>
     </div>
   </div>
 

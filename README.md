@@ -2,6 +2,9 @@
 
 Lightweight statistical workbench written in Rust (native desktop app).
 
+**Version 0.2.0** adds editable value labels, confirmed variable deletion,
+and a Save / Don't Save / Cancel prompt when closing with unsaved work.
+
 ![StatsCraft product showcase](docs/showcase/showcase.png)
 
 [![CI](https://github.com/SarmaSaurav/statscraft/actions/workflows/build.yml/badge.svg)](https://github.com/SarmaSaurav/statscraft/actions/workflows/build.yml)
@@ -13,7 +16,7 @@ The UI is a modern desktop workbench:
 
 - **Typography** — the bundled **Inter** family (Regular / Medium / SemiBold /
   Bold), embedded in the binary so the app looks the same on every machine.
-- **Icons** — a 38-glyph **SVG line-icon set** embedded in the binary.
+- **Icons** — a 39-glyph **SVG line-icon set** embedded in the binary.
   The ribbon uses large monochrome glyphs tinted from the active theme,
   with a readable label under each icon. Menu entries and tabs use the
   same set, so every surface stays consistent in light and dark mode.
@@ -30,6 +33,13 @@ The UI is a modern desktop workbench:
   blocks of cells copied and pasted, and a variable's **missing values**
   declared as discrete values or as a range, which every procedure then
   leaves out.
+- **Value labels from Variable View** — the Values column opens a
+  dedicated editor for numeric and string labels. The row is not a dead
+  cell any more: click `None.` or `Defined (n).`, add the mappings, and
+  press OK.
+- **Safe destructive actions** — deleting a variable uses a trash icon
+  and asks for confirmation first. Closing the window with unsaved edits
+  shows **Save / Don't Save / Cancel** instead of discarding them.
 - **The Chart Builder** — the type of the chart, the variables, how the
   data is summarised, the title and the axis labels, and a reference
   line, with a live preview of the result.
@@ -57,11 +67,11 @@ the Syntax Editor without running it, so you can edit the command by hand
 first. That is the whole dialog → syntax → output pipeline, and it is why
 the two editors and the menus behave identically.
 
-Sixteen procedures have dialogs: Frequencies, Descriptives, Crosstabs,
-Independent-Samples T Test, Paired-Samples T Test, One-Way ANOVA, Bivariate
-Correlations, Linear Regression, Means, Explore, and the nonparametric
-family — Mann-Whitney U, Kruskal-Wallis H, Wilcoxon signed-rank and
-Friedman.
+Eighteen procedures have dialogs: Frequencies, Descriptives, Crosstabs,
+Independent-Samples T Test, Paired-Samples T Test, One-Way ANOVA, General
+Linear Model, Bivariate Correlations, Linear Regression, Means, Explore,
+Reliability, Factor Analysis, ROC Curve, and the nonparametric family —
+Mann-Whitney U, Kruskal-Wallis H, Wilcoxon signed-rank and Friedman.
 
 The dialogs' options reach the statistics engine, not just the syntax:
 `/STATISTICS=` chooses which descriptives are computed, `/CELLS=` gives
@@ -171,7 +181,7 @@ cd installer && cargo build --release   # Windows installer (embeds the app exe)
 - Output Viewer charts: bar, histogram, scatter, box plot, ROC curve
 
 ## Validation
-Every procedure is covered by reference tests (`cargo test`), checked against
+Every procedure is covered by reference tests (`cargo test`, 107 tests), checked against
 closed-form/textbook values rather than against itself: sample mean/SD (n−1),
 unit correlations and exact regression recovery, Pearson χ² on a hand-computed
 contingency table, One-Way ANOVA F with known SS/df, Welch's t with unequal
@@ -183,8 +193,11 @@ back, and check the variables, the rows and the values match.
 
 The Data Editor's editing is covered too: adding and deleting cases, the
 shift of the cases after a deletion, pasting a block of values across the
-columns, and the missing values of a variable — both the discrete values and
-the range.
+columns, the missing values of a variable — both the discrete values and
+the range — and writing value labels through the public data API.
+
+See [`docs/FEATURE_GAP_PLAN.md`](docs/FEATURE_GAP_PLAN.md) for the honest
+audit against the reference feature set, including the gaps that remain.
 
 ## Reference behavior
 UI structure, menus, and analysis flow follow a classic desktop statistics design

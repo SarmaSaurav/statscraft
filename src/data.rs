@@ -66,7 +66,7 @@ impl VarAlign {
 }
 
 /// Per-variable metadata backing the StatsBench-style Variable View.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct VariableMeta {
     /// Variable/Value label ("Label" column). Empty = none.
     pub label: String,
@@ -629,6 +629,58 @@ impl DataTable {
         true
     }
 
+    /// Replace a variable's value labels.
+    ///
+    /// Each entry is the value as the user typed it and the label shown
+    /// for it. Numeric variables need a number in the value column; string
+    /// variables take the text itself. Blank rows are ignored, so the
+    /// dialog can start with an empty row.
+    pub fn set_value_labels(
+        &mut self,
+        col: usize,
+        rows: &[(String, String)],
+    ) -> Result<usize, String> {
+        let Some(c) = self.columns.get_mut(col) else {
+            return Err("That variable no longer exists.".to_string());
+        };
+        let mut numeric: Vec<(f64, String)> = Vec::new();
+        let mut text: Vec<(String, String)> = Vec::new();
+        for (raw_value, raw_label) in rows {
+            let value = raw_value.trim();
+            let label = raw_label.trim();
+            if value.is_empty() && label.is_empty() {
+                continue;
+            }
+            if value.is_empty() {
+                return Err("Every value label needs a value.".to_string());
+            }
+            if label.is_empty() {
+                return Err(format!("Value '{}' needs a label.", value));
+            }
+            match c.kind {
+                ColumnKind::Numeric => {
+                    let n: f64 = value
+                        .parse()
+                        .map_err(|_| format!("'{}' is not a number.", value))?;
+                    if numeric.iter().any(|(v, _)| *v == n) {
+                        return Err(format!("Value '{}' is entered twice.", value));
+                    }
+                    numeric.push((n, label.to_string()));
+                }
+                ColumnKind::String => {
+                    if text.iter().any(|(v, _)| v == value) {
+                        return Err(format!("Value '{}' is entered twice.", value));
+                    }
+                    text.push((value.to_string(), label.to_string()));
+                }
+            }
+        }
+        let count = numeric.len() + text.len();
+        c.meta.value_labels = numeric;
+        c.meta.text_value_labels = text;
+        Ok(count)
+    }
+
     /// The values of a numeric variable that the user has declared
     /// missing.
     ///
@@ -997,6 +1049,57 @@ mod tests {
         t.paste_text(0, 0, "7\tQ");
         assert_eq!(t.cell_text(0, 0), "7");
         assert_eq!(t.cell_text(1, 0), "Q");
+    }
+
+    #[test]
+    fn value_labels_are_replaced_and_validated() {
+        let mut t = editable();
+        // Numeric labels.
+        let rows = vec![
+            ("1".to_string(), "Low".to_string()),
+            ("2".to_string(), "High".to_string()),
+        ];
+        assert_eq!(t.set_value_labels(0, &rows).unwrap(), 2);
+        assert_eq!(t.columns[0].value_label_for(1.0), Some("Low"));
+        assert_eq!(t.columns[0].value_label_for(2.0), Some("High"));
+        // Replacing the set drops the labels that are no longer listed.
+        assert_eq!(
+            t.set_value_labels(0, &[("2".to_string(), "Upper".to_string())])
+                .unwrap(),
+            1
+        );
+        assert_eq!(t.columns[0].value_label_for(1.0), None);
+        assert_eq!(t.columns[0].value_label_for(2.0), Some("Upper"));
+        // A non-number and a duplicate are rejected, and the old set stays.
+        assert!(t.set_value_labels(0, &[("x".to_string(), "Bad".to_string())]).is_err());
+        assert!(t
+            .set_value_labels(
+                0,
+                &[
+                    ("2".to_string(), "A".to_string()),
+                    ("2".to_string(), "B".to_string())
+                ]
+            )
+            .is_err());
+        assert_eq!(t.columns[0].value_label_for(2.0), Some("Upper"));
+        // A blank row is ignored, and an empty value with a label is an error.
+        assert_eq!(
+            t.set_value_labels(
+                0,
+                &[("".to_string(), "".to_string()), ("3".to_string(), "Top".to_string())]
+            )
+            .unwrap(),
+            1
+        );
+        assert!(t.set_value_labels(0, &[("".to_string(), "Orphan".to_string())]).is_err());
+        // String variables use their text values.
+        let rows = vec![("A".to_string(), "Alpha".to_string())];
+        assert_eq!(t.set_value_labels(1, &rows).unwrap(), 1);
+        assert_eq!(t.columns[1].meta.text_value_labels.len(), 1);
+        assert_eq!(t.columns[1].meta.text_value_labels[0].0, "A");
+        // Clearing every label is allowed.
+        assert_eq!(t.set_value_labels(0, &[]).unwrap(), 0);
+        assert!(t.columns[0].meta.value_labels.is_empty());
     }
 
     #[test]

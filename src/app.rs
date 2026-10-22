@@ -36,6 +36,16 @@ pub struct StatsCraftApp {
     pub dialog: Option<crate::dialog::DialogState>,
     /// Phase 10: the open Missing Values dialog, if any.
     pub missing_dialog: Option<crate::dialog::MissingValues>,
+    /// The open Value Labels dialog, if any.
+    pub value_labels_dialog: Option<crate::dialog::ValueLabels>,
+    /// A variable waiting for the delete confirmation, if any.
+    pub pending_delete_variable: Option<usize>,
+    /// The unsaved-changes prompt shown when the window is closed.
+    pub close_prompt: bool,
+    /// Set once the user has decided to close, so the request goes through.
+    pub close_confirmed: bool,
+    /// Whether the dataset has edits that have not been written to a file.
+    pub dirty: bool,
     /// Phase 11: the open Chart Builder, if any.
     pub chart_builder: Option<crate::chartbuilder::ChartBuilder>,
     /// Whether the dark theme is active.
@@ -75,6 +85,11 @@ impl Default for StatsCraftApp {
             show_syntax_window: false,
             dialog: None,
             missing_dialog: None,
+            value_labels_dialog: None,
+            pending_delete_variable: None,
+            close_prompt: false,
+            close_confirmed: false,
+            dirty: false,
             chart_builder: None,
             dark: false,
             recent_files: Vec::new(),
@@ -106,6 +121,7 @@ impl StatsCraftApp {
             Ok(t) => {
                 self.status = format!("Loaded {} rows x {} cols.", t.n_rows, t.columns.len());
                 self.table = Some(t);
+                self.dirty = false;
                 self.dataset_no += 1;
                 self.add_recent_file(p);
             }
@@ -145,6 +161,7 @@ impl StatsCraftApp {
         self.edit_buf.clear();
         self.dataset_no += 1;
         self.view = View::Data;
+        self.dirty = false;
         self.status =
             "New dataset. Switch to Variable View to create the first variable.".to_string();
     }
@@ -325,6 +342,18 @@ impl StatsCraftApp {
         self.status = "Table pivoted: the row and column dimensions were exchanged.".to_string();
     }
 
+    /// Add an empty numeric variable. This is the same operation as the
+    /// button in Variable View, exposed for the toolbar and the menus.
+    pub fn add_variable(&mut self) {
+        let table = self.table.get_or_insert_with(DataTable::default);
+        let idx = table.add_variable(crate::data::ColumnKind::Numeric);
+        self.dirty = true;
+        self.status = format!(
+            "Added {}. Edit its name, label and measure in Variable View.",
+            table.columns[idx].name
+        );
+    }
+
     /// Add a case at the end of the data, as StatsBench's "Add Cases" does.
     pub fn add_case(&mut self) {
         let Some(t) = self.table.as_mut() else {
@@ -332,6 +361,7 @@ impl StatsCraftApp {
             return;
         };
         let row = t.add_case();
+        self.dirty = true;
         self.sel_cell = Some((0, row));
         self.status = format!("Added case {}.", row + 1);
     }
@@ -347,11 +377,120 @@ impl StatsCraftApp {
             return;
         };
         if t.delete_case(row) {
+            self.dirty = true;
             self.status = format!("Deleted case {}.", row + 1);
             // The selection moves to the case that took its place.
             let last = t.n_rows.saturating_sub(1);
             self.sel_cell = Some((0, row.min(last)));
         }
+    }
+
+    /// Delete a variable after the confirmation has been accepted.
+    pub fn delete_variable(&mut self, idx: usize) {
+        let Some(table) = self.table.as_mut() else {
+            self.status = "No data loaded.".to_string();
+            return;
+        };
+        let name = table
+            .columns
+            .get(idx)
+            .map(|c| c.name.clone())
+            .unwrap_or_default();
+        if table.remove_variable(idx) {
+            self.dirty = true;
+            self.status = format!("Deleted variable {}.", name);
+            if self.sel_cell.is_some_and(|(col, _)| col >= idx) {
+                self.sel_cell = None;
+            }
+            if self.editing_cell.is_some_and(|(col, _)| col >= idx) {
+                self.editing_cell = None;
+            }
+        }
+    }
+
+    /// Ask for a path, save the data, and close the window when the write
+    /// succeeds.
+    fn save_and_close(&mut self, ctx: &egui::Context) {
+        let extension = std::path::Path::new(self.path_input.trim())
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase());
+        let path = if !self.path_input.trim().is_empty()
+            && matches!(extension.as_deref(), Some("csv") | Some("sav"))
+        {
+            Some(std::path::PathBuf::from(self.path_input.trim()))
+        } else {
+            rfd::FileDialog::new()
+                .add_filter("Data", &["csv", "sav"])
+                .set_file_name("statscraft_data.sav")
+                .save_file()
+        };
+        let Some(path) = path else {
+            // The save dialog was cancelled: stay open.
+            return;
+        };
+        match self.save_data_to(&path) {
+            Ok(()) => {
+                self.status = format!("Saved {}", path.display());
+                self.path_input = path.display().to_string();
+                self.close_confirmed = true;
+                self.close_prompt = false;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            Err(e) => {
+                self.status = format!("Save failed: {}", e);
+            }
+        }
+    }
+
+    /// The unsaved-changes prompt shown when the window is closed.
+    fn show_close_prompt(&mut self, ctx: &egui::Context) {
+        let label = self.dataset_label();
+        egui::Window::new("Unsaved changes")
+            .collapsible(false)
+            .resizable(false)
+            .default_width(420.0)
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .show(ctx, |ui| {
+                ui.label(
+                    egui::RichText::new(format!("Save changes to {}?", label))
+                        .font(crate::theme::semibold(15.0)),
+                );
+                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new(
+                        "The dataset has changes that have not been written to a file. Closing without saving discards them.",
+                    )
+                    .color(crate::theme::text_muted()),
+                );
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("Save…")
+                                    .font(crate::theme::medium(12.5))
+                                    .color(crate::theme::text_on_accent()),
+                            )
+                            .fill(crate::theme::accent())
+                            .rounding(crate::theme::RADIUS_SM)
+                            .min_size(egui::vec2(90.0, 28.0)),
+                        )
+                        .clicked()
+                    {
+                        self.save_and_close(ctx);
+                    }
+                    if ui.button("Don't Save").clicked() {
+                        self.dirty = false;
+                        self.close_confirmed = true;
+                        self.close_prompt = false;
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.close_prompt = false;
+                    }
+                });
+            });
     }
 
     /// Copy the selected cell to the clipboard.
@@ -397,6 +536,7 @@ impl StatsCraftApp {
             return;
         };
         let pasted = t.paste_text(col, row, &text);
+        self.dirty = true;
         self.status = format!("Pasted {} row(s).", pasted);
     }
 
@@ -410,6 +550,7 @@ impl StatsCraftApp {
             return;
         };
         if t.define_user_missing(col, discrete, range) {
+            self.dirty = true;
             let name = t.columns[col].name.clone();
             self.status = match range {
                 Some((lo, hi)) => {
@@ -422,13 +563,42 @@ impl StatsCraftApp {
         }
     }
 
+    /// Write the current data to a CSV or `.sav` file.
+    ///
+    /// The extension chooses the format. A successful write clears the
+    /// unsaved-changes flag; a failed one leaves it set.
+    pub fn save_data_to(&mut self, path: &std::path::Path) -> Result<(), String> {
+        let Some(t) = &self.table else {
+            return Err("No data loaded.".to_string());
+        };
+        let is_sav = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("sav"))
+            .unwrap_or(false);
+        if is_sav {
+            crate::data::write_sav(t, path)?;
+        } else {
+            let mut wtr = csv::Writer::from_path(path)
+                .map_err(|e| format!("save {}: {}", path.display(), e))?;
+            let headers: Vec<&str> = t.columns.iter().map(|c| c.name.as_str()).collect();
+            wtr.write_record(&headers)
+                .map_err(|e| format!("save {}: {}", path.display(), e))?;
+            for r in 0..t.n_rows {
+                let row: Vec<String> = (0..t.columns.len()).map(|ci| t.cell_text(ci, r)).collect();
+                wtr.write_record(&row)
+                    .map_err(|e| format!("save {}: {}", path.display(), e))?;
+            }
+            wtr.flush()
+                .map_err(|e| format!("save {}: {}", path.display(), e))?;
+        }
+        self.dirty = false;
+        Ok(())
+    }
+
     /// Save the data as a .sav file.
     pub fn save_data_sav(&mut self, path: &std::path::Path) {
-        let Some(t) = &self.table else {
-            self.status = "No data loaded.".to_string();
-            return;
-        };
-        match crate::data::write_sav(t, path) {
+        match self.save_data_to(path) {
             Ok(()) => {
                 self.status = format!("Saved {} as a .sav file.", path.display());
             }
@@ -608,24 +778,9 @@ impl StatsCraftApp {
     }
 
     pub fn export_data_csv_to(&mut self, path: &std::path::Path) {
-        if let Some(t) = &self.table {
-            let mut wtr = match csv::Writer::from_path(path) {
-                Ok(w) => w,
-                Err(e) => {
-                    self.status = format!("Export failed: {}", e);
-                    return;
-                }
-            };
-            let headers: Vec<&str> = t.columns.iter().map(|c| c.name.as_str()).collect();
-            let _ = wtr.write_record(&headers);
-            for r in 0..t.n_rows {
-                let row: Vec<String> = (0..t.columns.len()).map(|ci| t.cell_text(ci, r)).collect();
-                let _ = wtr.write_record(&row);
-            }
-            let _ = wtr.flush();
-            self.status = format!("Exported data to {}", path.display());
-        } else {
-            self.status = "No data loaded.".to_string();
+        match self.save_data_to(path) {
+            Ok(()) => self.status = format!("Exported data to {}", path.display()),
+            Err(e) => self.status = format!("Export failed: {}", e),
         }
     }
 
@@ -741,6 +896,16 @@ impl eframe::App for StatsCraftApp {
         // reply arrives on the next frame.
         self.handle_screenshot(ctx);
 
+        // A close request is held back while the dataset has unsaved
+        // edits. The prompt offers Save, Don't Save and Cancel.
+        if ctx.input(|i| i.viewport().close_requested())
+            && !self.close_confirmed
+            && self.dirty
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.close_prompt = true;
+        }
+
         // ---- Phase 4: real OS document windows (StatsBench multi-document UX) ----
         // The Output Viewer and Syntax editor live in their own viewports;
         // the Data Editor stays the main window, like StatsBench.
@@ -808,10 +973,17 @@ impl eframe::App for StatsCraftApp {
                             }
 
                             // StatsBench splits the Viewer into an outline tree on
-                            // the left and the result on the right.
-                            ui.columns(2, |cols| {
-                                cols[0].set_min_width(210.0);
-                                cols[0].group(|ui| {
+                            // the left and the result on the right. The outline
+                            // keeps a fixed width; the result takes the rest.
+                            let mut pivot_requested = false;
+                            let mut copy_table = false;
+                            let mut copy_chart = false;
+                            let mut chart_rect = None;
+                            egui::SidePanel::left("ov_outline")
+                                .resizable(false)
+                                .exact_width(236.0)
+                                .frame(egui::Frame::none())
+                                .show_inside(ui, |ui| {
                                     ui.add(
                                         egui::Label::new(
                                             egui::RichText::new("Outline")
@@ -821,6 +993,7 @@ impl eframe::App for StatsCraftApp {
                                     );
                                     ui.add_space(4.0);
                                     egui::ScrollArea::vertical()
+                                        .id_salt("output_outline")
                                         .auto_shrink([false, false])
                                         .show(ui, |ui| {
                                             for (i, t) in self.outputs.iter().enumerate() {
@@ -873,15 +1046,12 @@ impl eframe::App for StatsCraftApp {
                                             }
                                         });
                                 });
-                                // The actions are applied after the
-                                // borrow of the table ends.
-                                let mut pivot_requested = false;
-                                let mut copy_table = false;
-                                let mut copy_chart = false;
-                                let mut chart_rect = None;
-                                cols[1].group(|ui| {
+                                egui::CentralPanel::default()
+                                    .frame(egui::Frame::none())
+                                    .show_inside(ui, |ui| {
                                     let t = &self.outputs[self.selected_output.min(self.outputs.len() - 1)];
                                     egui::ScrollArea::vertical()
+                                        .id_salt("output_result")
                                         .auto_shrink([false, false])
                                         .show(ui, |ui| {
                                             ui.add_space(2.0);
@@ -963,7 +1133,6 @@ impl eframe::App for StatsCraftApp {
                                 if copy_chart {
                                     self.copy_selected_chart(vctx);
                                 }
-                            });
                         });
                     // closing the window hides it until re-opened from Window menu
                     if vctx.input(|i| i.viewport().close_requested()) {
@@ -1036,6 +1205,14 @@ impl eframe::App for StatsCraftApp {
                 self.dialog = None;
             } else {
                 self.dialog = Some(d);
+            }
+        }
+        // ---- The Value Labels dialog (Variable View > Values) ----
+        if self.value_labels_dialog.is_some() {
+            let mut dlg = self.value_labels_dialog.take().expect("dialog present");
+            crate::dialog::show_value_labels(ctx, self, &mut dlg);
+            if dlg.confirmed.is_none() && !dlg.cancelled {
+                self.value_labels_dialog = Some(dlg);
             }
         }
 
@@ -1230,8 +1407,10 @@ impl eframe::App for StatsCraftApp {
                         ui.separator();
                         if crate::icon::menu_item(ui, crate::theme::Icon::Save, "Save Data As…").clicked() {
                             ui.close_menu();
-                            if let Some(p) =
-                                rfd::FileDialog::new().add_filter("CSV", &["csv"]).save_file()
+                            if let Some(p) = rfd::FileDialog::new()
+                                .add_filter("Data", &["csv", "sav"])
+                                .set_file_name("statscraft_data.sav")
+                                .save_file()
                             {
                                 self.export_data_csv_to(&p);
                             }
@@ -1287,7 +1466,10 @@ impl eframe::App for StatsCraftApp {
                         ui.separator();
                         if ui.button("Exit").clicked() {
                             ui.close_menu();
-                            std::process::exit(0);
+                            // Route Exit through the same close request as
+                            // the window button, so unsaved edits still get
+                            // the Save / Don't Save / Cancel prompt.
+                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                         }
                     });
                     // ---------------- Edit ----------------
@@ -1388,7 +1570,13 @@ impl eframe::App for StatsCraftApp {
                         }
                         if crate::icon::menu_item(ui, crate::theme::Icon::ValueLabels, "Value Labels…").clicked() {
                             ui.close_menu();
-                            self.status = "Value Labels: not implemented yet.".to_string();
+                            if self.table.as_ref().is_some_and(|t| !t.columns.is_empty()) {
+                                self.value_labels_dialog = Some(
+                                    crate::dialog::ValueLabels::for_first_variable(self),
+                                );
+                            } else {
+                                self.status = "Add a variable before defining value labels.".to_string();
+                            }
                         }
                     });
                     // ---------------- Transform ----------------
@@ -1577,7 +1765,7 @@ impl eframe::App for StatsCraftApp {
                     )
                     .clicked()
                     {
-                        self.status = "Insert Variable: not implemented yet.".to_string();
+                        self.add_variable();
                     }
                     if crate::icon::icon_button(
                         ui,
@@ -1587,7 +1775,7 @@ impl eframe::App for StatsCraftApp {
                     )
                     .clicked()
                     {
-                        self.status = "Insert Cases: not implemented yet.".to_string();
+                        self.add_case();
                     }
                     if crate::icon::icon_button(
                         ui,
@@ -1597,7 +1785,12 @@ impl eframe::App for StatsCraftApp {
                     )
                     .clicked()
                     {
-                        self.status = "Value Labels: not implemented yet.".to_string();
+                        if self.table.as_ref().is_some_and(|t| !t.columns.is_empty()) {
+                            self.value_labels_dialog =
+                                Some(crate::dialog::ValueLabels::for_first_variable(self));
+                        } else {
+                            self.status = "Add a variable before defining value labels.".to_string();
+                        }
                     }
                     crate::icon::separator(ui);
                     if crate::icon::icon_button(
@@ -1806,6 +1999,7 @@ impl eframe::App for StatsCraftApp {
         egui::CentralPanel::default().show(ctx, |ui| {
         let mut add_variable = false;
         let mut delete_variable = None;
+        let mut edit_value_labels = None;
         match self.view {
             View::Data => {
                 let vis: Vec<usize> = match &self.table {
@@ -1826,13 +2020,29 @@ impl eframe::App for StatsCraftApp {
                     sel_cell,
                     editing_cell,
                     edit_buf,
+                    dirty,
                     ..
                 } = self;
-                data_grid(ui, table.as_mut(), &vis, sel_cell, editing_cell, edit_buf);
+                data_grid(
+                    ui,
+                    table.as_mut(),
+                    &vis,
+                    sel_cell,
+                    editing_cell,
+                    edit_buf,
+                    dirty,
+                );
             }
             View::Variables => {
                 if let Some(table) = &mut self.table {
-                    render_variables(ui, table, &mut add_variable, &mut delete_variable);
+                    render_variables(
+                        ui,
+                        table,
+                        &mut add_variable,
+                        &mut delete_variable,
+                        &mut edit_value_labels,
+                        &mut self.dirty,
+                    );
                 } else {
                     // A fresh session has no dataset yet. StatsBench lets the
                     // reader start from Variable View; an empty screen
@@ -1889,7 +2099,9 @@ impl eframe::App for StatsCraftApp {
                                     .strong()
                                     .color(egui::Color32::from_rgb(0x55, 0x55, 0x55)),
                             );
-                            egui::ScrollArea::vertical().show(ui, |ui| {
+                            egui::ScrollArea::vertical()
+                                .id_salt("inline_output_outline")
+                                .show(ui, |ui| {
                                 for (i, t) in self.outputs.iter().enumerate() {
                                     let label = format!("▤  {}", t.title);
                                     if ui
@@ -1904,6 +2116,7 @@ impl eframe::App for StatsCraftApp {
                         // right content: StatsBench pivot-table display
                         cols[1].group(|ui| {
                             egui::ScrollArea::vertical()
+                                .id_salt("inline_output_result")
                                 .auto_shrink([false, false])
                                 .show(ui, |ui| {
                                     ui.add_space(2.0);
@@ -2021,30 +2234,89 @@ impl eframe::App for StatsCraftApp {
         if add_variable {
             let table = self.table.get_or_insert_with(DataTable::default);
             let idx = table.add_variable(crate::data::ColumnKind::Numeric);
+            self.dirty = true;
             self.status = format!(
                 "Added {}. Edit its name, label and measure in Variable View.",
                 table.columns[idx].name
             );
         }
         if let Some(idx) = delete_variable {
-            if let Some(table) = self.table.as_mut() {
-                let name = table
-                    .columns
-                    .get(idx)
-                    .map(|c| c.name.clone())
-                    .unwrap_or_default();
-                if table.remove_variable(idx) {
-                    self.status = format!("Deleted variable {}.", name);
-                    if self.sel_cell.is_some_and(|(col, _)| col >= idx) {
-                        self.sel_cell = None;
-                    }
-                    if self.editing_cell.is_some_and(|(col, _)| col >= idx) {
-                        self.editing_cell = None;
-                    }
-                }
+            // Deletion is destructive: hold it until the user confirms.
+            self.pending_delete_variable = Some(idx);
+        }
+        if let Some(idx) = edit_value_labels {
+            let name = self
+                .table
+                .as_ref()
+                .and_then(|t| t.columns.get(idx))
+                .map(|c| c.name.clone());
+            if let Some(name) = name {
+                self.value_labels_dialog =
+                    Some(crate::dialog::ValueLabels::for_variable(self, &name));
             }
         }
         });
+
+        // ---- Delete Variable confirmation ----
+        if let Some(idx) = self.pending_delete_variable {
+            let name = self
+                .table
+                .as_ref()
+                .and_then(|t| t.columns.get(idx))
+                .map(|c| c.name.clone())
+                .unwrap_or_else(|| "this variable".to_string());
+            let mut confirm = false;
+            let mut cancel = false;
+            egui::Window::new("Delete Variable")
+                .collapsible(false)
+                .resizable(false)
+                .default_width(400.0)
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    ui.label(
+                        egui::RichText::new(format!("Delete '{}'?", name))
+                            .font(crate::theme::semibold(15.0)),
+                    );
+                    ui.add_space(6.0);
+                    ui.label(
+                        egui::RichText::new(
+                            "The variable and every value in its column will be removed. This cannot be undone.",
+                        )
+                        .color(crate::theme::text_muted()),
+                    );
+                    ui.add_space(12.0);
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new("Delete Variable")
+                                        .font(crate::theme::medium(12.5))
+                                        .color(egui::Color32::WHITE),
+                                )
+                                .fill(ui.visuals().error_fg_color)
+                                .rounding(crate::theme::RADIUS_SM)
+                                .min_size(egui::vec2(130.0, 30.0)),
+                            )
+                            .clicked()
+                        {
+                            confirm = true;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            cancel = true;
+                        }
+                    });
+                });
+            if confirm {
+                self.pending_delete_variable = None;
+                self.delete_variable(idx);
+            } else if cancel {
+                self.pending_delete_variable = None;
+            }
+        }
+
+        if self.close_prompt {
+            self.show_close_prompt(ctx);
+        }
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -2074,6 +2346,7 @@ fn data_grid(
     sel_cell: &mut Option<(usize, usize)>,
     editing_cell: &mut Option<(usize, usize)>,
     edit_buf: &mut String,
+    dirty: &mut bool,
 ) {
     use crate::theme;
 
@@ -2273,7 +2546,9 @@ fn data_grid(
                                 *editing_cell = None;
                             } else if enter || tresp.lost_focus() {
                                 if let Some(t) = table.as_deref_mut() {
-                                    commit_edit(t, eci, edi, edit_buf);
+                                    if commit_edit(t, eci, edi, edit_buf) {
+                                        *dirty = true;
+                                    }
                                 }
                                 *editing_cell = None;
                             }
@@ -2287,7 +2562,10 @@ fn data_grid(
                 if editing_cell.is_none() && ui.input(|i| i.key_pressed(egui::Key::Delete)) {
                     if let Some(t) = table.as_deref_mut() {
                         if di < t.n_rows && ci < t.columns.len() {
-                            t.columns[ci].values[di] = crate::data::Value::Missing;
+                            if t.columns[ci].values[di] != crate::data::Value::Missing {
+                                t.columns[ci].values[di] = crate::data::Value::Missing;
+                                *dirty = true;
+                            }
                         }
                     }
                 }
@@ -2301,9 +2579,9 @@ fn di_of_row(row: usize) -> usize {
 }
 
 /// StatsBench semantics: empty -> missing; unparseable numeric -> missing.
-fn commit_edit(table: &mut DataTable, ci: usize, di: usize, buf: &str) {
+fn commit_edit(table: &mut DataTable, ci: usize, di: usize, buf: &str) -> bool {
     if ci >= table.columns.len() || di >= table.n_rows {
-        return;
+        return false;
     }
     let raw = buf.trim().to_string();
     let v = if raw.is_empty() {
@@ -2317,7 +2595,11 @@ fn commit_edit(table: &mut DataTable, ci: usize, di: usize, buf: &str) {
             crate::data::ColumnKind::String => crate::data::Value::Text(raw),
         }
     };
+    if table.columns[ci].values[di] == v {
+        return false;
+    }
     table.columns[ci].values[di] = v;
+    true
 }
 
 /// One output object as an Office-friendly HTML table.
@@ -3290,9 +3572,10 @@ fn render_output_table(ui: &mut egui::Ui, t: &OutputTable) {
     // A wide table gets a horizontal scrollbar, so that a table with
     // many columns stays readable instead of running off the panel.
     egui::ScrollArea::horizontal()
+        .id_salt(("output_table_scroll", &t.title))
         .auto_shrink([false, false])
         .show(ui, |ui| {
-    egui::Grid::new(&t.title)
+    egui::Grid::new(("output_table", &t.title))
         .striped(false)
         .spacing([0.0, 0.0])
         .show(ui, |ui| {
@@ -3417,6 +3700,8 @@ fn render_variables(
     table: &mut DataTable,
     add_variable: &mut bool,
     delete_variable: &mut Option<usize>,
+    edit_value_labels: &mut Option<usize>,
+    dirty: &mut bool,
 ) {
     use crate::data::{Measure, VarAlign, ColumnKind};
     use crate::theme;
@@ -3500,6 +3785,9 @@ fn render_variables(
                     ui.end_row();
 
                     for (ci, c) in table.columns.iter_mut().enumerate() {
+                        let name_before = c.name.clone();
+                        let kind_before = c.kind;
+                        let meta_before = c.meta.clone();
                         // Name
                         block(ui, 110.0, cell_fill, &mut |inner: &mut egui::Ui| {
                             inner.add(
@@ -3554,10 +3842,24 @@ fn render_variables(
                         // Values (value labels)
                         block(ui, 88.0, cell_fill, &mut |inner: &mut egui::Ui| {
                             let n = c.meta.value_labels.len() + c.meta.text_value_labels.len();
-                            let txt = if n == 0 { "None".to_string() } else { format!("Defined ({})", n) };
-                            inner.label(
-                                egui::RichText::new(txt).size(12.0),
+                            let (txt, colour) = if n == 0 {
+                                ("None…".to_string(), theme::text_muted())
+                            } else {
+                                (format!("Defined ({})…", n), theme::accent())
+                            };
+                            let resp = inner.add(
+                                egui::Button::new(
+                                    egui::RichText::new(txt).size(12.0).color(colour),
+                                )
+                                .frame(false)
+                                .min_size(egui::vec2(76.0, 18.0)),
                             );
+                            if resp
+                                .on_hover_text("Define or edit the labels shown for this variable's values.")
+                                .clicked()
+                            {
+                                *edit_value_labels = Some(ci);
+                            }
                         });
                         // Missing
                         block(ui, 88.0, cell_fill, &mut |inner: &mut egui::Ui| {
@@ -3621,25 +3923,23 @@ fn render_variables(
                         block(ui, 70.0, cell_fill, &mut |inner: &mut egui::Ui| {
                             inner.label(egui::RichText::new("Input").size(12.0));
                         });
-                        // Delete
-                        block(ui, 66.0, cell_fill, &mut |inner: &mut egui::Ui| {
+                        // Delete (icon button; the confirmation follows)
+                        block(ui, 44.0, cell_fill, &mut |inner: &mut egui::Ui| {
                             let colour = inner.visuals().error_fg_color;
-                            if inner
-                                .add(
-                                    egui::Button::new(
-                                        egui::RichText::new("Delete")
-                                            .font(theme::medium(11.0))
-                                            .color(colour),
-                                    )
-                                    .frame(false)
-                                    .min_size(egui::vec2(54.0, 18.0)),
-                                )
-                                .on_hover_text("Delete this variable and all of its values.")
-                                .clicked()
+                            if crate::icon::small_icon_button(
+                                inner,
+                                theme::Icon::DeleteVariable,
+                                "Delete this variable…",
+                                colour,
+                            )
+                            .clicked()
                             {
                                 *delete_variable = Some(ci);
                             }
                         });
+                        if c.name != name_before || c.kind != kind_before || c.meta != meta_before {
+                            *dirty = true;
+                        }
                         ui.end_row();
                     }
                 });

@@ -141,6 +141,7 @@ fn execute_line(app: &mut StatsCraftApp, line: &str) {
             app.table = None;
             app.sel_cell = None;
             app.editing_cell = None;
+            app.dirty = false;
             app.status = "Dataset cleared.".to_string();
         }
         "DESCRIPTIVES" | "DESCRIPTIVE" => {
@@ -968,6 +969,7 @@ fn execute_line(app: &mut StatsCraftApp, line: &str) {
             };
             match stats::compute_variable(t, &name, &expression) {
                 Ok(n) => {
+                    app.dirty = true;
                     app.status = format!("COMPUTE created the variable {}.", n);
                 }
                 Err(e) => {
@@ -999,6 +1001,7 @@ fn execute_line(app: &mut StatsCraftApp, line: &str) {
                 match t.column_index(&name) {
                     Some(ci) => {
                         t.sort_rows(ci, asc);
+                        app.dirty = true;
                         app.status = format!(
                             "SORT CASES BY {} ({}) executed.",
                             name,

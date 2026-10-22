@@ -425,6 +425,7 @@ pub mod icons {
         means => "means",
         explore => "explore",
         delete_case => "delete_case",
+        delete_variable => "delete_variable",
     );
 }
 
@@ -471,8 +472,10 @@ pub enum Icon {
     Means,
     /// The explore procedure.
     Explore,
-    /// A row with a cross through it — deleting a case.
+    /// A row with a cross through it - deleting a case.
     DeleteCase,
+    /// A waste bin - deleting a variable.
+    DeleteVariable,
 }
 
 impl Icon {
@@ -514,6 +517,7 @@ impl Icon {
             Icon::Means => icons::means,
             Icon::Explore => icons::explore,
             Icon::DeleteCase => icons::delete_case,
+            Icon::DeleteVariable => icons::delete_variable,
         }
     }
 
@@ -555,6 +559,7 @@ impl Icon {
             Icon::Means => "Means",
             Icon::Explore => "Explore",
             Icon::DeleteCase => "Delete Cases",
+            Icon::DeleteVariable => "Delete Variable",
         }
     }
 }

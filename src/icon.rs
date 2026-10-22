@@ -168,6 +168,37 @@ pub fn paint_icon(
     }
 }
 
+/// A small icon-only button, used in dense grids and table rows.
+///
+/// The icon is tinted with `colour`, a hover wash uses the same colour at
+/// low alpha, and the tooltip carries the full description.
+pub fn small_icon_button(
+    ui: &mut egui::Ui,
+    icon: Icon,
+    tip: &str,
+    colour: egui::Color32,
+) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::click());
+    let p = ui.painter();
+    if resp.hovered() {
+        p.rect_filled(rect, theme::RADIUS_SM, colour.gamma_multiply(0.14));
+    }
+    let tint = if resp.hovered() {
+        colour
+    } else {
+        colour.gamma_multiply(0.85)
+    };
+    let ctx = ui.ctx().clone();
+    paint_icon(
+        p,
+        &ctx,
+        icon,
+        egui::Rect::from_center_size(rect.center(), egui::vec2(15.0, 15.0)),
+        tint,
+    );
+    resp.on_hover_text(tip)
+}
+
 /// A menu entry with a leading icon, used across the menu bar.
 pub fn menu_item(ui: &mut egui::Ui, icon: Icon, label: &str) -> egui::Response {
     let ctx = ui.ctx().clone();

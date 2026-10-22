@@ -1564,3 +1564,265 @@ pub fn render_missing(ui: &mut egui::Ui, app: &mut StatsCraftApp, mv: &mut Missi
         }
     });
 }
+
+// ---------------------------------------------------------------------------
+// The Value Labels dialog
+//
+// Like Missing Values, this edits a variable's properties rather than
+// running a procedure. It is opened from the "Values" cell in Variable
+// View, from Data > Value Labels, and it writes the labels back to the
+// variable's metadata, which the .sav writer preserves.
+// ---------------------------------------------------------------------------
+
+/// The state of the "Value Labels" dialog.
+#[derive(Debug, Clone, Default)]
+pub struct ValueLabels {
+    /// The variable the labels are for.
+    pub variable: Option<String>,
+    /// One row per label: the value as typed, and the label shown for it.
+    pub rows: Vec<(String, String)>,
+    /// A validation message, shown under the grid.
+    pub error: Option<String>,
+    /// Set when the user pressed Cancel.
+    pub cancelled: bool,
+    /// Set when the labels were applied, so the caller can drop the dialog.
+    pub confirmed: Option<String>,
+}
+
+impl ValueLabels {
+    /// Open the dialog on one variable, with its current labels loaded.
+    pub fn for_variable(app: &StatsCraftApp, variable: &str) -> Self {
+        let mut dlg = Self {
+            variable: Some(variable.to_string()),
+            ..Self::default()
+        };
+        dlg.reload(app);
+        dlg
+    }
+
+    /// Open the dialog on the first variable in the dataset.
+    pub fn for_first_variable(app: &StatsCraftApp) -> Self {
+        let name = app
+            .table
+            .as_ref()
+            .and_then(|t| t.columns.first())
+            .map(|c| c.name.clone())
+            .unwrap_or_default();
+        Self::for_variable(app, &name)
+    }
+
+    /// Replace the rows with the variable's current labels.
+    pub fn reload(&mut self, app: &StatsCraftApp) {
+        self.rows.clear();
+        self.error = None;
+        let Some(name) = self.variable.as_deref() else {
+            return;
+        };
+        let Some(table) = app.table.as_ref() else {
+            return;
+        };
+        let Some(c) = table
+            .columns
+            .iter()
+            .find(|c| c.name.eq_ignore_ascii_case(name))
+        else {
+            return;
+        };
+        for (value, label) in &c.meta.value_labels {
+            self.rows.push((format!("{}", value), label.clone()));
+        }
+        for (value, label) in &c.meta.text_value_labels {
+            self.rows.push((value.clone(), label.clone()));
+        }
+        if self.rows.is_empty() {
+            self.rows.push((String::new(), String::new()));
+        }
+    }
+}
+
+/// Draw the "Value Labels" dialog.
+pub fn show_value_labels(ctx: &egui::Context, app: &mut StatsCraftApp, dlg: &mut ValueLabels) {
+    let mut open = true;
+    egui::Window::new("Value Labels - StatsCraft")
+        .open(&mut open)
+        .resizable(false)
+        .default_width(480.0)
+        .default_pos(egui::pos2(400.0, 170.0))
+        .show(ctx, |ui| {
+            render_value_labels(ui, app, dlg);
+        });
+    if !open {
+        dlg.cancelled = true;
+    }
+}
+
+/// The body of the "Value Labels" dialog, split out so a test can drive it
+/// without a window.
+pub fn render_value_labels(ui: &mut egui::Ui, app: &mut StatsCraftApp, dlg: &mut ValueLabels) {
+    let names: Vec<String> = app
+        .table
+        .as_ref()
+        .map(|t| t.columns.iter().map(|c| c.name.clone()).collect())
+        .unwrap_or_default();
+
+    if names.is_empty() {
+        ui.label(
+            egui::RichText::new("No variables in the data.")
+                .color(theme::text_muted()),
+        );
+        ui.add_space(8.0);
+        if ui.button("Close").clicked() {
+            dlg.cancelled = true;
+        }
+        return;
+    }
+
+    // The variable. Switching it reloads that variable's labels.
+    ui.label(egui::RichText::new("Variable:").strong());
+    let current = dlg
+        .variable
+        .clone()
+        .filter(|n| names.iter().any(|x| x.eq_ignore_ascii_case(n)))
+        .unwrap_or_else(|| names[0].clone());
+    dlg.variable = Some(current.clone());
+    let mut chosen = current;
+    egui::ComboBox::from_id_salt("value_labels_var")
+        .selected_text(chosen.clone())
+        .width(240.0)
+        .show_ui(ui, |ui| {
+            for name in &names {
+                if ui
+                    .selectable_label(name.eq_ignore_ascii_case(&chosen), name)
+                    .clicked()
+                {
+                    chosen = name.clone();
+                }
+            }
+        });
+    if dlg.variable.as_deref() != Some(chosen.as_str()) {
+        dlg.variable = Some(chosen);
+        dlg.reload(app);
+    }
+    ui.add_space(8.0);
+
+    let numeric = app
+        .table
+        .as_ref()
+        .and_then(|t| {
+            t.columns
+                .iter()
+                .find(|c| dlg.variable.as_deref().is_some_and(|n| c.name.eq_ignore_ascii_case(n)))
+        })
+        .map(|c| c.kind == ColumnKind::Numeric)
+        .unwrap_or(false);
+    ui.label(
+        egui::RichText::new(if numeric {
+            "Each row maps a numeric value to the label shown for it."
+        } else {
+            "Each row maps a text value to the label shown for it."
+        })
+        .color(theme::text_faint())
+        .size(11.5),
+    );
+    ui.add_space(6.0);
+
+    let mut remove_row = None;
+    let danger = ui.visuals().error_fg_color;
+    ui.horizontal(|ui| {
+        ui.add_sized(
+            [100.0, 18.0],
+            egui::Label::new(egui::RichText::new("Value").strong()),
+        );
+        ui.add_sized(
+            [240.0, 18.0],
+            egui::Label::new(egui::RichText::new("Label").strong()),
+        );
+    });
+    egui::ScrollArea::vertical()
+        .max_height(250.0)
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            for (i, (value, label)) in dlg.rows.iter_mut().enumerate() {
+                ui.push_id(("value_label_row", i), |ui| {
+                    ui.horizontal(|ui| {
+                        ui.add_sized(
+                            [100.0, 22.0],
+                            egui::TextEdit::singleline(value)
+                                .hint_text(if numeric { "1" } else { "text" }),
+                        );
+                        ui.add_sized(
+                            [240.0, 22.0],
+                            egui::TextEdit::singleline(label).hint_text("Label shown in output"),
+                        );
+                        if crate::icon::small_icon_button(
+                            ui,
+                            theme::Icon::DeleteVariable,
+                            "Remove this value label",
+                            danger,
+                        )
+                        .clicked()
+                        {
+                            remove_row = Some(i);
+                        }
+                    });
+                });
+            }
+        });
+    if let Some(i) = remove_row {
+        dlg.rows.remove(i);
+    }
+
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        if ui.button("+ Add Label").clicked() {
+            dlg.rows.push((String::new(), String::new()));
+        }
+        if ui.button("Reset").clicked() {
+            dlg.reload(app);
+        }
+    });
+
+    if let Some(error) = &dlg.error {
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new(error)
+                .color(ui.visuals().error_fg_color)
+                .size(11.5),
+        );
+    }
+
+    ui.add_space(10.0);
+    ui.horizontal(|ui| {
+        if ui.button("OK").clicked() {
+            let Some(name) = dlg.variable.clone() else {
+                dlg.error = Some("Choose a variable.".to_string());
+                return;
+            };
+            let col = app.table.as_ref().and_then(|t| t.column_index(&name));
+            let Some(col) = col else {
+                dlg.error = Some("That variable no longer exists.".to_string());
+                return;
+            };
+            let result = app
+                .table
+                .as_mut()
+                .map(|t| t.set_value_labels(col, &dlg.rows))
+                .unwrap_or_else(|| Err("No data loaded.".to_string()));
+            match result {
+                Ok(n) => {
+                    app.dirty = true;
+                    app.status = if n == 0 {
+                        format!("{}: value labels cleared.", name)
+                    } else {
+                        format!("{}: {} value label(s) defined.", name, n)
+                    };
+                    dlg.confirmed = Some(name);
+                }
+                Err(e) => dlg.error = Some(e),
+            }
+        }
+        if ui.button("Cancel").clicked() {
+            dlg.cancelled = true;
+        }
+    });
+}
