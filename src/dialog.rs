@@ -1,7 +1,7 @@
-//! Procedure dialogs — the SPSS workflow of *choose variables, choose
+//! Procedure dialogs — the StatsBench workflow of *choose variables, choose
 //! options, then generate syntax and run it*.
 //!
-//! IBM SPSS Statistics does not run a procedure straight from the Analyze
+//! StatsBench does not run a procedure straight from the Analyze
 //! menu. It opens a dialog window with:
 //!
 //! * a **source variable list** on the left, each row carrying a
@@ -15,13 +15,13 @@
 //! * a button row of `OK`, `Paste`, `Reset`, `Cancel`, `Help` where **OK
 //!   stays disabled until at least one variable is chosen**.
 //!
-//! This module reproduces that structure. Each dialog *builds SPSS syntax*
+//! This module reproduces that structure. Each dialog *builds command syntax*
 //! and hands it to the existing runner, so the dialog -> syntax -> output
-//! pipeline works exactly as SPSS does it, including `Paste`, which puts
-//! the generated syntax into the Syntax Editor without running it.
+//! pipeline works exactly as the classic workbench does it, including `Paste`,
+//! which puts the generated syntax into the Syntax Editor without running it.
 //!
-//! The geometry and wording were taken from the installed IBM SPSS
-//! Statistics 27; see `docs/SPSS_REFERENCE.md`.
+//! The geometry and wording were taken from the reference workbench (version
+//! 27); see `docs/REFERENCE.md`.
 
 use crate::app::StatsCraftApp;
 use crate::data::ColumnKind;
@@ -52,7 +52,7 @@ pub enum Procedure {
 }
 
 impl Procedure {
-    /// The window title, matching SPSS's dialog captions.
+    /// The window title, matching StatsBench's dialog captions.
     pub fn title(self) -> &'static str {
         match self {
             Procedure::Frequencies => "Frequencies",
@@ -124,7 +124,7 @@ impl Procedure {
     }
 }
 
-/// Which sub-dialog is currently open, if any. SPSS opens these as
+/// Which sub-dialog is currently open, if any. StatsBench opens these as
 /// separate windows stacked on the parent dialog.
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum SubDialog {
@@ -149,10 +149,10 @@ pub enum SubDialog {
 
 /// The statistic choices offered by the `Statistics…` sub-dialog, keyed by
 /// a stable id. The set mirrors the `STATISTICS` subcommand of the
-/// corresponding IBM SPSS command.
+/// corresponding StatsBench command.
 #[derive(Clone)]
 pub struct StatOptions {
-    /// Which statistics are ticked. Empty means "the SPSS default set".
+    /// Which statistics are ticked. Empty means "the StatsBench default set".
     pub selected: Vec<&'static str>,
     /// For Frequencies: show a bar chart / histogram in the Viewer.
     pub show_charts: bool,
@@ -181,7 +181,7 @@ impl Default for StatOptions {
         Self {
             selected: Vec::new(),
             show_charts: false,
-            // SPSS shows the frequency table by default.
+            // StatsBench shows the frequency table by default.
             display_tables: true,
             save_standardised: false,
             cell_counts: Vec::new(),
@@ -190,7 +190,7 @@ impl Default for StatOptions {
             effect_sizes: false,
             significance_stars: false,
             pairwise_delete: false,
-            // SPSS uses Type III by default.
+            // StatsBench uses Type III by default.
             ss_type: Some(3),
         }
     }
@@ -252,7 +252,7 @@ impl DialogState {
         }
     }
 
-    /// SPSS disables OK until the dialog has everything it needs.
+    /// StatsBench disables OK until the dialog has everything it needs.
     pub fn ok_enabled(&self) -> bool {
         match self.procedure {
             // The paired and Friedman tests compare several variables.
@@ -265,7 +265,7 @@ impl DialogState {
         }
     }
 
-    /// Build the SPSS syntax for the current state, or `None` if the
+    /// Build the StatsBench syntax for the current state, or `None` if the
     /// dialog is not yet complete.
     pub fn build_syntax(&self) -> Option<String> {
         if self.targets.is_empty() {
@@ -455,7 +455,7 @@ impl DialogState {
     }
 }
 
-/// The statistics each procedure offers, in the order SPSS lists them.
+/// The statistics each procedure offers, in the order StatsBench lists them.
 pub fn statistics_choices(procedure: Procedure) -> &'static [(&'static str, &'static str)] {
     match procedure {
         Procedure::Frequencies | Procedure::Descriptives => &[
@@ -494,7 +494,7 @@ pub fn statistics_choices(procedure: Procedure) -> &'static [(&'static str, &'st
     }
 }
 
-/// The post-hoc tests ANOVA offers, in SPSS's order.
+/// The post-hoc tests ANOVA offers, in StatsBench's order.
 pub const POSTHOC_CHOICES: &[(&str, &str)] = &[
     ("SCHEFFE", "Scheffe"),
     ("TUKEY", "Tukey"),
@@ -604,7 +604,7 @@ pub fn render(
                 d.selected_source = Some(sel);
             }
             // Double-clicking a source variable moves it across, the way
-            // SPSS's variable lists do.
+            // StatsBench's variable lists do.
             if let Some(sel) = list.take_activated() {
                 if !d.targets.iter().any(|t| *t == sel) {
                     d.targets.push(sel);
@@ -723,7 +723,7 @@ pub fn render(
             if let Some(name) = payload {
                 dropped_target = Some((*name).clone());
             }
-            // Clicking or double-clicking a target removes it (SPSS's
+            // Clicking or double-clicking a target removes it (StatsBench's
             // behaviour).
             if let Some(sel) = picked_target.or(activated_target) {
                 d.targets.retain(|t| *t != sel);
@@ -741,7 +741,7 @@ pub fn render(
             ui.separator();
             ui.add_space(6.0);
 
-            // ---- Sub-dialog buttons (right-hand column, as in SPSS) ----
+            // ---- Sub-dialog buttons (right-hand column, as in StatsBench) ----
             ui.horizontal_wrapped(|ui| {
                 match d.procedure {
                     Procedure::Frequencies => {
@@ -900,7 +900,7 @@ pub fn render(
             .clicked()
         {
             app.status = format!(
-                "{}: see docs/SPSS_REFERENCE.md for the full command grammar.",
+                "{}: see docs/REFERENCE.md for the full command grammar.",
                 d.procedure.title()
             );
         }
@@ -1140,7 +1140,7 @@ fn render_sub_dialog(ui: &mut egui::Ui, d: &mut DialogState) {
                         egui::RichText::new("The type of the sums of squares:").size(11.5),
                     );
                     ui.add_space(3.0);
-                    // The three radio buttons SPSS offers.
+                    // The three radio buttons StatsBench offers.
                     for (n, label, help) in [
                         (1u8, "Type I", "Sequential: each factor is tested after the ones before it."),
                         (2u8, "Type II", "Each factor is tested after the others, except the interactions that contain it."),
@@ -1243,7 +1243,7 @@ impl<'a> UiList<'a> {
 ///
 /// The interaction rect is the whole row, not just the text, so a click
 /// anywhere across the list selects the variable. This is the hit area
-/// SPSS gives its variable lists.
+/// StatsBench gives its variable lists.
 fn variable_row(
     ui: &mut egui::Ui,
     name: &str,
@@ -1272,7 +1272,7 @@ fn variable_row(
     } else if resp.hovered() {
         p.rect_filled(rect, theme::RADIUS_SM, theme::surface_alt());
     }
-    // The measure-level icon SPSS puts beside each variable: a ruler for
+    // The measure-level icon StatsBench puts beside each variable: a ruler for
     // numeric/scale, a pencil for string/nominal.
     let icon = if kind == ColumnKind::Numeric {
         Icon::MeasureScale
@@ -1312,7 +1312,7 @@ mod tests {
     }
 
     #[test]
-    fn a_grouping_variable_is_required_where_spss_needs_one() {
+    fn a_grouping_variable_is_required_where_needed() {
         let mut s = d(Procedure::TTest);
         s.targets.push("score".into());
         assert!(!s.ok_enabled(), "t-test needs a grouping variable");
@@ -1321,7 +1321,7 @@ mod tests {
     }
 
     #[test]
-    fn frequencies_builds_the_expected_spss_syntax() {
+    fn frequencies_builds_the_expected_syntax() {
         let mut s = d(Procedure::Frequencies);
         s.targets.push("region".into());
         s.targets.push("group".into());
@@ -1451,7 +1451,7 @@ impl MissingValues {
 
 /// Draw the "Missing Values" dialog.
 ///
-/// The window is the same shape as SPSS's: the variable, the two ways
+/// The window is the same shape as StatsBench's: the variable, the two ways
 /// of declaring the values, and the action row.
 pub fn show_missing(ctx: &egui::Context, app: &mut StatsCraftApp, mv: &mut MissingValues) {
     let mut open = true;
@@ -1461,7 +1461,7 @@ pub fn show_missing(ctx: &egui::Context, app: &mut StatsCraftApp, mv: &mut Missi
         .resizable(false)
         .default_width(440.0)
         .default_height(330.0)
-        // The window opens clear of the menu bar, the way SPSS's
+        // The window opens clear of the menu bar, the way StatsBench's
         // dialogs do.
         .default_pos(egui::pos2(420.0, 190.0))
         .show(ctx, |ui| {

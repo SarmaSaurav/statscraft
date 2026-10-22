@@ -1,6 +1,6 @@
 //! StatsCraft visual theme: palette, typography, spacing and the icon set.
 //!
-//! The old UI was SPSS-grey: 1990s flat greys, the system UI font, and
+//! The old UI was StatsBench-grey: 1990s flat greys, the system UI font, and
 //! hand-painted pictograms. This module is the single place where the modern
 //! look lives, so the rest of the app only refers to named colours.
 
@@ -459,9 +459,9 @@ pub enum Icon {
     Refresh,
     Settings,
     Check,
-    /// A ruler — SPSS's measure-level icon for a numeric/scale variable.
+    /// A ruler — StatsBench's measure-level icon for a numeric/scale variable.
     MeasureScale,
-    /// A pencil — SPSS's measure-level icon for a string/nominal variable.
+    /// A pencil — StatsBench's measure-level icon for a string/nominal variable.
     MeasureNominal,
     /// A data grid — the Data View tab.
     DataView,

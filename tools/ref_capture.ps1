@@ -1,7 +1,7 @@
-# Capture a set of IBM SPSS Statistics 27 reference surfaces.
+# Capture a set of StatsBench 27 reference surfaces.
 # Each entry: menu path (menu X, submenu row Y, leaf Z) and a label.
 param(
-  [string]$OutDir = 'C:/Users/Saurav/AppData/Local/Temp/spss_ref',
+  [string]$OutDir = 'C:/Users/Saurav/AppData/Local/Temp/ref_shots',
   [string]$Only = ''
 )
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
@@ -42,7 +42,7 @@ public class R2 {
   }
 }
 '@
-# Measured geometry (SPSS 27 window sits at -8,-8):
+# Measured geometry (StatsBench 27 window sits at -8,-8):
 #   Analyze menu      -> (285, 38)
 #   menu item rows   -> y = 63, 89, 115, 141, 167, 193 (26px apart)
 #   Descriptive Statistics submenu leaf 'Frequencies' -> (572, 118)
@@ -78,7 +78,7 @@ foreach ($s in $SHOTS) {
     $bmp = New-Object System.Drawing.Bitmap $dlg.Wd, $dlg.Ht
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     $g.CopyFromScreen($dlg.L, $dlg.TP, 0, 0, $bmp.Size)
-    $bmp.Save("C:\Users\Saurav\AppData\Local\Temp\spss_ref\dlg_$($s.Name).png", [System.Drawing.Imaging.ImageFormat]::Png)
+    $bmp.Save("C:\Users\Saurav\AppData\Local\Temp\ref_shots\dlg_$($s.Name).png", [System.Drawing.Imaging.ImageFormat]::Png)
     $g.Dispose(); $bmp.Dispose()
     Write-Output ("SAVED dlg_$($s.Name).png | $($dlg.T2) $($dlg.Wd)x$($dlg.Ht)")
   } else {

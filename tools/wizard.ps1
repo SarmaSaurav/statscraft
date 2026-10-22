@@ -1,4 +1,4 @@
-# Walk the SPSS Text Import Wizard to the end, loading the CSV with a header row.
+# Walk the StatsBench Text Import Wizard to the end, loading the CSV with a header row.
 # The wizard is at a known screen position; coordinates are computed from the
 # captured geometry so they survive small layout differences.
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
@@ -44,7 +44,7 @@ function Shot([string]$t) {
   $bmp = New-Object System.Drawing.Bitmap $vs.Width, $vs.Height
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   $g.CopyFromScreen($vs.X, $vs.Y, 0, 0, $bmp.Size)
-  $bmp.Save("C:\Users\Saurav\AppData\Local\Temp\spss_ref\w_$t.png", [System.Drawing.Imaging.ImageFormat]::Png)
+  $bmp.Save("C:\Users\Saurav\AppData\Local\Temp\ref_shots\w_$t.png", [System.Drawing.Imaging.ImageFormat]::Png)
   $g.Dispose(); $bmp.Dispose()
 }
 $p = Get-Process stats -EA SilentlyContinue | Select-Object -First 1

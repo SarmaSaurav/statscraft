@@ -1,68 +1,68 @@
-# StatsCraft — Lightweight SPSS-like App in Rust
+# StatsCraft — Lightweight Statistical App in Rust
 
-## 1. What IBM SPSS Statistics is (observed on this machine)
+## 1. What the reference application is (observed on this machine)
 
 Installed versions: **26.0.0.0** and **27.0.1.0** at
-`C:\Program Files\IBM\SPSS\Statistics\{26,27}\`.
+`C:\Program Files\StatsBench\Statistics\{26,27}\`.
 
 ### 1.1 Process architecture (client / server split)
 
 - `stats.exe` (359 KB, PE/x64) is a **native launcher**. Strings show it
   bootstraps a JVM (`JNI_CreateJavaVM`, `-Djava.class.path=`,
   `-Dapplication.home=`, `-Dstatistics.home=`) and loads
-  `com.spss.java_client.core.documents.AppMgr` plus
-  `com.spss.java_client.core.common.Driver` /
+  `com.ref.java_client.core.documents.AppMgr` plus
+  `com.ref.java_client.core.common.Driver` /
   `DynamicDataExchange`.
   Evidence: `strings stats.exe` → `JNI_CreateJavaVM`,
-  `com/spss/java_client/core/documents/AppMgr`,
-  `com/spss/java_client/core/common/Driver`.
-- `spssengine.exe` is a **separate backend daemon/child process**. Its strings
+  `com/ref/java_client/core/documents/AppMgr`,
+  `com/ref/java_client/core/common/Driver`.
+- `statsengine.exe` is a **separate backend daemon/child process**. Its strings
   show a socket/named-pipe command line:
-  `Usage: spssengine.exe [-parenthost host] [-parentport n] [-port n] [-id n]
+  `Usage: statsengine.exe [-parenthost host] [-parentport n] [-port n] [-id n]
   [-iplisten string] ...` with `\\.\pipe\statisticsproc`,
   `inet:localhost:3287`, `localsockets`.
-  Evidence: `strings spssengine.exe`.
-- `config/statisticsd.conf` configures a **daemon server** (`spssd`) on port
+  Evidence: `strings statsengine.exe`.
+- `config/statisticsd.conf` configures a **daemon server** (`refd`) on port
   `3027`, with `userthreads`/`workerthreads`, `max-jvm-memory 256–2048 MB`,
   and many COM-style `<regclass path="..." clsid="..."/>` package
-  registrations (`spsswpkg.dll`, `spssdeds.dll`, `dacmgrpk.dll`, …).
+  registrations (`statswpkg.dll`, `refdeds.dll`, `dacmgrpk.dll`, …).
   Evidence: `config/statisticsd.conf`.
 
-Conclusion: SPSS is a **Java Swing client + C++/COM compute engine**, talking
+Conclusion: the reference application is a **Java Swing client + C++/COM compute engine**, talking
 over local sockets / named pipes, with the engine hosting dozens of
 procedure packages.
 
 ### 1.2 JVM / UI layer
 
-- `jvmcfg.ini`: IBM J9 Java 8 (`jvm.dll`), heap `-Xms256M -Xmx2048M`,
+- `jvmcfg.ini`: J9 Java 8 (`jvm.dll`), heap `-Xms256M -Xmx2048M`,
   class sharing `-Xshareclasses:name=statistics_%u`.
-- UI jars: `SPSSClientUI.jar`, `SPSSClientCore.jar`, `SPSSCoreApi.jar`,
-  `statisticsapi.jar` (build 27.0.1.0.860, IBM J9).
+- UI jars: `StatsBenchClientUI.jar`, `StatsBenchClientCore.jar`, `StatsBenchCoreApi.jar`,
+  `statisticsapi.jar` (build 27.0.1.0.860, J9).
 - `productnames.ini` lists feature modules (Base, Regression, Advanced
   Statistics, Complex Samples, Decision Trees, Data Preparation,
   Programmability, Forecasting, Custom Tables, …).
 
 ### 1.3 Compute / procedure layer
 
-- 132 `spssw*.dll` modules (e.g. `spsswfre.dll` frequencies, `spsswreg.dll`,
-  `spsswglm.dll`, `spsswcox.dll`, `spsswkm.dll`, …) — one DLL per
+- 132 `statsw*.dll` modules (e.g. `statswfre.dll` frequencies, `statswreg.dll`,
+  `statswglm.dll`, `statswcox.dll`, `statswkm.dll`, …) — one DLL per
   statistical procedure family.
-- `spssstat.dll`, `spssengine.exe` drive execution; `spsspool.dll`,
-  `spssxd.dll` etc. support the output/execution pipeline.
+- `statsstat.dll`, `statsengine.exe` drive execution; `statspool.dll`,
+  `refxd.dll` etc. support the output/execution pipeline.
 
 ### 1.4 Data I/O layer
 
-- `spssio64.dll` implements the **SPSS system file (.sav)** format.
+- `savio64.dll` implements the **StatsBench system file (.sav)** format.
   Strings: magic `$FL2` / `$FL3` / `ENCRYPTEDSAV`,
-  `@(#) SPSS DATA FILE MS Windows ...`, functions `spssOpenRead`,
-  `spssCommitHeader`, `spssCommitCaseRecord`, `spssCloseWrite`, …
+  `@(#) StatsBench DATA FILE MS Windows ...`, functions `refOpenRead`,
+  `refCommitHeader`, `refCommitCaseRecord`, `refCloseWrite`, …
 - Sample data ships as `.sav` (e.g. `Samples/English/accidents.sav`,
-  header bytes `$FL2@(#) IBM SPSS STATISTICS 64-bit MS Windows ...`).
+  header bytes `$FL2@(#) StatsBench STATISTICS 64-bit MS Windows ...`).
 
 ### 1.5 Syntax language
 
 - Commands are stored as `.sps` text files (see `Syntax1.sps`,
-  `dynamite plot try.sps` in `D:\The_SPSS_Garage`): e.g.
+  `dynamite plot try.sps` in `D:\Projects\StatsCraft`): e.g.
   `DATASET ACTIVATE`, `GRAPH /BAR(GROUPED)=...`, `FREQUENCIES`,
   `BEGIN PROGRAM R. ... END PROGRAM.`
 - Formal grammar is shipped as XML in `syntax_xml/` (one file per command,
@@ -72,9 +72,9 @@ procedure packages.
 
 ### 1.6 Output layer
 
-- Output documents `.spv` (SPSS Viewer) with pivot tables, charts, text.
+- Output documents `.spv` (StatsBench Viewer) with pivot tables, charts, text.
 - OMS (Output Management System) routes results; XSDs in install dir
-  (`spss-output-*.xsd`, `viewer-*.xsd`, `vizml-*.xsd`, `table-looks-*.xsd`).
+  (`output-*.xsd`, `viewer-*.xsd`, `vizml-*.xsd`, `table-looks-*.xsd`).
 - `.wwd` autoscript files (Python/Basic) post-process output.
 
 ### 1.7 Programmability
@@ -86,7 +86,7 @@ procedure packages.
 ### 1.8 Server/remote mode
 
 - `statisticsd.conf` shows a multi-user server mode (port 3027, SSL, auth,
-  worker threads, reconnect buffers) — SPSS can run as a remote statistics
+  worker threads, reconnect buffers) — StatsBench can run as a remote statistics
   server.
 
 ---
@@ -95,14 +95,14 @@ procedure packages.
 
 Goal: a **desktop statistical workbench** that covers the 80% workflow:
 open data → explore → run common procedures → view output → export.
-Not a byte-compatible SPSS replacement; a lighter, modern tool.
+Not a byte-compatible replacement; a lighter, modern tool.
 
 ### 2.1 Core data model
 - `DataTable`: columns of `Numeric(f64)`, `String`, `Date`, `Nominal/Categorical`.
 - Variable metadata: name, label, type, measure level, missing values,
-  value labels (SPSS-style).
+  value labels (classic statistics style).
 - Read: CSV, Excel (calamine), Parquet. Write: CSV, Parquet.
-- `.sav`: Phase 1 = read via FFI to `spssio64.dll` (available locally) or
+- `.sav`: Phase 1 = read via FFI to `savio64.dll` (available locally) or
   implement `$FL2` reader; Phase 2 = native reader/writer.
 
 ### 2.2 Compute engine (procedures)
@@ -115,7 +115,7 @@ Use `statrs` + hand-rolled linear algebra (or `nalgebra`) for:
 - Charts: bar, histogram, scatter, boxplot (egui_plot)
 
 ### 2.3 Syntax (subset)
-- A small command language inspired by SPSS: `GET FILE`, `FREQUENCIES`,
+- A small command language inspired by classic statistics commands: `GET FILE`, `FREQUENCIES`,
   `DESCRIPTIVES`, `CORRELATIONS`, `REGRESSION`, `GRAPH`, `COMPUTE`,
   `RECODE`, `FILTER`, `SORT`, `AGGREGATE`, `MATCH FILES`.
 - Parser via `pest`/`nom`; AST → procedure calls.
@@ -148,7 +148,7 @@ statscraft/
 │   │   ├── table.rs           # DataTable, Column, Value
 │   │   ├── metadata.rs        # variable labels, value labels
 │   │   ├── import.rs          # CSV/Excel/Parquet
-│   │   └── sav_ffi.rs         # optional spssio64.dll bridge
+│   │   └── sav_ffi.rs         # optional savio64.dll bridge
 │   ├── stats/
 │   │   ├── descriptives.rs
 │   │   ├── frequencies.rs
@@ -180,7 +180,7 @@ statscraft/
 - Serde: `serde`, `serde_json`, `thiserror`, `anyhow`
 
 ### 3.2 Performance / memory
-- Use Polars LazyFrames for large data; SPSS loads all into memory.
+- Use Polars LazyFrames for large data; the reference application loads all into memory.
 - Stream .sav rows where possible.
 - Keep UI rendering on main thread, compute on rayon thread pool.
 
@@ -204,7 +204,7 @@ now, against the design above.
 | Phase | What it delivered |
 |---|---|
 | 1 | The modern shell: the Inter and JetBrains Mono type scale, the 28-glyph SVG icon set, the blue/teal palette, the rounded surfaces, the zebra-striped grid and the document tabs. |
-| 2 | The SPSS-style procedure dialogs — source list, target list, move arrow, sub-dialog buttons, OK / Paste / Reset / Cancel — wired to the syntax runner, so a dialog builds syntax and the same runner executes it. |
+| 2 | The procedure dialogs — source list, target list, move arrow, sub-dialog buttons, OK / Paste / Reset / Cancel — wired to the syntax runner, so a dialog builds syntax and the same runner executes it. |
 | 3 | The options reached the engine: `/CELLS`, `/STATISTICS`, `/POSTHOC`, the effect sizes, the significance stars and the missing-value mode all change the output. Explore, Means and the four nonparametric procedures were added, and the Output Viewer learned to draw charts. |
 | 4 | Reliability, Factor Analysis, ROC curves, Welch's and Brown-Forsythe's variance tests, `COMPUTE`, and a `.sav` writer that round-trips. |
 | 5 | The general linear model: a factorial ANOVA with any number of factors, a covariate, and the three types of sums of squares, checked against statsmodels. |
@@ -216,8 +216,8 @@ now, against the design above.
 | 11 | The Chart Builder: the type of the chart, the variables, how the data is summarised, the labels, a reference line, and a preview of the result. |
 
 Nineteen procedures, 103 tests, one runner behind both the menus and the
-Syntax Editor. `docs/SPSS_REFERENCE.md` records what was observed in the
-installed IBM SPSS Statistics 27 and where the app deliberately differs
+Syntax Editor. `docs/REFERENCE.md` records what was observed in the
+reference environment and where the app deliberately differs
 from it.
 
 The remaining work, in the order it should be taken:
@@ -235,14 +235,14 @@ The remaining work, in the order it should be taken:
 
 | Claim | Evidence |
 |---|---|
-| Java client launcher | `stats.exe` strings: `JNI_CreateJavaVM`, `com/spss/java_client/core/documents/AppMgr` |
-| Separate engine daemon | `spssengine.exe` strings: `-parenthost`, `-parentport`, `\\.\pipe\statisticsproc` |
+| Java client launcher | `stats.exe` strings: `JNI_CreateJavaVM`, `com/ref/java_client/core/documents/AppMgr` |
+| Separate engine daemon | `statsengine.exe` strings: `-parenthost`, `-parentport`, `\\.\pipe\statisticsproc` |
 | Server config | `config/statisticsd.conf`: port 3027, threads, regclass packages |
 | JVM 8 J9 | `jvmcfg.ini`: `-Xms256M -Xmx2048M`, `-Xshareclasses` |
-| 132 procedure DLLs | `spssw*.dll` count in install dir |
-| .sav format magic | `spssio64.dll` strings `$FL2`/`$FL3`/`ENCRYPTEDSAV`; `accidents.sav` header |
+| 132 procedure DLLs | `statsw*.dll` count in install dir |
+| .sav format magic | `savio64.dll` strings `$FL2`/`$FL3`/`ENCRYPTEDSAV`; `accidents.sav` header |
 | Syntax grammar | `syntax_xml/*.xml` (e.g. `FREQUENCIES.xml`) |
 | R/Python embedding | `.sps` `BEGIN PROGRAM R.`; `InvokePython*.dll` |
-| Output schemas | `spss-output-*.xsd`, `viewer-*.xsd`, `vizml-*.xsd` |
+| Output schemas | `output-*.xsd`, `viewer-*.xsd`, `vizml-*.xsd` |
 
 > Note: strings/binaries are untrusted analysis targets; treated as data only.

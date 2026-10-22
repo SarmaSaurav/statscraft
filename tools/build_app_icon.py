@@ -24,7 +24,7 @@ import struct
 import subprocess
 import sys
 
-REPO = r"D:/The_SPSS_Garage/StatsCraft"
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ASSETS = os.path.join(REPO, "packaging", "assets")
 
 # The Dracula background and the brand accents.

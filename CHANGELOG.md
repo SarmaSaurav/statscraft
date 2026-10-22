@@ -13,7 +13,7 @@ data editor that edits, and a chart builder.
 ### Added
 
 **The workbench**
-- A **Data Editor** with SPSS's column set, a zebra-striped grid, and
+- A **Data Editor** with the full variable column set, a zebra-striped grid, and
   the Data View and Variable View tabs.
 - The **Data Editor's editing**: cases can be added and deleted, cells
   and blocks of cells copied and pasted, and a variable's **missing
@@ -53,8 +53,8 @@ change the output.
 
 **The data**
 
-- Reads and **writes** SPSS system files (`.sav`) — labels, value
-  labels, measures and display widths intact.
+- Reads and **writes** `.sav` system files — labels, value labels,
+  measures and display widths intact.
 - CSV, and the Variable View's full metadata.
 
 ### Notes
@@ -62,6 +62,6 @@ change the output.
 - The statistics are checked against closed-form reference values and
   published tables, not against themselves. The GLM is checked against
   statsmodels.
-- The reference for the interface and the command grammar is the
-  installed IBM SPSS Statistics 27; `docs/SPSS_REFERENCE.md` records
-  what was observed and where the app deliberately differs.
+- The interface and command grammar were developed from a reference
+  desktop statistics environment; `docs/REFERENCE.md` records what was
+  observed and where the app deliberately differs.

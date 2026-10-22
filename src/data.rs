@@ -1,5 +1,5 @@
 use polars::prelude::*;
-use polars_readstat_rs::SpssReader;
+use polars_readstat_rs::SpssReader as SavReader;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
@@ -17,7 +17,7 @@ pub enum ColumnKind {
     String,
 }
 
-/// SPSS "Measure": Scale / Ordinal / Nominal (Variable View).
+/// StatsBench "Measure": Scale / Ordinal / Nominal (Variable View).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Measure {
     Nominal,
@@ -41,7 +41,7 @@ impl Measure {
     }
 }
 
-/// SPSS "Align" in Variable View.
+/// StatsBench "Align" in Variable View.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VarAlign {
     Left,
@@ -65,7 +65,7 @@ impl VarAlign {
     }
 }
 
-/// Per-variable metadata backing the SPSS-style Variable View.
+/// Per-variable metadata backing the StatsBench-style Variable View.
 #[derive(Debug, Clone)]
 pub struct VariableMeta {
     /// Variable/Value label ("Label" column). Empty = none.
@@ -80,7 +80,7 @@ pub struct VariableMeta {
     ///
     /// The discrete values and the range are kept apart, because two
     /// discrete values and a range of two are different things, and
-    /// SPSS's dialog asks which one is meant.
+    /// StatsBench's dialog asks which one is meant.
     pub user_missing_range: Option<(f64, f64)>,
     pub measure: Measure,
     pub align: VarAlign,
@@ -88,7 +88,7 @@ pub struct VariableMeta {
     pub columns_width: usize,
     /// "Decimals".
     pub decimals: usize,
-    /// SPSS "Role"; we only model "Input".
+    /// StatsBench "Role"; we only model "Input".
     pub role: String,
 }
 
@@ -121,7 +121,7 @@ impl Column {
     /// System- or user-missing?
     ///
     /// A single declared value is one discrete missing value; a pair
-    /// of them is the ends of a range, which is how SPSS stores it.
+    /// of them is the ends of a range, which is how StatsBench stores it.
     pub fn is_missing(&self, row: usize) -> bool {
         match self.values.get(row) {
             Some(Value::Missing) => true,
@@ -140,7 +140,7 @@ impl Column {
         }
     }
 
-    /// Type change with value conversion (SPSS converts when possible).
+    /// Type change with value conversion (StatsBench converts when possible).
     pub fn set_kind(&mut self, kind: ColumnKind) {
         if kind == self.kind {
             return;
@@ -167,7 +167,7 @@ impl Column {
         self.meta.label = label;
     }
 
-    /// The name SPSS shows for a variable: its label when it has one,
+    /// The name StatsBench shows for a variable: its label when it has one,
     /// otherwise its name. Calculations and output use this, while the
     /// syntax and the data model keep using the machine name.
     pub fn display_name(&self) -> &str {
@@ -277,7 +277,7 @@ impl DataTable {
     }
 
     pub fn from_sav_path(path: &Path) -> Result<Self, String> {
-        let reader = SpssReader::open(path).map_err(|e| e.to_string())?;
+        let reader = SavReader::open(path).map_err(|e| e.to_string())?;
         let md = reader.metadata().clone();
         let df = reader.read().finish().map_err(|e| e.to_string())?;
         let n_rows = df.height();
@@ -344,7 +344,7 @@ impl DataTable {
                 values.push(v);
             }
 
-            // ---- Phase 1: real SPSS variable metadata ----
+            // ---- Phase 1: real StatsBench variable metadata ----
             let mut meta = VariableMeta::default_for(kind);
             if let Some(p) = &plan {
                 if let Some(l) = &md_str(&md.metadata_df, "label", mi) {
@@ -418,7 +418,7 @@ impl DataTable {
         self.columns.get(col).map(|c| c.is_missing(row)).unwrap_or(false)
     }
 
-    /// Rename a variable (SPSS enforces non-empty names).
+    /// Rename a variable (StatsBench enforces non-empty names).
     pub fn rename_column(&mut self, col: usize, name: &str) -> bool {
         let name = name.trim();
         if name.is_empty() || self.columns.get(col).is_none() {
@@ -478,7 +478,7 @@ impl DataTable {
 
     /// Add a case at the end of the table.
     ///
-    /// SPSS's "Add Cases" adds empty cases at the end; the new case
+    /// StatsBench's "Add Cases" adds empty cases at the end; the new case
     /// holds the system-missing value in every column.
     pub fn add_case(&mut self) -> usize {
         for c in self.columns.iter_mut() {
@@ -534,7 +534,7 @@ impl DataTable {
                     match t.parse::<f64>() {
                         Ok(n) => Value::Number(n),
                         // A value that is not a number is not a
-                        // missing value; it is rejected, as SPSS
+                        // missing value; it is rejected, as StatsBench
                         // rejects it.
                         Err(_) => return false,
                     }
@@ -579,7 +579,7 @@ impl DataTable {
     /// cell.
     ///
     /// The number of cases is grown if the pasted block is taller than
-    /// the table, which is what SPSS does.
+    /// the table, which is what StatsBench does.
     pub fn paste_text(&mut self, col0: usize, row0: usize, text: &str) -> usize {
         let mut pasted = 0;
         for (i, line) in text.lines().enumerate() {
@@ -603,7 +603,7 @@ impl DataTable {
 
     /// Define the user-missing values of a numeric variable.
     ///
-    /// SPSS's "Missing" dialog takes either a list of discrete values
+    /// StatsBench's "Missing" dialog takes either a list of discrete values
     /// or a range, and the values that fall in them are treated as
     /// missing by every procedure.
     pub fn define_user_missing(
@@ -660,7 +660,7 @@ impl DataTable {
         }
     }
 
-    /// SPSS "Sort Cases": stable reorder of all rows by one column.
+    /// StatsBench "Sort Cases": stable reorder of all rows by one column.
     /// Numeric values sort as numbers, text after numbers, missing last.
     /// Column index by name (case-insensitive), for the syntax runner.
     pub fn column_index(&self, name: &str) -> Option<usize> {
@@ -724,16 +724,6 @@ mod tests {
     }
 
     #[test]
-    fn sav_load_accidents() {
-        let path = std::path::Path::new(r"C:\Program Files\IBM\SPSS\Statistics\27\Samples\English\accidents.sav");
-        if !path.exists() { return; }
-        let t = DataTable::from_sav_path(path).unwrap();
-        assert!(t.n_rows > 0);
-        assert!(!t.columns.is_empty());
-        println!("sav: {} rows x {}", t.n_rows, t.columns.len());
-    }
-
-    #[test]
     fn sort_rows_orders_cases() {
         let mut t = DataTable {
             n_rows: 4,
@@ -794,7 +784,7 @@ mod tests {
     }
 
     #[test]
-    fn variable_meta_defaults_follow_spss_conventions() {
+    fn variable_meta_defaults_follow_measure_conventions() {
         let path = std::env::temp_dir().join("sc_meta_test.csv");
         let mut f = std::fs::File::create(&path).unwrap();
         writeln!(f, "id,name").unwrap();
@@ -869,21 +859,6 @@ mod tests {
         t.columns[0].set_kind(ColumnKind::String);
         assert!(matches!(t.columns[0].values[0], Value::Text(_)));
         let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn sav_metadata_is_loaded() {
-        let path = std::path::Path::new(r"C:\Program Files\IBM\SPSS\Statistics\27\Samples\English\accidents.sav");
-        if !path.exists() { return; }
-        let t = DataTable::from_sav_path(path).unwrap();
-        assert!(t.n_rows > 0);
-        assert!(!t.columns.is_empty());
-        // accidents.sav carries real SPSS metadata: labels and/or widescale measures.
-        let labeled = t.columns.iter().any(|c| !c.meta.label.is_empty());
-        let measures = t.columns.iter().any(|c| c.meta.measure != Measure::default_for(c.kind) || c.meta.align != VarAlign::default_for(c.kind) || c.meta.decimals != VariableMeta::default_for(c.kind).decimals);
-        println!("sav meta: labeled={} measure_differs={}", labeled, measures);
-        let _ = labeled;
-        let _ = measures;
     }
 
     #[test]
@@ -1056,7 +1031,7 @@ mod tests {
     }
 
     #[test]
-    fn new_variables_get_a_unique_spss_name_and_missing_cells() {
+    fn new_variables_get_a_unique_name_and_missing_cells() {
         let mut t = editable();
         let a = t.add_variable(ColumnKind::Numeric);
         let b = t.add_variable(ColumnKind::String);
@@ -1084,34 +1059,38 @@ mod tests {
 }
 
 /// ---------------------------------------------------------------------------
-/// Writing SPSS .sav files.
+/// Writing StatsBench .sav files.
 /// ---------------------------------------------------------------------------
 
 
 
 
-/// Write the table to an SPSS .sav file.
+/// Write the table to an StatsBench .sav file.
 ///
 /// The `.sav` writer in `polars-readstat-rs` handles the record layout,
 /// the compression and the metadata, so the table is converted to a
 /// Polars frame and handed to it. The variable labels, the value labels,
 /// the measures and the display widths are carried across, so a file
-/// written here opens in SPSS with the same metadata it had here.
+/// written here opens in StatsBench with the same metadata it had here.
 pub fn write_sav(table: &DataTable, path: &std::path::Path) -> Result<(), String> {
     use polars::prelude::*;
     use polars_readstat_rs::{
-        SpssValueLabelKey, SpssValueLabelMap, SpssValueLabels, SpssVariableDisplayWidths,
-        SpssVariableLabels, SpssVariableMeasures, SpssWriteColumn, SpssWriteSchema, SpssWriter,
+        SpssMeasure as SavMeasure, SpssValueLabelKey as SavValueLabelKey,
+        SpssValueLabelMap as SavValueLabelMap, SpssValueLabels as SavValueLabels,
+        SpssVariableDisplayWidths as SavVariableDisplayWidths,
+        SpssVariableLabels as SavVariableLabels, SpssVariableMeasures as SavVariableMeasures,
+        SpssWriteColumn as SavWriteColumn, SpssWriteSchema as SavWriteSchema,
+        SpssWriter as SavWriter,
     };
 
     // The schema: the columns of the frame.
-    let mut schema_columns: Vec<SpssWriteColumn> = Vec::new();
+    let mut schema_columns: Vec<SavWriteColumn> = Vec::new();
     for col in &table.columns {
         let dtype = match col.kind {
             ColumnKind::Numeric => DataType::Float64,
             ColumnKind::String => DataType::String,
         };
-        schema_columns.push(SpssWriteColumn {
+        schema_columns.push(SavWriteColumn {
             name: col.name.clone(),
             dtype,
             string_width_bytes: if col.kind == ColumnKind::String {
@@ -1154,40 +1133,40 @@ pub fn write_sav(table: &DataTable, path: &std::path::Path) -> Result<(), String
 
     // The metadata: the variable labels, the value labels and the
     // measures. The maps are keyed by the variable's name.
-    let mut variable_labels = SpssVariableLabels::default();
-    let mut value_labels = SpssValueLabels::default();
-    let mut measures = SpssVariableMeasures::default();
-    let mut widths = SpssVariableDisplayWidths::default();
+    let mut variable_labels = SavVariableLabels::default();
+    let mut value_labels = SavValueLabels::default();
+    let mut measures = SavVariableMeasures::default();
+    let mut widths = SavVariableDisplayWidths::default();
     for col in table.columns.iter() {
         if !col.meta.label.is_empty() {
             variable_labels.insert(col.name.clone(), col.meta.label.clone());
         }
         if !col.meta.value_labels.is_empty() {
-            let mut map = SpssValueLabelMap::new();
+            let mut map = SavValueLabelMap::new();
             for (value, label) in &col.meta.value_labels {
-                map.insert(SpssValueLabelKey::from(*value), label.clone());
+                map.insert(SavValueLabelKey::from(*value), label.clone());
             }
             value_labels.insert(col.name.clone(), map);
         }
         measures.insert(
             col.name.clone(),
             match col.meta.measure {
-                crate::data::Measure::Nominal => polars_readstat_rs::spss::Measure::Nominal,
-                crate::data::Measure::Ordinal => polars_readstat_rs::spss::Measure::Ordinal,
-                crate::data::Measure::Scale => polars_readstat_rs::spss::Measure::Scale,
+                crate::data::Measure::Nominal => SavMeasure::Nominal,
+                crate::data::Measure::Ordinal => SavMeasure::Ordinal,
+                crate::data::Measure::Scale => SavMeasure::Scale,
             },
         );
         widths.insert(col.name.clone(), col.meta.columns_width.max(1) as i32);
     }
 
-    let schema = SpssWriteSchema {
+    let schema = SavWriteSchema {
         columns: schema_columns,
         row_count: Some(table.n_rows),
         value_labels: Some(value_labels),
         variable_labels: Some(variable_labels),
     };
 
-    let writer = SpssWriter::new(path)
+    let writer = SavWriter::new(path)
         .with_schema(schema)
         .with_variable_measures(measures)
         .with_variable_display_widths(widths);

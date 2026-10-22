@@ -5,7 +5,7 @@ param(
   [int]$Settle = 900
 )
 # Capture a native window by title substring, resolved fresh at capture time.
-# Usage: .\snap.ps1 -Out shot.png -Match "SPSS Statistics"
+# Usage: .\snap.ps1 -Out shot.png -Match "StatsBench"
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 Add-Type @'
 using System;

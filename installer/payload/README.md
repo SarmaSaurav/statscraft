@@ -1,18 +1,19 @@
 # StatsCraft
 
-Lightweight SPSS-like statistical workbench written in Rust (native desktop app).
+Lightweight statistical workbench written in Rust (native desktop app).
 
 ## Interface
 
-The UI is a modern take on the SPSS workbench, not a pixel copy of it:
+The UI is a modern desktop workbench:
 
 - **Typography** — the bundled **Inter** family (Regular / Medium / SemiBold /
   Bold), embedded in the binary so the app looks the same on every machine.
-- **Icons** — a 28-glyph **SVG line-icon set** drawn with VectorCraft and
-  embedded in the binary. Toolbar buttons, menu entries, tabs and the app
-  icon all use it. Regenerate with `python tools/build_icons.py`.
-- **Palette** — a single accent blue with a teal "ready" state, defined once
-  in `src/theme.rs`.
+- **Icons** — a 38-glyph **SVG line-icon set** embedded in the binary.
+  Ribbon buttons use large monochrome glyphs with labels underneath;
+  menu entries, tabs and the app icon use the same set. Regenerate with
+  `python tools/build_icons.py`.
+- **Palette** — light and dark themes defined once in `src/theme.rs`,
+  switched from the View menu.
 - **Chrome** — rounded cards, soft shadows, zebra-striped grid, pill-shaped
   document tabs, hairline borders, and a proper primary button for *Run Syntax*.
 
@@ -44,8 +45,8 @@ cd installer && cargo build --release   # Windows installer (embeds the app exe)
 
 ## Architecture (locked-in decisions)
 - **Stack**: Rust + egui/eframe, one codebase for Windows + Linux, fully
-  custom-drawn UI that reproduces the IBM SPSS Statistics 27 look.
-- **Pipeline (mirrors SPSS internals)**: UI and dialogs generate **syntax**
+  custom-drawn UI.
+- **Pipeline**: UI and dialogs generate **syntax**
   commands → the syntax runner executes them → analyses emit **pivot-table
   models** shown in the Output Viewer. GUI and syntax editing stay consistent.
 - **Windows packaging**: prebuilt native installer (`installer/` crate).
@@ -54,15 +55,15 @@ cd installer && cargo build --release   # Windows installer (embeds the app exe)
   loading via polars-readstat-rs.
 
 ## Features
-- Load CSV and SPSS `.sav` (labels, value labels, measure, alignment,
+- Load CSV and `.sav` files (labels, value labels, measure, alignment,
   decimals, user-missing)
 - Procedures: Descriptives, Frequencies, Correlations, Linear Regression,
   Independent-Samples T Test, Paired-Samples T Test, One-Way ANOVA,
   Crosstabs with Pearson Chi-Square
-- SPSS-like Data Editor (Data View / Variable View tabs, variable filter)
-- Variable View with the SPSS column set (Name…Role)
+- Data Editor (Data View / Variable View tabs, variable filter)
+- Variable View with the full variable column set (Name…Role)
 - Multi-window documents: Data Editor (main window), Output Viewer and
-  Syntax Editor in separate OS windows, like SPSS
+  Syntax Editor in separate OS windows
 - Output Viewer with pivot tables, outline pane, and Markdown/HTML export
 - Sort Cases, export data (CSV), file dialogs
 - Syntax runner:
@@ -79,9 +80,9 @@ variances, paired t on known differences, and user-missing exclusion through
 the analysis pipeline.
 
 ## Reference behavior
-UI structure, menus, and analysis flow are cloned from IBM SPSS Statistics
+UI structure, menus, and analysis flow follow a classic desktop statistics design
 (evidence gathered from the installed copy: menu resources, dialog→command
-catalog, engine IPC). Numbers are validated against SPSS sample datasets.
+catalog, engine IPC). Numbers are validated against real-world sample datasets.
 
 ## Roadmap
 See `PLAN.md`.

@@ -1,4 +1,4 @@
-﻿use crate::data::DataTable;
+use crate::data::DataTable;
 use crate::output::OutputTable;
 use eframe::egui;
 use egui_plot::{Plot, PlotPoints};
@@ -24,7 +24,7 @@ pub struct StatsCraftApp {
     pub grid_lines: bool,
     pub show_status: bool,
     pub dataset_no: usize,
-    /// Active (column, row) in Data View, like the SPSS active cell.
+    /// Active (column, row) in Data View, like the StatsBench active cell.
     pub sel_cell: Option<(usize, usize)>,
     /// Cell currently being edited.
     pub editing_cell: Option<(usize, usize)>,
@@ -164,7 +164,7 @@ impl StatsCraftApp {
         self.status = "New output document.".to_string();
     }
 
-    /// SPSS-style dataset title, e.g. "bank [DataSet1]" or "Untitled1 [DataSet1]".
+    /// StatsBench-style dataset title, e.g. "bank [DataSet1]" or "Untitled1 [DataSet1]".
     fn dataset_label(&self) -> String {
         let stem = std::path::Path::new(self.path_input.trim())
             .file_stem()
@@ -174,12 +174,12 @@ impl StatsCraftApp {
         format!("{} [DataSet{}]", stem, self.dataset_no)
     }
 
-    /// Phase 2 pipeline: menus/dialogs generate SPSS syntax text; the single
+    /// Phase 2 pipeline: menus/dialogs generate StatsBench syntax text; the single
     /// syntax runner executes it; results appear in the Output Viewer.
     pub fn paste_and_run(&mut self, cmd: String) {
         self.status = format!("Pasted: {}", cmd);
         crate::syntax::run(self, &cmd);
-        // SPSS raises the Output Viewer document window
+        // StatsBench raises the Output Viewer document window
         if !self.outputs.is_empty() {
             self.show_output_window = true;
         }
@@ -214,7 +214,7 @@ impl StatsCraftApp {
         if let Some(syntax) = d.confirmed {
             self.paste_and_run(syntax);
         } else if let Some(syntax) = d.pasted {
-            // SPSS's Paste puts the command in the syntax window without
+            // StatsBench's Paste puts the command in the syntax window without
             // running it.
             self.syntax_text = if self.syntax_text.trim().is_empty() {
                 syntax.clone()
@@ -325,7 +325,7 @@ impl StatsCraftApp {
         self.status = "Table pivoted: the row and column dimensions were exchanged.".to_string();
     }
 
-    /// Add a case at the end of the data, as SPSS's "Add Cases" does.
+    /// Add a case at the end of the data, as StatsBench's "Add Cases" does.
     pub fn add_case(&mut self) {
         let Some(t) = self.table.as_mut() else {
             self.status = "No data loaded.".to_string();
@@ -422,7 +422,7 @@ impl StatsCraftApp {
         }
     }
 
-    /// Save the data as an SPSS .sav file.
+    /// Save the data as a .sav file.
     pub fn save_data_sav(&mut self, path: &std::path::Path) {
         let Some(t) = &self.table else {
             self.status = "No data loaded.".to_string();
@@ -430,7 +430,7 @@ impl StatsCraftApp {
         };
         match crate::data::write_sav(t, path) {
             Ok(()) => {
-                self.status = format!("Saved {} as SPSS .sav.", path.display());
+                self.status = format!("Saved {} as a .sav file.", path.display());
             }
             Err(e) => self.status = format!("Save failed: {}", e),
         }
@@ -467,7 +467,7 @@ impl StatsCraftApp {
         }
     }
 
-    /// SPSS-like pivot table exported as a styled HTML document.
+    /// A styled pivot table exported as an HTML document.
     pub fn export_output_html_to(&mut self, path: &std::path::Path) {
         self.export_output_document(path, false);
     }
@@ -478,7 +478,7 @@ impl StatsCraftApp {
     /// Both formats are HTML documents with the Office namespaces and a
     /// `ProgId` hint. Word and Excel open them as editable documents, and
     /// the pivot structure and the styling survive the round trip. This is
-    /// the same idea as SPSS's `OUTPUT EXPORT /DOC` and `/XLS`, without
+    /// the same idea as StatsBench's `OUTPUT EXPORT /DOC` and `/XLS`, without
     /// carrying a full OOXML writer and a ZIP dependency.
     pub fn export_output_office_to(&mut self, path: &std::path::Path) {
         self.export_output_document(path, true);
@@ -518,7 +518,7 @@ impl StatsCraftApp {
 
     /// Copy the selected output table as rich HTML, with a tab-separated
     /// plain-text fallback. Word, Excel, PowerPoint and LibreOffice paste
-    /// the HTML as an editable table, which is what SPSS's Viewer copy
+    /// the HTML as an editable table, which is what StatsBench's Viewer copy
     /// does.
     pub fn copy_selected_table(&mut self) {
         let Some(t) = self.outputs.get(self.selected_output) else {
@@ -741,9 +741,9 @@ impl eframe::App for StatsCraftApp {
         // reply arrives on the next frame.
         self.handle_screenshot(ctx);
 
-        // ---- Phase 4: real OS document windows (SPSS multi-document UX) ----
+        // ---- Phase 4: real OS document windows (StatsBench multi-document UX) ----
         // The Output Viewer and Syntax editor live in their own viewports;
-        // the Data Editor stays the main window, like IBM SPSS.
+        // the Data Editor stays the main window, like StatsBench.
         if self.show_output_window {
             ctx.show_viewport_immediate(
                 egui::ViewportId::from_hash_of("statscraft_output"),
@@ -798,7 +798,7 @@ impl eframe::App for StatsCraftApp {
                                     );
                                     ui.label(
                                         egui::RichText::new(
-                                            "Run an analysis from the Analyze menu, or type SPSS syntax in Syntax1.",
+                                            "Run an analysis from the Analyze menu, or type command syntax in Syntax1.",
                                         )
                                         .color(crate::theme::text_faint())
                                         .size(12.0),
@@ -807,7 +807,7 @@ impl eframe::App for StatsCraftApp {
                                 return;
                             }
 
-                            // SPSS splits the Viewer into an outline tree on
+                            // StatsBench splits the Viewer into an outline tree on
                             // the left and the result on the right.
                             ui.columns(2, |cols| {
                                 cols[0].set_min_width(210.0);
@@ -891,7 +891,7 @@ impl eframe::App for StatsCraftApp {
                                             ));
                                             ui.add_space(6.0);
                                             ui.horizontal_wrapped(|ui| {
-                                                // SPSS's Viewer copies the
+                                                // StatsBench's Viewer copies the
                                                 // selected object; the rich
                                                 // table survives a paste into
                                                 // Word, Excel or PowerPoint.
@@ -925,7 +925,7 @@ impl eframe::App for StatsCraftApp {
                                                 // A pivot table can be
                                                 // pivoted: the row and the
                                                 // column dimensions
-                                                // exchanged, the way SPSS
+                                                // exchanged, the way StatsBench
                                                 // lets the reader drag one
                                                 // across.
                                                 if t.pivot.is_some()
@@ -974,7 +974,7 @@ impl eframe::App for StatsCraftApp {
             );
         }
         // ---- Phase 5: the open procedure dialog ----
-        // SPSS opens a modal dialog for every procedure. We draw it in the
+        // StatsBench opens a modal dialog for every procedure. We draw it in the
         // main window so the Data Editor stays visible behind it.
         // ---- Phase 11: the Chart Builder ----
         if self.chart_builder.is_some() {
@@ -1101,7 +1101,7 @@ impl eframe::App for StatsCraftApp {
         // StatsCraft. The flag is the app's own, so a viewport that is
         // opened later follows the theme the user chose.
         crate::theme::apply_style(ctx, self.dark);
-        // SPSS titles the window "<dataset> [DataSet<n>] - <product>".
+        // StatsBench titles the window "<dataset> [DataSet<n>] - <product>".
         let title = format!("{} — StatsCraft Statistics", self.dataset_label());
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
@@ -1120,7 +1120,7 @@ impl eframe::App for StatsCraftApp {
                 egui::menu::bar(ui, |ui| {
                     // ---------------- File ----------------
                     ui.menu_button("File", |ui| {
-                        // SPSS's File > New has one entry per document type.
+                        // StatsBench's File > New has one entry per document type.
                         ui.menu_button("New", |ui| {
                             if crate::icon::menu_item(
                                 ui,
@@ -1155,7 +1155,7 @@ impl eframe::App for StatsCraftApp {
                         });
                         ui.separator();
                         // Recent files are loaded when the item is chosen, just
-                        // as SPSS's File > Recently Used Data does.
+                        // as StatsBench's File > Recently Used Data does.
                         ui.menu_button("Recent Files", |ui| {
                             let recent = self.recent_files.clone();
                             if recent.is_empty() {
@@ -1216,10 +1216,10 @@ impl eframe::App for StatsCraftApp {
                                     self.load();
                                 }
                             }
-                            if ui.button("SPSS Statistics (.sav)…").clicked() {
+                            if ui.button("Statistics data (.sav)…").clicked() {
                                 ui.close_menu();
                                 if let Some(p) = rfd::FileDialog::new()
-                                    .add_filter("SPSS", &["sav"])
+                                    .add_filter("SAV", &["sav"])
                                     .pick_file()
                                 {
                                     self.path_input = p.display().to_string();
@@ -1353,7 +1353,7 @@ impl eframe::App for StatsCraftApp {
                             self.view = View::Variables;
                         }
                         ui.separator();
-                        // The case-level editing, as SPSS's Data menu
+                        // The case-level editing, as StatsBench's Data menu
                         // has it.
                         if crate::icon::menu_item(ui, crate::theme::Icon::InsertCase, "Add Cases").clicked() {
                             ui.close_menu();
@@ -1401,7 +1401,7 @@ impl eframe::App for StatsCraftApp {
                         if ui.button("Automatic Recode…").clicked() { ui.close_menu(); self.status = "Automatic Recode: not implemented yet.".to_string(); }
                     });
                     // ---------------- Analyze ----------------
-                    // Every procedure opens a dialog, as in SPSS: the user
+                    // Every procedure opens a dialog, as in StatsBench: the user
                     // picks the variables and the options, then presses OK.
                     ui.menu_button("Analyze", |ui| {
                         ui.menu_button("Descriptive Statistics", |ui| {
@@ -1478,7 +1478,7 @@ impl eframe::App for StatsCraftApp {
                     });
                     // ---------------- Help ----------------
                     ui.menu_button("Help", |ui| {
-                        if ui.button("About StatsCraft").clicked() { ui.close_menu(); self.status = "StatsCraft — lightweight SPSS-like workbench (Rust).".to_string(); }
+                        if ui.button("About StatsCraft").clicked() { ui.close_menu(); self.status = "StatsCraft — lightweight statistical workbench (Rust).".to_string(); }
                     });
                 });
             });
@@ -1496,13 +1496,13 @@ impl eframe::App for StatsCraftApp {
             )
             .show(ctx, |ui| {
                 // ---- Toolbar: action groups on the left, view switch and the
-                //      variable filter on the right, like SPSS but flatter. ----
+                //      variable filter on the right, like StatsBench but flatter. ----
                 ui.horizontal(|ui| {
                     if crate::icon::icon_button(
                         ui,
                         crate::theme::Icon::Open,
                         "Open",
-                        "Open data file (CSV / SPSS .sav)",
+                        "Open data file (CSV / .sav)",
                     )
                     .clicked()
                     {
@@ -1518,7 +1518,7 @@ impl eframe::App for StatsCraftApp {
                         ui,
                         crate::theme::Icon::Save,
                         "Save",
-                        "Save data (CSV or SPSS .sav)",
+                        "Save data (CSV or .sav)",
                     )
                     .clicked()
                     {
@@ -1674,7 +1674,7 @@ impl eframe::App for StatsCraftApp {
             });
 
         // ---- The bottom row: the view tabs on the left, the status on
-        //      the right, in one panel as SPSS has it. ----
+        //      the right, in one panel as StatsBench has it. ----
         egui::TopBottomPanel::bottom("tabs")
             .frame(
                 egui::Frame::none()
@@ -1755,7 +1755,7 @@ impl eframe::App for StatsCraftApp {
                     }
 
                     // The status sits on the right of the same row, as it
-                    // does in SPSS.
+                    // does in StatsBench.
                     if self.show_status {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.label(
@@ -1764,7 +1764,7 @@ impl eframe::App for StatsCraftApp {
                                 .size(11.0),
                         );
                         ui.add_space(10.0);
-                        // SPSS shows "IBM SPSS Statistics Processor is ready".
+                        // StatsBench shows "StatsBench Processor is ready".
                         // We keep the same shape, with our own name.
                         let ready = !self.status.starts_with("Error");
                         let (label, col) = if ready {
@@ -1784,7 +1784,7 @@ impl eframe::App for StatsCraftApp {
                                 .size(11.5),
                         );
                         ui.add_space(14.0);
-                        // SPSS shows the cell count in the status bar.
+                        // StatsBench shows the cell count in the status bar.
                         if let Some(t) = &self.table {
                             ui.label(
                                 egui::RichText::new(format!("{} cells", t.n_rows * t.columns.len()))
@@ -1828,13 +1828,13 @@ impl eframe::App for StatsCraftApp {
                     edit_buf,
                     ..
                 } = self;
-                spss_grid(ui, table.as_mut(), &vis, sel_cell, editing_cell, edit_buf);
+                data_grid(ui, table.as_mut(), &vis, sel_cell, editing_cell, edit_buf);
             }
             View::Variables => {
                 if let Some(table) = &mut self.table {
                     render_variables(ui, table, &mut add_variable, &mut delete_variable);
                 } else {
-                    // A fresh session has no dataset yet. SPSS lets the
+                    // A fresh session has no dataset yet. StatsBench lets the
                     // reader start from Variable View; an empty screen
                     // with no controls does not.
                     ui.vertical_centered(|ui| {
@@ -1882,7 +1882,7 @@ impl eframe::App for StatsCraftApp {
                     let mut copy_chart = false;
                     let mut chart_rect = None;
                     ui.columns(2, |cols| {
-                        // left outline (SPSS Output Viewer tree)
+                        // left outline (StatsBench Output Viewer tree)
                         cols[0].group(|ui| {
                             ui.label(
                                 egui::RichText::new("Outline")
@@ -1901,7 +1901,7 @@ impl eframe::App for StatsCraftApp {
                                 }
                             });
                         });
-                        // right content: SPSS pivot-table display
+                        // right content: StatsBench pivot-table display
                         cols[1].group(|ui| {
                             egui::ScrollArea::vertical()
                                 .auto_shrink([false, false])
@@ -1911,7 +1911,7 @@ impl eframe::App for StatsCraftApp {
                                     ui.add_space(4.0);
                                     // A pivot table can be pivoted: the
                                     // row and the column dimensions
-                                    // exchanged, the way SPSS lets
+                                    // exchanged, the way StatsBench lets
                                     // the reader drag one across.
                                     let has_pivot = self.outputs[self.selected_output]
                                         .pivot
@@ -1991,7 +1991,7 @@ impl eframe::App for StatsCraftApp {
             }
             View::Syntax => {
                 ui.vertical(|ui| {
-                    ui.label("SPSS-like syntax (LOAD/DESCRIPTIVES/FREQUENCIES/CORRELATIONS/REGRESSION/TTEST/CLEAR):");
+                    ui.label("Command syntax (LOAD/DESCRIPTIVES/FREQUENCIES/CORRELATIONS/REGRESSION/TTEST/CLEAR):");
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         ui.add(
                             egui::TextEdit::multiline(&mut self.syntax_text)
@@ -2052,22 +2052,22 @@ impl eframe::App for StatsCraftApp {
     }
 }
 
-/// Small vector-drawn SPSS-like toolbar icons (no emoji/glyph font dependency).
+/// Small vector-drawn statistics-style toolbar icons (no emoji/glyph font dependency).
 
-const SPSS_ROW_H: f32 = 19.0;
-const SPSS_ROWNUM_W: f32 = 48.0;
-const SPSS_COL_W: f32 = 82.0;
-const SPSS_GAP: f32 = 2.5;
-const SPSS_MIN_COLS: usize = 20;
+const GRID_ROW_H: f32 = 19.0;
+const GRID_ROWNUM_W: f32 = 48.0;
+const GRID_COL_W: f32 = 82.0;
+const GRID_GAP: f32 = 2.5;
+const GRID_MIN_COLS: usize = 20;
 
 /// The Data Editor grid.
 ///
-/// Modern take on the SPSS grid: white cells on a light canvas, a soft
+/// Modern take on the StatsBench grid: white cells on a light canvas, a soft
 /// header band, subtle zebra striping, rounded selection and a hairline
 /// border around the whole table. Row 0 of the virtual list is the header
-/// band. Clicking selects a cell (the SPSS active cell), double-clicking
+/// band. Clicking selects a cell (the StatsBench active cell), double-clicking
 /// edits it in place, Delete clears the selected cell.
-fn spss_grid(
+fn data_grid(
     ui: &mut egui::Ui,
     mut table: Option<&mut DataTable>,
     vis_cols: &[usize],
@@ -2300,7 +2300,7 @@ fn di_of_row(row: usize) -> usize {
     row - 1
 }
 
-/// SPSS semantics: empty -> missing; unparseable numeric -> missing.
+/// StatsBench semantics: empty -> missing; unparseable numeric -> missing.
 fn commit_edit(table: &mut DataTable, ci: usize, di: usize, buf: &str) {
     if ci >= table.columns.len() || di >= table.n_rows {
         return;
@@ -2578,7 +2578,7 @@ fn pivot_to_html(pivot: &crate::pivot::PivotTable) -> String {
     let col_keys = pivot.col_keys();
     let measure = pivot.measure_index.min(pivot.measures.len().saturating_sub(1));
 
-    // The measures are tabs, as they are in SPSS's output tree.
+    // The measures are tabs, as they are in StatsBench's output tree.
     if pivot.measures.len() > 1 {
         h.push_str("<p class=\"measures\">");
         for (i, m) in pivot.measures.iter().enumerate() {
@@ -2760,7 +2760,7 @@ mod tests {
     }
 }
 
-/// SPSS pivot-table look: bordered cells, shaded header band, right-aligned
+/// StatsBench pivot-table look: bordered cells, shaded header band, right-aligned
 /// numerics, footnote note beneath the table.
 
 /// Draw a chart in the Output Viewer, under the pivot table.
@@ -3027,7 +3027,7 @@ fn series_color(i: usize) -> egui::Color32 {
     }
 }
 
-/// Draw a pivot table, with the multi-level header SPSS builds.
+/// Draw a pivot table, with the multi-level header StatsBench builds.
 ///
 /// A pivot table has a header for each column dimension, and the cells
 /// of the outer dimension span the cells of the inner one. The body
@@ -3050,7 +3050,7 @@ fn render_pivot_table(ui: &mut egui::Ui, pivot: &crate::pivot::PivotTable) {
 
     // ---- The measures, and which one is shown ----
     // A pivot holds several measures of the same cells - the counts,
-    // the expected counts, the percentages. SPSS shows them as
+    // the expected counts, the percentages. StatsBench shows them as
     // separate tables under the crosstabulation, so the reader picks
     // which one to look at.
     let mut measure = pivot.measure_index.min(pivot.measures.len().saturating_sub(1));
@@ -3424,7 +3424,7 @@ fn render_variables(
     let cell_fill = theme::cell();
     let header_text = theme::text();
 
-    // SPSS's Variable View can always make a new row. The button sits
+    // StatsBench's Variable View can always make a new row. The button sits
     // above the grid so it is visible both for an empty dataset and for a
     // loaded one.
     ui.horizontal(|ui| {
@@ -3486,7 +3486,7 @@ fn render_variables(
                 .spacing([2.0, 2.0])
                 .striped(false)
                 .show(ui, |ui| {
-                    // ---- header row (SPSS Variable View columns) ----
+                    // ---- header row (StatsBench Variable View columns) ----
                     for h in ["Name", "Type", "Width", "Decimals", "Label", "Values",
                               "Missing", "Columns", "Align", "Measure", "Role", "Delete"] {
                         block(ui, 92.0, header_fill, &mut |inner: &mut egui::Ui| {
@@ -3508,7 +3508,7 @@ fn render_variables(
                                     .frame(false),
                             );
                         });
-                        // Type (converting values like SPSS)
+                        // Type (converting values like StatsBench)
                         block(ui, 82.0, cell_fill, &mut |inner: &mut egui::Ui| {
                             let label = match c.kind {
                                 ColumnKind::Numeric => "Numeric",

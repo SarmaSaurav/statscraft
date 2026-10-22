@@ -1,6 +1,6 @@
 # StatsCraft
 
-Lightweight SPSS-like statistical workbench written in Rust (native desktop app).
+Lightweight statistical workbench written in Rust (native desktop app).
 
 ![StatsCraft product showcase](docs/showcase/showcase.png)
 
@@ -9,18 +9,15 @@ Lightweight SPSS-like statistical workbench written in Rust (native desktop app)
 
 ## Interface
 
-The UI is a modern take on the SPSS workbench, not a pixel copy of it:
+The UI is a modern desktop workbench:
 
 - **Typography** — the bundled **Inter** family (Regular / Medium / SemiBold /
   Bold), embedded in the binary so the app looks the same on every machine.
-- **Icons** — a 37-glyph **SVG icon set** embedded in the binary. Each
-  icon is a rounded tile in one of the Dracula accents with a near-white
-  glyph on top, so the ribbon reads as a set of distinct, colourful
-  buttons and every icon is legible on a white surface and on a dark
-  one. The colours are assigned by family — the file operations are
-  orange, the editing ones yellow, the data handling pink, the data
-  procedures purple, the modelling ones green and the reporting ones
-  cyan. Regenerate with `python tools/build_icons2.py`.
+- **Icons** — a 38-glyph **SVG line-icon set** embedded in the binary.
+  The ribbon uses large monochrome glyphs tinted from the active theme,
+  with a readable label under each icon. Menu entries and tabs use the
+  same set, so every surface stays consistent in light and dark mode.
+  Regenerate with `python tools/build_icons.py`.
 - **Palette** — two themes, defined once in `src/theme.rs`: the light
   workbench one and a dark one after the **Dracula** palette. The
   colours live in a struct rather than in constants, so the widgets and
@@ -41,7 +38,7 @@ The UI is a modern take on the SPSS workbench, not a pixel copy of it:
 
 ## Procedure dialogs
 
-Like SPSS, a procedure does not run straight from the Analyze menu. It opens
+A procedure does not run straight from the Analyze menu. It opens
 a dialog:
 
 - a **source variable list**, each row marked with a measure-level icon (a
@@ -54,7 +51,7 @@ a dialog:
   has what it needs (and a grouping variable for t-test, ANOVA, means and
   crosstabs).
 
-The dialog computes nothing — it **builds SPSS syntax** and hands it to the
+The dialog computes nothing — it **builds command syntax** and hands it to the
 same runner the Syntax Editor uses. **OK** runs it; **Paste** puts it in
 the Syntax Editor without running it, so you can edit the command by hand
 first. That is the whole dialog → syntax → output pipeline, and it is why
@@ -80,8 +77,8 @@ statscraft data.csv --dialog frequencies
 statscraft data.csv --script run.sps
 ```
 
-`docs/SPSS_REFERENCE.md` records the observed behaviour of IBM SPSS
-Statistics 27 that the dialogs are modelled on.
+`docs/REFERENCE.md` records the reference behaviour that the dialogs are
+modelled on.
 
 ## Install
 
@@ -132,8 +129,8 @@ cd installer && cargo build --release   # Windows installer (embeds the app exe)
 
 ## Architecture (locked-in decisions)
 - **Stack**: Rust + egui/eframe, one codebase for Windows + Linux, fully
-  custom-drawn UI that reproduces the IBM SPSS Statistics 27 look.
-- **Pipeline (mirrors SPSS internals)**: UI and dialogs generate **syntax**
+  custom-drawn UI.
+- **Pipeline**: UI and dialogs generate **syntax**
   commands → the syntax runner executes them → analyses emit **pivot-table
   models** shown in the Output Viewer. GUI and syntax editing stay consistent.
 - **Windows packaging**: prebuilt native installer (`installer/` crate).
@@ -142,7 +139,7 @@ cd installer && cargo build --release   # Windows installer (embeds the app exe)
   loading via polars-readstat-rs.
 
 ## Features
-- Load CSV and SPSS `.sav` (labels, value labels, measure, alignment,
+- Load CSV and `.sav` files (labels, value labels, measure, alignment,
   decimals, user-missing), and **write** `.sav` back out with the labels,
   the value labels, the measures and the display widths intact
 - Procedures: Descriptives, Frequencies, Correlations, Linear Regression,
@@ -156,10 +153,10 @@ cd installer && cargo build --release   # Windows installer (embeds the app exe)
   **Factor Analysis (principal components)**, **ROC curves**, **Means**,
   **Explore**, and the **nonparametric** family (Mann-Whitney U,
   Kruskal-Wallis H, Wilcoxon signed-rank, Friedman)
-- SPSS-like Data Editor (Data View / Variable View tabs, variable filter)
-- Variable View with the SPSS column set (Name…Role)
+- Data Editor (Data View / Variable View tabs, variable filter)
+- Variable View with the full variable column set (Name…Role)
 - Multi-window documents: Data Editor (main window), Output Viewer and
-  Syntax Editor in separate OS windows, like SPSS
+  Syntax Editor in separate OS windows
 - Output Viewer with pivot tables, outline pane, and Markdown/HTML export
 - Sort Cases, export data (CSV), file dialogs
 - Syntax runner:
@@ -190,9 +187,9 @@ columns, and the missing values of a variable — both the discrete values and
 the range.
 
 ## Reference behavior
-UI structure, menus, and analysis flow are cloned from IBM SPSS Statistics
+UI structure, menus, and analysis flow follow a classic desktop statistics design
 (evidence gathered from the installed copy: menu resources, dialog→command
-catalog, engine IPC). Numbers are validated against SPSS sample datasets.
+catalog, engine IPC). Numbers are validated against real-world sample datasets.
 
 ## Roadmap
 See `PLAN.md`. The changes of each release are in

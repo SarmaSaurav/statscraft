@@ -5,7 +5,7 @@ param(
   [int]$SubRow = 3,       # which item in the Analyze menu to hover (1-based)
   [int]$Leaf = 1          # which item in the submenu to click (1-based)
 )
-# Open a menu in IBM SPSS Statistics and capture the resulting dialog.
+# Open a menu in StatsBench and capture the resulting dialog.
 # The whole interaction runs in ONE PowerShell process so no menu can be
 # dismissed by a window switch between steps.
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
@@ -28,7 +28,7 @@ public class S {
 }
 '@
 $p = Get-Process stats -EA SilentlyContinue | Select-Object -First 1
-if (-not $p) { Write-Output 'SPSS_NOT_RUNNING'; exit 1 }
+if (-not $p) { Write-Output 'StatsBench_NOT_RUNNING'; exit 1 }
 [void][S]::SetForegroundWindow($p.MainWindowHandle)
 Start-Sleep -Milliseconds 1000
 

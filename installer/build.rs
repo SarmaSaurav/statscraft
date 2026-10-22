@@ -9,7 +9,7 @@ fn main() {
     res.set_manifest_file("../packaging/assets/statscraft.manifest");
     res.set("FileDescription", "StatsCraft Setup");
     res.set("ProductName", "StatsCraft");
-    res.set("CompanyName", "The SPSS Garage");
+    res.set("CompanyName", "The StatsCraft Garage");
     res.set("LegalCopyright", "MIT licensed");
     res.set("FileVersion", env!("CARGO_PKG_VERSION"));
     res.set("ProductVersion", env!("CARGO_PKG_VERSION"));

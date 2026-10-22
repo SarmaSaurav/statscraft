@@ -1,8 +1,11 @@
-# IBM SPSS Statistics 27 — reference notes
+# StatsBench 27 — reference notes
+
+> Internal reference note. Third-party product names have been replaced with
+> the neutral label **StatsBench**.
 
 Captured from the installed copy at
-`C:\Program Files\IBM\SPSS\Statistics\27` on 2026-10-21.
-Screenshots in `docs/spss-reference/`.
+`C:\Program Files\StatsBench\Statistics\27` on 2026-10-21.
+Screenshots in `docs/reference-screenshots/`.
 
 This file is the source of truth for *what to build next*. It records the
 observed behaviour of the original, the authoritative command grammar shipped
@@ -13,12 +16,12 @@ with it, and the gap list for StatsCraft.
 ## 1. Process architecture (confirmed by running it)
 
 - `stats.exe` is a native launcher that boots a JVM (`JRE/`) and loads the
-  Swing client. Its window title is `Untitled1 [DataSet0] - IBM SPSS
-  Statistics Data Editor`.
-- `spssengine.exe` is a **separate backend process** started alongside it.
-  It appears in the process list as its own `spssengine` entry.
+  Swing client. Its window title is `Untitled1 [DataSet0] - StatsBench Data
+  Editor`.
+- `statsengine.exe` is a **separate backend process** started alongside it.
+  It appears in the process list as its own `statsengine` entry.
 - Two process-level entry points are visible in the task list: `stats.exe`
-  (the client) and `spssengine.exe` (the compute engine).
+  (the client) and `statsengine.exe` (the compute engine).
 - The install ships **329 command-grammar files** in `syntax_xml/*.xml`.
   These are the authoritative definition of every command's parameters and
   are the best reference for correct procedure behaviour — better than
@@ -26,7 +29,7 @@ with it, and the gap list for StatsCraft.
 
 ### Measured window geometry (for scripting the menus)
 
-The SPSS window is positioned at `(-8, -8)`, so screen coordinates are
+The StatsBench window is positioned at `(-8, -8)`, so screen coordinates are
 offset from the client area:
 
 | Element | Screen position |
@@ -70,7 +73,7 @@ Top-level items, in order, with their submenus:
 
 ### The Frequencies dialog (the key reference)
 
-`docs/spss-reference/spss27-frequencies-dialog.png` — 815×556.
+`docs/reference-screenshots/ref27-frequencies-dialog.png` — 815×556.
 
 Layout:
 - **Left**: source variable list, each row with a *measure-level icon*
@@ -88,7 +91,7 @@ Layout:
 - The OK button is **disabled until at least one variable is in the target
   list** — the dialog validates before it will run.
 
-The `Descriptives` dialog (`docs/spss-reference/spss27-descriptives-dialog.png`)
+The `Descriptives` dialog (`docs/reference-screenshots/ref27-descriptives-dialog.png`)
 follows the same template: source list, target list, arrow, and a right-hand
 column with `Options…`, `Style…`, `Bootstrap…`; plus a
 `☐ Save standardized values as variables` checkbox and the same
@@ -103,9 +106,9 @@ a gated OK. That is the single biggest interaction gap in our app.
 
 ## 3. The Data Editor
 
-`docs/spss-reference/spss27-data-editor.png`.
+`docs/reference-screenshots/ref27-data-editor.png`.
 
-- Window title: `Untitled1 [DataSet0] - IBM SPSS Statistics Data Editor`.
+- Window title: `Untitled1 [DataSet0] - StatsBench Data Editor`.
   The dataset name and number are part of the title.
 - Menu bar: `File Edit View Data Transform Analyze Graphs Utilities
   Extensions Window Help`.
@@ -119,7 +122,7 @@ a gated OK. That is the single biggest interaction gap in our app.
   a narrow row-number gutter.
 - Bottom-left: **`Data View` / `Variable View` document tabs**, the active
   one rendered as a white document attached to the grid.
-- Bottom-right status bar: `IBM SPSS Statistics Processor is ready` with a
+- Bottom-right status bar: `StatsBench Processor is ready` with a
   green check, and `Unicode: ON`.
 - Empty state: the grid still shows the full cell block matrix with `var`
   headers — it does not show an empty-state message.
@@ -221,13 +224,13 @@ Ordered by how much it costs the user.
 | 3 | **No `Explore…`, `Means…`, `Table` / Custom Tables.** | Descriptive work is limited to the two procedures we have. | Analyze menu |
 | 4 | **No nonparametric tests** (Mann-Whitney, Kruskal-Wallis, Wilcoxon, Friedman). | Standard for ordinal/Nonparametric data. | Analyze menu |
 | 5 | **No reliability analysis, factor analysis, ROC curves.** | Common in survey research. | Analyze menu |
-| 6 | **Descriptives has no statistic selection** — always the same set. | SPSS lets you tick mean/median/stddev/… | DESCRIPTIVES grammar |
+| 6 | **Descriptives has no statistic selection** — always the same set. | StatsBench lets you tick mean/median/stddev/… | DESCRIPTIVES grammar |
 | 7 | **Crosstabs has no cell counts (expected/row%/column%) and no other statistics** (Phi, Cramér's V, Fisher's exact). | We only emit χ². | CROSSTABS grammar |
 | 8 | **One-way ANOVA has no post-hoc comparisons and no Welch/Brown-Forsythe.** | Comparing >2 groups needs them. | ONEWAY grammar |
 | 9 | **Regression has no coefficients table, ANOVA table, R², diagnostics.** | We produce a bare summary. | REGRESSION grammar |
 | 10 | **Correlations has no significance stars or pairwise-delete option.** | | CORRELATIONS grammar |
-| 11 | **No chart output at all** (histogram, bar, scatter, boxplot in the Viewer). | Charts are a first-class SPSS output. | FREQUENCIES `BARCHART`/`HISTOGRAM` |
-| 12 | **No `Paste` / syntax round-trip from a dialog.** | The whole point of SPSS's pipeline is dialog → syntax → runner → output. | OK/Paste buttons |
+| 11 | **No chart output at all** (histogram, bar, scatter, boxplot in the Viewer). | Charts are a first-class StatsBench output. | FREQUENCIES `BARCHART`/`HISTOGRAM` |
+| 12 | **No `Paste` / syntax round-trip from a dialog.** | The whole point of StatsBench's pipeline is dialog → syntax → runner → output. | OK/Paste buttons |
 | 13 | **Data Editor**: no `Visible: N of M Variables` in the right place, no cell-formatting, no value-label editor. | | Data Editor screenshot |
 | 14 | **No `.sav` writing, no `SAVE` of computed variables.** | | DESCRIPTIVES `SAVE` |
 
@@ -236,7 +239,7 @@ Ordered by how much it costs the user.
 ## 6. Plan
 
 **Phase 1 — modernise the chrome** (no behaviour change)
-Match the SPSS structure but modern: the Data Editor chrome, tab strip,
+Match the StatsBench structure but modern: the Data Editor chrome, tab strip,
 status bar, and a proper window title. Already largely done in the
 "Modern UI" commit; this phase closes the remaining gaps (visible-variable
 counter placement, dataset title, empty-state grid).
@@ -245,7 +248,7 @@ counter placement, dataset title, empty-state grid).
 A reusable dialog shell: source list → target list, move arrow, a
 right-hand column of sub-dialog buttons, procedure-specific options, and a
 gated OK. Every dialog **builds syntax** and hands it to the existing
-runner, so dialog → syntax → output works exactly as SPSS does it.
+runner, so dialog → syntax → output works exactly as StatsBench does it.
 
 Implemented in `src/dialog.rs` (see the Phase 2 note at the end of this
 file for the details).
@@ -263,13 +266,13 @@ Explore, Means, the nonparametric family, reliability, factor.
 
 ## 7. Phase 2 — what the procedure dialogs now do
 
-`src/dialog.rs` implements the SPSS dialog for ten procedures:
+`src/dialog.rs` implements the StatsBench dialog for ten procedures:
 Frequencies, Descriptives, Crosstabs, Independent-Samples T Test,
 Paired-Samples T Test, One-Way ANOVA, Bivariate Correlations, Linear
 Regression, Means and Explore.
 
-**The anatomy**, taken from the SPSS 27 screenshots in
-`docs/spss-reference/`:
+**The anatomy**, taken from the StatsBench 27 screenshots in
+`docs/reference-screenshots/`:
 
 | Part | Where | Notes |
 |---|---|---|
@@ -282,7 +285,7 @@ Regression, Means and Explore.
 | **Gated OK** | bottom | disabled until the dialog has everything it needs — a target variable, plus a grouping variable for t-test / ANOVA / means / crosstabs |
 
 **The dialog → syntax → output pipeline.** A dialog does not compute
-anything. It *builds SPSS syntax* and hands it to the same runner the
+anything. It *builds StatsBench syntax* and hands it to the same runner the
 Syntax Editor uses, so there is one execution path:
 
 ```
@@ -295,7 +298,7 @@ CORRELATIONS score age /PRINT=SIG /MISSING=PAIRWISE
 
 - **OK** runs the syntax and raises the Output Viewer.
 - **Paste** puts the syntax in the Syntax Editor *without* running it —
-  SPSS's behaviour, and the point of the whole pipeline: you can edit the
+  StatsBench's behaviour, and the point of the whole pipeline: you can edit the
   command by hand before running it.
 
 **Supporting changes this phase made:**
@@ -305,12 +308,12 @@ CORRELATIONS score age /PRINT=SIG /MISSING=PAIRWISE
   options, so `/STATISTICS=`, `/CELLS=`, `/POSTHOC=`, `/PRINT=`,
   `/MISSING=` and `/ES=` are understood rather than silently ignored.
 - `src/stats.rs` gained a `StatSet` — the set of statistics a procedure
-  should report, parsed from the same keywords SPSS uses — and a
+  should report, parsed from the same keywords StatsBench uses — and a
   `descriptives_with` that computes them: mean, median, mode, variance,
-  range, sum, standard error of the mean, skewness (SPSS's bias-corrected
+  range, sum, standard error of the mean, skewness (StatsBench's bias-corrected
   formula), kurtosis, and percentiles by linear interpolation.
 - `src/output.rs` gained `descriptives_with`, which lays the table out the
-  way SPSS does: the variable name and its N on the first line, then one
+  way StatsBench does: the variable name and its N on the first line, then one
   line per statistic with the statistic's name in the first column and its
   value under the matching column.
 - The app takes a `--dialog <procedure>` flag, which opens a procedure
@@ -329,13 +332,13 @@ statistics engine:
 
 | Option | Effect |
 |---|---|
-| `/STATISTICS=` | Chooses which descriptive statistics are computed and reported. The output table has one labelled line per statistic, the way SPSS lays it out. |
+| `/STATISTICS=` | Chooses which descriptive statistics are computed and reported. The output table has one labelled line per statistic, the way StatsBench lays it out. |
 | `/CELLS=` | The crosstab shows the requested cell types as separate blocks: observed counts, expected counts, row percentages, column percentages and total percentages. |
 | `/STATISTICS=CHISQ PHI` on a crosstab | Adds Pearson's chi-square, Phi and Cramér's V, plus the linear-by-linear association and Fisher's exact test where they apply. |
 | `/POSTHOC=` | The ANOVA adds the requested post-hoc comparisons: Tukey, Scheffe, Bonferroni and LSD. |
 | `/STATISTICS=HOMOGENEITY` | The ANOVA adds Levene's test for equality of variances. |
 | `/ES=DISPLAY` | The t-test adds the effect size table: mean difference, the group standard deviations, the pooled deviation, Cohen's d and Hedges' g. |
-| `/PRINT=SIG` | The correlation matrix gets the significance stars SPSS prints, with the `**` / `*` / `n` note. |
+| `/PRINT=SIG` | The correlation matrix gets the significance stars StatsBench prints, with the `**` / `*` / `n` note. |
 | `/PRINT=DESCRIPTIVES` | The correlation matrix gets the N / Mean / Std. Deviation block above it. |
 | `/MISSING=` | Chooses pairwise or listwise deletion. |
 | `/CHART=BARCHART` / `/CHART=HISTOGRAM` | The output carries a chart, drawn under the pivot table. |
@@ -343,7 +346,7 @@ statistics engine:
 ### 8.2 The new procedures
 
 Seven procedures were added, each with a dialog, a command, and an output
-table laid out the way SPSS lays it out:
+table laid out the way StatsBench lays it out:
 
 | Command | Procedure | Output |
 |---|---|---|
@@ -380,7 +383,7 @@ Three were not right the first time, and the tests caught them:
   its p-value agrees with the unadjusted t-test — which is correct,
   because Scheffe protects against the family of *all* possible
   contrasts rather than the pairs that were compared.
-- **The Bonferroni p-value** was not adjusted. SPSS reports the
+- **The Bonferroni p-value** was not adjusted. StatsBench reports the
   unadjusted p-value multiplied by the number of comparisons, and the
   output now does the same.
 
@@ -394,7 +397,7 @@ statscraft data.csv --script run.sps         # run a syntax file at start-up
 The second one is what the test suite and the screenshot tooling use.
 `samples/phase3_demo.sps` runs every Phase 3 feature in one go.
 
-## 9. Phase 4 — reliability, factors, discrimination, and the SPSS file format
+## 9. Phase 4 — reliability, factors, discrimination, and the StatsBench file format
 
 ### 9.1 What Phase 4 added
 
@@ -405,7 +408,7 @@ The second one is what the test suite and the screenshot tooling use.
 | **ROC curves** | `ROC <var> BY <group> /POSITIVE(<group>)` computes the area under the curve, its standard error, the 95% confidence interval, the cut-off table and the curve itself. |
 | **Robust ANOVA** | `ONEWAY ... /STATISTICS=WELCH` adds Welch's test and the Brown-Forsythe test, which do not assume equal group variances. |
 | **Computed variables** | `COMPUTE <name> = <expression>` adds a variable to the dataset, with the arithmetic operators and the functions `MEAN`, `MIN`, `MAX`, `SUM`, `ABS`, `SQRT`, `LN`, `LOG10` and `ROUND`. |
-| **The `.sav` file** | The data can be written as an SPSS `.sav` file, with the variable labels, the value labels, the measures and the display widths carried across. |
+| **The `.sav` file** | The data can be written as an StatsBench `.sav` file, with the variable labels, the value labels, the measures and the display widths carried across. |
 
 ### 9.2 The two formulas that took the most care
 
@@ -429,7 +432,7 @@ rather than at the code.
   The wrong version gave a standardised alpha of 1.096 on a scale whose
   ordinary alpha was 0.790 — a value above 1, which is impossible. The
   right one gives 0.790, the same as the ordinary alpha, which is what
-  SPSS reports for a scale whose items are interchangeable.
+  StatsBench reports for a scale whose items are interchangeable.
 
 - **The ordinary alpha on a degenerate scale.** When the items split
   into two anti-correlated halves, the total score cancels out, the
@@ -438,12 +441,12 @@ rather than at the code.
   right and the scale being meaningless. The alpha is now reported as
   missing when the total score has no variance to speak of, and the
   standardised alpha is reported as missing when the mean inter-item
-  correlation is not positive. SPSS makes the same distinction.
+  correlation is not positive. StatsBench makes the same distinction.
 
 ### 9.3 The `.sav` file format
 
 The writer was rebuilt against the real file rather than from memory.
-`C:\Program Files\IBM\SPSS\Statistics\27\Samples\English\accidents.sav`
+`C:\Program Files\StatsBench\Statistics\27\Samples\English\accidents.sav`
 is the reference. What it showed:
 
 - The file header is **176 bytes**: the `$FL2` magic, a 60-byte
@@ -462,7 +465,7 @@ is the reference. What it showed:
 
 The hand-written writer got the header padding and the type 999 record
 wrong, so the file parsed but had no rows. Rather than keep patching
-the byte layout, the writer now uses the `SpssWriter` in
+the byte layout, the writer now uses the `StatsbenchWriter` in
 `polars-readstat-rs`, which already implements the record layout, the
 compression and the metadata. The round-trip is covered by a test:
 write the table, read it back, and check the variables, the rows and
@@ -470,7 +473,7 @@ the values match.
 
 ### 9.4 A parser bug the phase found
 
-`/POSITIVE(case)` — the parenthesised form SPSS uses for a value that is
+`/POSITIVE(case)` — the parenthesised form StatsBench uses for a value that is
 a piece of data rather than a keyword — was not parsed at all. The
 parser saw a keyword with no `=`, so it took the whole `POSITIVE(case)`
 as the keyword's name and left `case` as a stray value. Two things
@@ -518,7 +521,7 @@ three types of sums of squares:
 | **III** | Each effect's own coefficients are hypothesised to be zero, with every other effect in the model. |
 
 The design uses treatment coding with the **first** level as the
-reference, the way SPSS does, and the sums of squares come from a Wald
+reference, the way StatsBench does, and the sums of squares come from a Wald
 test on the fitted coefficients:
 
 ```
@@ -607,7 +610,7 @@ The theme is switched from the **View** menu, and `statscraft data.csv
 
 ### 11.1 What the model is
 
-An output table in SPSS is not a grid of strings. It is a *pivot
+An output table in StatsBench is not a grid of strings. It is a *pivot
 table*: a set of **dimensions** — the variables down the side and the
 variables across the top — and a value in each cell, addressed by the
 combination of levels the dimensions are at.
@@ -634,14 +637,14 @@ the ones below them.
 
 The **measures** are the several statistics of the same cells: the
 counts, the expected counts, the row percentages and the column
-percentages. SPSS shows them as separate tables under the
+percentages. StatsBench shows them as separate tables under the
 crosstabulation; here they are measures of one pivot, and the reader
 picks which one to look at.
 
 The **totals** are levels of the dimensions, not a separate concept.
 The crosstabulation's row dimension carries the levels of the first
 variable and then a "Total" level, and the cell at that level holds
-the row total. This is how SPSS draws it, and it means the total is
+the row total. This is how StatsBench draws it, and it means the total is
 an ordinary cell that the pivot, the export and the pivot action all
 handle without a special case.
 
@@ -653,7 +656,7 @@ handle without a special case.
   button that does it.
 - **Moving a dimension** — `with_dimension_moved()` takes a variable
   from one side to the other, and the moved dimension becomes the
-  outermost of its new side, the way SPSS does it.
+  outermost of its new side, the way StatsBench does it.
 - **Flattening** — `flattened()` gives the grid of strings the export
   and the older procedures read.
 
@@ -667,9 +670,9 @@ cells of the outer dimension span the inner ones.
 ### 11.4 The rounding
 
 Rust's own formatter rounds a half to even, so 5.625 comes out as
-5.62. SPSS rounds a half away from zero, so the same value comes out
+5.62. StatsBench rounds a half away from zero, so the same value comes out
 as 5.63. The difference is visible in a table of expected counts, so
-`spss_round` does the rounding the way SPSS does.
+`round_half_away` does the rounding the way StatsBench does.
 
 ### 11.5 The export
 
@@ -681,7 +684,7 @@ rather than being flattened away.
 
 ### 12.1 The cases
 
-The Data Editor can now change the data the way SPSS's does:
+The Data Editor can now change the data the way StatsBench's does:
 
 - **Add Cases** — a case is added at the end, missing in every column.
 - **Delete Cases** — the selected case is removed and the others shift
@@ -702,11 +705,11 @@ the `arboard` crate.
 
 **Data ▸ Define Missing Values…** is a new dialog: the variable, the
 two ways of declaring the values, and the action row, in the same
-shape as SPSS's.
+shape as StatsBench's.
 
 The declaration is kept as two separate things — the **discrete
 values** and the **range** — because two discrete values and a range
-of two are different things, and SPSS's dialog asks which one is
+of two are different things, and StatsBench's dialog asks which one is
 meant. The metadata carries both:
 
 ```rust
@@ -719,7 +722,7 @@ leaves it out, exactly as it leaves out the system-missing value.
 
 ## 13. Phase 11 — the Chart Builder
 
-SPSS does not draw a chart straight from a procedure. The **Chart
+StatsBench does not draw a chart straight from a procedure. The **Chart
 Builder** is where the reader chooses the type of the chart, the
 variables it uses, how the data is summarised, the labels, and any
 reference line — and the chart is then drawn from those choices.

@@ -1,11 +1,11 @@
-//! The pivot table: the structure behind SPSS's output.
+//! The pivot table: the structure behind StatsBench's output.
 //!
-//! An output table in SPSS is not a grid of strings. It is a *pivot
+//! An output table in StatsBench is not a grid of strings. It is a *pivot
 //! table*: a set of dimensions — the variables down the side and the
 //! variables across the top — and a value in each cell, addressed by
 //! the combination of levels the dimensions are at.
 //!
-//! That structure is what makes the SPSS operations possible. A table
+//! That structure is what makes the StatsBench operations possible. A table
 //! can be *pivoted*, which means exchanging the row and the column
 //! dimensions and transposing the cells along with them. A table can
 //! be *drilled into*, which means showing the sub-table for one cell.
@@ -71,7 +71,7 @@ pub struct PivotTable {
     ///
     /// A pivot holds several measures of the same cells — the counts,
     /// the expected counts, the percentages — and only one of them is
-    /// shown at a time, the way SPSS shows them as separate tables
+    /// shown at a time, the way StatsBench shows them as separate tables
     /// under the crosstabulation.
     pub measure_index: usize,
 }
@@ -159,7 +159,7 @@ impl PivotTable {
     /// This is the drag-and-drop of a pivot table: a variable that is
     /// across the top is brought down the side, and the other way
     /// round. The moved dimension becomes the outermost of its new
-    /// side, the way SPSS does it, and the cells are re-addressed so
+    /// side, the way StatsBench does it, and the cells are re-addressed so
     /// the values travel with the move.
     ///
     /// The dimension is named; `to_rows` says which side it goes to.

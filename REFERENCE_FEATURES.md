@@ -1,9 +1,12 @@
-# IBM SPSS Statistics 27 — Feature Analysis, Mechanics, and Evidence
+# StatsBench 27 — Feature Analysis, Mechanics, and Evidence
 
-**Product analysed:** IBM SPSS Statistics 27 (build 27.0.1.0), installed at `C:\Program Files\IBM\SPSS\Statistics\27`
+> Internal reference note. Third-party product names have been replaced with
+> the neutral label **StatsBench**.
+
+**Product analysed:** StatsBench 27 (build 27.0.1.0), installed at `C:\Program Files\StatsBench\Statistics\27`
 **Analysis date:** 22 October 2026
 **Method:** direct observation of the running application, installation-tree inspection, command-descriptor XML, output schemas, sample files, and extension bundles
-**Deliverable location:** `D:\The_SPSS_Garage\StatsCraft\SPSS_Features.md`
+**Deliverable location:** `D:\Projects\StatsCraft\REFERENCE_FEATURES.md`
 
 ---
 
@@ -26,16 +29,16 @@ The application was launched and used live. The full pipeline **dialog → gener
 
 ## 1. Executive summary
 
-IBM SPSS Statistics 27 is a **metadata-driven statistical workbench** built as a Java Swing client over a separate native compute engine, with per-procedure native modules and an R/Python extension layer.
+StatsBench 27 is a **metadata-driven statistical workbench** built as a Java Swing client over a separate native compute engine, with per-procedure native modules and an R/Python extension layer.
 
 Six design decisions explain almost every feature in the product:
 
 1. **The dataset is a dictionary, not just a grid.** Every variable carries a name, type, width, decimals, label, value labels, missing-value rules, display width, alignment, measurement level, and modelling role. Dialogs, charts, and procedures read that metadata and change their behaviour accordingly.
 2. **Dialogs are syntax generators.** A dialog assembles a command, and its **Paste** button writes the exact command into a Syntax Editor. The Output Viewer's log shows the commands that actually ran. Nothing is hidden in a proprietary "dialog state".
-3. **Analysis is command-oriented.** The install ships 328 command descriptors (`syntax_xml\*.xml`). Every menu procedure maps to one of these commands and to a native module (`spssw*.dll`, 132 modules; most are procedures, a few are format handlers) or an R/Python extension.
-4. **Output is a structured document, not a screenshot.** Results are a tree of headings, notes, pivot tables, charts, trees, and models, serialised as `.spv` XML conforming to the shipped `spss-output-1.8.xsd`. Pivot tables stay editable after the analysis.
-5. **The front end is separate from the engine.** `stats.exe` starts a JVM/Swing client; `spssengine.exe` performs the computation. The same engine can be reached through a server daemon (`statisticsd.conf`, port 3027), which is why SPSS can run locally or in client/server mode.
-6. **New statistics ship as extensions, not core rebuilds.** Many SPSS 27 additions (Distribution Fit, Relative Importance, Ridge Regression, Canonical Correlation, Cluster Silhouettes, Nonparametric Regression, Propensity Score Matching, TURF, Column Proportion Test, Weibull Plot) are R-based bundles under `ProgramData\IBM\SPSS\Statistics\27\extensions`, each with a dialog spec (`.spd`), syntax spec (`.xml`/`.spe`), and R source (`.R`).
+3. **Analysis is command-oriented.** The install ships 328 command descriptors (`syntax_xml\*.xml`). Every menu procedure maps to one of these commands and to a native module (`statsw*.dll`, 132 modules; most are procedures, a few are format handlers) or an R/Python extension.
+4. **Output is a structured document, not a screenshot.** Results are a tree of headings, notes, pivot tables, charts, trees, and models, serialised as `.spv` XML conforming to the shipped `output-1.8.xsd`. Pivot tables stay editable after the analysis.
+5. **The front end is separate from the engine.** `stats.exe` starts a JVM/Swing client; `statsengine.exe` performs the computation. The same engine can be reached through a server daemon (`statisticsd.conf`, port 3027), which is why StatsBench can run locally or in client/server mode.
+6. **New statistics ship as extensions, not core rebuilds.** Many StatsBench 27 additions (Distribution Fit, Relative Importance, Ridge Regression, Canonical Correlation, Cluster Silhouettes, Nonparametric Regression, Propensity Score Matching, TURF, Column Proportion Test, Weibull Plot) are R-based bundles under `ProgramData\StatsBench\Statistics\27\extensions`, each with a dialog spec (`.spd`), syntax spec (`.xml`/`.spe`), and R source (`.R`).
 
 The rest of this document expands those points feature by feature.
 
@@ -47,23 +50,23 @@ The rest of this document expands those points feature by feature.
 
 | Property | Observed value | Evidence |
 |---|---|---|
-| Product name | IBM SPSS Statistics 27 | [E1] |
+| Product name | StatsBench 27 | [E1] |
 | Version | 27.0.1.0 (VersionMajor 27, VersionMinor 0, FixPack 0, VersionPatch 1) | [E1] |
-| Install root | `C:\Program Files\IBM\SPSS\Statistics\27` | [E1], [E5] |
+| Install root | `C:\Program Files\StatsBench\Statistics\27` | [E1], [E5] |
 | Licence feature code | 1200 (Base); module codes listed in `productnames.ini` | [E1], [E2] |
 | Character encoding | CodePage 65001 (UTF-8); status bar reports `Unicode: ON` | [E1], [E13] |
-| Java runtime | IBM J9 (`JRE\bin\j9vm\jvm.dll`), `-Xms256M -Xmx2048M`, compressed references, TLS 1.2 default | [E3] |
-| Compute binaries | `stats.exe` (client launcher, 359 KB) and `spssengine.exe` (engine, 86 KB) | [E5] |
+| Java runtime | J9 (`JRE\bin\j9vm\jvm.dll`), `-Xms256M -Xmx2048M`, compressed references, TLS 1.2 default | [E3] |
+| Compute binaries | `stats.exe` (client launcher, 359 KB) and `statsengine.exe` (engine, 86 KB) | [E5] |
 | Server daemon config | port 3027, `win32` authentication, 4 user / 4 worker threads, SSL mode 0 (disabled; 2/3/4 enable TLS 1.0/1.1/1.2), client data access `FULL` | [E4] |
-| Native `spssw*` modules | 132 files | [E5] |
-| Java components | 142 JARs, including `SPSSClientUI.jar` (16.5 MB), `SPSSClientUIRes.jar` (15.0 MB), `SPSSSyntaxEditor.jar` | [E5] |
+| Native `statsw*` modules | 132 files | [E5] |
+| Java components | 142 JARs, including `StatsBenchClientUI.jar` (16.5 MB), `StatsBenchClientUIRes.jar` (15.0 MB), `StatsBenchSyntaxEditor.jar` | [E5] |
 | Command descriptors | 328 XML files in `syntax_xml\` | [E6] |
 | Help topics | 8,992 IDs in `helpids.csv` | [E9] |
 | Chart templates | 50 `.viztemplate` files | [E8] |
 | Sample assets | 1,328 `.sav`, 209 `.sps`, 22 `.spv`, 55 `.csplan`, 33 `.csaplan` | [E7] |
 | Bundled Python | Python 3.8.2 (`Python3\python.exe`) | [E12] |
 | R integration | present; R-based extension bundles and `R 3.6 Configuration` bundle | [E12] |
-| Output schemas | `spss-output-1.4` … `1.8.xsd`, `dictionary-1.0/1.1.xsd`, `spss-oms-log-1.1/1.2.xsd`, PMML 2.1–4.3 | [E10] |
+| Output schemas | `output-1.4` … `1.8.xsd`, `dictionary-1.0/1.1.xsd`, `oms-log-1.1/1.2.xsd`, PMML 2.1–4.3 | [E10] |
 
 ### 2.2 What "evidence" means here
 
@@ -83,23 +86,23 @@ It does not claim to document every option of all 328 commands at parameter leve
 
 ---
 
-## 3. Architecture: how SPSS is put together
+## 3. Architecture: how StatsBench is put together
 
 ### 3.1 Layer model
 
 ```
 +--------------------------------------------------------------+
 |  Java Swing client                                           |
-|  stats.exe -> JVM (J9) -> SPSSClientUI.jar / ClientCore.jar  |
+|  stats.exe -> JVM (J9) -> StatsBenchClientUI.jar / ClientCore.jar  |
 |  Data Editor | Syntax Editor | Output Viewer | Dialogs       |
 +-----------------------------+--------------------------------+
                               | commands, data, output objects
 +-----------------------------v--------------------------------+
-|  Compute engine  (spssengine.exe)                            |
-|  spssstat.dll  (core statistics, 5.0 MB)                     |
-|  132 spssw*.dll modules (procedures + format handlers)       |
-|  spssio64.dll + spssodbc/spssxls/spssxd/... (data access)    |
-|  spsswout.dll, spsswoms.dll  (output and OMS)                |
+|  Compute engine  (statsengine.exe)                            |
+|  statsstat.dll  (core statistics, 5.0 MB)                     |
+|  132 statsw*.dll modules (procedures + format handlers)       |
+|  savio64.dll + savodbc/savxls/refxd/... (data access)    |
+|  statswout.dll, statswoms.dll  (output and OMS)                |
 +-----------------------------+--------------------------------+
                               |
 +-----------------------------v--------------------------------+
@@ -111,34 +114,34 @@ It does not claim to document every option of all 328 commands at parameter leve
 
 ### 3.2 The client
 
-`stats.exe` is a small native launcher (359 KB). It starts the bundled J9 JVM (`jvmcfg.ini`) and the Java client. The client is by far the largest part of the product: `SPSSClientUI.jar` is 16.5 MB and `SPSSClientUIRes.jar` is 15.0 MB, with additional JARs for the syntax editor, chart editor, pivot-table editor, model viewer, and custom-dialog builder. The measured behaviour matches a Swing application: Java-style menus, a Java Look-and-Feel, keyboard mnemonics, modal dialogs over MDI child windows, and a separate window per Data Editor, Syntax Editor, and Viewer.
+`stats.exe` is a small native launcher (359 KB). It starts the bundled J9 JVM (`jvmcfg.ini`) and the Java client. The client is by far the largest part of the product: `StatsBenchClientUI.jar` is 16.5 MB and `StatsBenchClientUIRes.jar` is 15.0 MB, with additional JARs for the syntax editor, chart editor, pivot-table editor, model viewer, and custom-dialog builder. The measured behaviour matches a Swing application: Java-style menus, a Java Look-and-Feel, keyboard mnemonics, modal dialogs over MDI child windows, and a separate window per Data Editor, Syntax Editor, and Viewer.
 
 The client is responsible for **presentation and command construction**, not for the statistics. It knows which variables exist and what their metadata is, which is why dialogs can grey out invalid choices and why the Frequencies dialog can show `Age category [agecat]` rather than only `agecat`.
 
-**Why:** the split lets IBM ship a rich cross-platform UI once, keep the numerical engine native and fast, and offer the same engine in local, server, and batch modes.
+**Why:** the split lets the original developer ship a rich cross-platform UI once, keep the numerical engine native and fast, and offer the same engine in local, server, and batch modes.
 
 ### 3.3 The engine and the procedure modules
 
-`spssengine.exe` (86 KB) is the separate compute executable in the install; the client is designed to drive it as the engine, as the product's client/server layout and daemon configuration indicate **(inferred from the binary layout; the exact IPC is not exposed)**. The heavy numerical code is in `spssstat.dll` (5.0 MB) and in **132 `spssw*.dll` modules**. The naming is systematic and matches commands:
+`statsengine.exe` (86 KB) is the separate compute executable in the install; the client is designed to drive it as the engine, as the product's client/server layout and daemon configuration indicate **(inferred from the binary layout; the exact IPC is not exposed)**. The heavy numerical code is in `statsstat.dll` (5.0 MB) and in **132 `statsw*.dll` modules**. The naming is systematic and matches commands:
 
 | Module | Command family (inferred from name) |
 |---|---|
-| `spsswfre.dll` | FREQUENCIES |
-| `spsswreg.dll` | REGRESSION |
-| `spsswglm.dll` | GLM / UNIANOVA |
-| `spsswmix.dll` | MIXED |
-| `spsswgen.dll` | GENLIN |
-| `spsswfac.dll` | FACTOR |
-| `spsswrel.dll` | RELIABILITY |
-| `spsswclu.dll` | CLUSTER / QUICK CLUSTER |
-| `spsswcox.dll` | COXREG |
-| `spsswkm.dll` | KM (Kaplan-Meier) |
-| `spsswmva.dll` | MVA (Missing Value Analysis) |
-| `spsswmim.dll` | MULTIPLE IMPUTATION |
-| `spsswneu.dll` | Neural Networks (MLP/RBF) |
-| `spsswggr.dll` | GGRAPH (Chart Builder graphics) |
-| `spsswstm.dll` | Spatial and Temporal Modeling |
-| `spsswcs*.dll` | Complex Samples family |
+| `statswfre.dll` | FREQUENCIES |
+| `statswreg.dll` | REGRESSION |
+| `statswglm.dll` | GLM / UNIANOVA |
+| `statswmix.dll` | MIXED |
+| `statswgen.dll` | GENLIN |
+| `statswfac.dll` | FACTOR |
+| `statswrel.dll` | RELIABILITY |
+| `statswclu.dll` | CLUSTER / QUICK CLUSTER |
+| `statswcox.dll` | COXREG |
+| `statswkm.dll` | KM (Kaplan-Meier) |
+| `statswmva.dll` | MVA (Missing Value Analysis) |
+| `statswmim.dll` | MULTIPLE IMPUTATION |
+| `statswneu.dll` | Neural Networks (MLP/RBF) |
+| `statswggr.dll` | GGRAPH (Chart Builder graphics) |
+| `statswstm.dll` | Spatial and Temporal Modeling |
+| `statswcs*.dll` | Complex Samples family |
 
 Modules are loaded on demand, which is why the install can carry 132 of them without a 132-module startup cost. The engine also enforces the licence: `productnames.ini` maps feature codes (Base, Tables, Regression Models, Advanced Models, Exact Tests, Categories, Missing Values, Custom Tables, Complex Samples, Classification Trees, Data Validation, Programmability, Advanced Visualization, Trends) to modules. **(inferred)** from the feature-code table and the per-module layout.
 
@@ -148,20 +151,20 @@ Data I/O is a separate layer with format-specific libraries:
 
 | Library | Role |
 |---|---|
-| `spssio64.dll` (1.3 MB) | Native SPSS `.sav`/`.zsav` reader/writer |
-| `spssodbc.dll` | ODBC database access |
-| `spssxls.dll`, `spssexcel.jar` | Excel workbooks |
-| `spssxd.dll`, `spssxdlm.dll` | Delimited text and data access |
-| `spsswsas.dll` | SAS transport files (`GET SAS`) |
-| `spssjson.dll` | JSON |
-| `spssdeds.dll`, `spssdemg.dll`, `spssdnet.dll` | Data-editor and data-management support |
-| `SpssClientProxy.dll` | Client-side proxy into the engine |
+| `savio64.dll` (1.3 MB) | Native StatsBench `.sav`/`.zsav` reader/writer |
+| `savodbc.dll` | ODBC database access |
+| `savxls.dll`, `refexcel.jar` | Excel workbooks |
+| `refxd.dll`, `refxdlm.dll` | Delimited text and data access |
+| `statswsas.dll` | SAS transport files (`GET SAS`) |
+| `savjson.dll` | JSON |
+| `refdeds.dll`, `refdemg.dll`, `refdnet.dll` | Data-editor and data-management support |
+| `StatsbenchClientProxy.dll` | Client-side proxy into the engine |
 
 The command catalog confirms the formats: `GET SAS`, `GET STATA`, `GET TRANSLATE`, `SAVE TRANSLATE`, `IMPORT`, `EXPORT`, `SAVE CODEPAGE`, `MATRIX DATA`, `OMS` destinations, and the `OUTPUT EXPORT` subcommands `DOC, HTML, PDF, PPT, TEXT, XLS, XLSX, XLSM, BMP, EMF, EPS, JPG, PNG, TIF` [E6].
 
 ### 3.5 Output and OMS
 
-`spsswout.dll` (678 KB) and `spsswoms.dll` (203 KB) handle output and the Output Management System. The output model is defined publicly by `spss-output-1.8.xsd`, whose root `outputTree` contains `command`, `pageTitle`, `textBlock`, `heading`, `pivotTable`, `chartTitle`/`chart`, `treeTitle`/`treeView`, and `modelTitle`/`model` elements [E10]. That is exactly what the Viewer displays in its outline (Log, Title, Notes, Active Dataset, Statistics, Age category), which confirms that the Viewer is rendering the same structured document that `.spv` stores [E17].
+`statswout.dll` (678 KB) and `statswoms.dll` (203 KB) handle output and the Output Management System. The output model is defined publicly by `output-1.8.xsd`, whose root `outputTree` contains `command`, `pageTitle`, `textBlock`, `heading`, `pivotTable`, `chartTitle`/`chart`, `treeTitle`/`treeView`, and `modelTitle`/`model` elements [E10]. That is exactly what the Viewer displays in its outline (Log, Title, Notes, Active Dataset, Statistics, Age category), which confirms that the Viewer is rendering the same structured document that `.spv` stores [E17].
 
 ### 3.6 Server mode
 
@@ -180,7 +183,7 @@ The command catalog confirms the formats: `GET SAS`, `GET STATA`, `GET TRANSLATE
 
 ### 4.1 Two views of one dataset
 
-The Data Editor is the default window (`Untitled1 [DataSet0] - IBM SPSS Statistics Data Editor`, later `accidents.sav [DataSet1]`). It has two tabs:
+The Data Editor is the default window (`Untitled1 [DataSet0] - StatsBench Data Editor`, later `accidents.sav [DataSet1]`). It has two tabs:
 
 - **Data View** — a case-by-variable grid. Rows are cases (respondents, records); columns are variables. Cells show either raw values or value labels depending on **View > Value Labels**.
 - **Variable View** — one row per variable and one column per metadata property. This is the dictionary that drives every dialog.
@@ -231,7 +234,7 @@ Variable View's **Missing** column supports:
 - **Discrete missing values** (up to three specific codes, e.g. 9, 99),
 - **Range** (a low–high range) plus an optional discrete value.
 
-Missing values are declared, not guessed. Procedures exclude them listwise or pairwise depending on their options; the Frequencies output separates `N Valid` from `Missing` (observed: Valid 6, Missing 0) [E17]. **Why:** SPSS distinguishes "no answer" codes from real data, so a code such as 99 does not silently inflate means.
+Missing values are declared, not guessed. Procedures exclude them listwise or pairwise depending on their options; the Frequencies output separates `N Valid` from `Missing` (observed: Valid 6, Missing 0) [E17]. **Why:** StatsBench distinguishes "no answer" codes from real data, so a code such as 99 does not silently inflate means.
 
 ### 4.6 Roles and custom attributes
 
@@ -255,11 +258,11 @@ Transformations can remain **pending** until the data are read or a procedure fo
 
 ### 4.8 Status, Unicode, and auto-recovery
 
-The status bar reports `IBM SPSS Statistics Processor is ready` and `Unicode: ON`. The Unicode flag reflects the UTF-8 code page (65001) and affects how text and labels are stored and displayed [E1], [E13].
+The status bar reports `StatsBench Processor is ready` and `Unicode: ON`. The Unicode flag reflects the UTF-8 code page (65001) and affects how text and labels are stored and displayed [E1], [E13].
 
 The product maintains **restore points**. On startup in this environment it presented a **Session Management** dialog: "Please select a restore point to open", with a table of restore points by type (Data Editor, Output, Syntax), file name, and date, plus **Restore**, **Cancel**, and **Delete** [E20]. The File menu exposes **Open Restore Point...**, **Save Restore Point...**, and a checked **File Enabled for Auto-Recovery** item [E22]. **Why:** statistical sessions can represent hours of work; auto-recovery is a first-class data-protection feature, not an afterthought.
 
-A separate **Error Reporting Service** dialog appeared at startup ("SPSS Statistics encountered an unexpected error"), offering **More Information**, **Send**, and **Cancel** [E21]. Cancelling it allowed the application to continue normally. This is the crash-reporting/telemetry path, and it is independent of the session-recovery path.
+A separate **Error Reporting Service** dialog appeared at startup ("StatsBench encountered an unexpected error"), offering **More Information**, **Send**, and **Cancel** [E21]. Cancelling it allowed the application to continue normally. This is the crash-reporting/telemetry path, and it is independent of the session-recovery path.
 
 ---
 
@@ -311,7 +314,7 @@ Notes:
 Running the pasted syntax (`Ctrl+A`, `Ctrl+R`) produced the Viewer document described in §7. The Viewer's **Log** recorded the *actual* commands, including the ones the GUI had issued earlier:
 
 ```
-GET  FILE='C:\Program Files\IBM\SPSS\Statistics\27\Samples\English\accidents.sav'.
+GET  FILE='C:\Program Files\StatsBench\Statistics\27\Samples\English\accidents.sav'.
 DATASET NAME DataSet1 WINDOW=FRONT.
 DATASET ACTIVATE DataSet1.
 FREQUENCIES VARIABLES=agecat
@@ -352,7 +355,7 @@ Dialogs are not generic forms. They read the dictionary:
 
 ### 6.1 Window anatomy
 
-The pasted command opened a window titled `*Syntax1 - IBM SPSS Statistics Syntax Editor` [E16]. Its parts:
+The pasted command opened a window titled `*Syntax1 - StatsBench Syntax Editor` [E16]. Its parts:
 
 - **Menu bar** specific to syntax: `File, Edit, View, Data, Transform, Analyze, Graphs, Utilities, Run, Tools, Extensions, Window, Help`. The presence of **Run** and **Tools** distinguishes it from the Data Editor.
 - **Navigation pane** on the left, listing the commands in the file (`DATASET ACTIVATE`, `FREQUENCIES`). This is an outline for long syntax files.
@@ -379,7 +382,7 @@ The **Run** menu and the toolbar support running the whole file, the current com
 
 ### 7.1 Document structure
 
-The Viewer window for the Frequencies run was titled `*Output1 [Document1] - IBM SPSS Statistics Viewer` [E17]. Its left pane is an **outline tree**:
+The Viewer window for the Frequencies run was titled `*Output1 [Document1] - StatsBench Viewer` [E17]. Its left pane is an **outline tree**:
 
 ```
 Output
@@ -400,7 +403,7 @@ The Log is not a console dump; it is a first-class output object containing the 
 
 ### 7.3 Pivot tables
 
-The output tables are **pivot tables**, not images. The `spss-output-1.8.xsd` defines a `pivotTable` node with caption, corner text, dimensions, categories, and cells [E10]. In the Viewer, a pivot table can be:
+The output tables are **pivot tables**, not images. The `output-1.8.xsd` defines a `pivotTable` node with caption, corner text, dimensions, categories, and cells [E10]. In the Viewer, a pivot table can be:
 
 - transposed (rows and columns swapped),
 - pivoted (dimensions moved between layers, rows, and columns),
@@ -408,7 +411,7 @@ The output tables are **pivot tables**, not images. The `spss-output-1.8.xsd` de
 - restyled (table looks, fonts, borders),
 - exported or copied into Word/Excel/PowerPoint.
 
-**Why:** the same result often needs to be read in different orientations, and a table that can be reshaped is more useful than a frozen screenshot. It also makes the output machine-processable (OMS, XML, SPSS Statistics Server).
+**Why:** the same result often needs to be read in different orientations, and a table that can be reshaped is more useful than a frozen screenshot. It also makes the output machine-processable (OMS, XML, StatsBench Server).
 
 ### 7.4 Charts, trees, and models
 
@@ -471,7 +474,7 @@ The File menu is the document and session layer: create/open/save data and outpu
 | **Recently Used Data / Files ▸** | Reopens recent items | Client MRU list | Fast return to work |
 | **Exit** | Quits the application | Closes documents, prompts to save | Normal shutdown |
 
-**Why the File menu looks like this:** SPSS treats data, syntax, output, and scripts as separate document types with separate lifecycles. That is why New/Open/Save each have submenus rather than a single "file" concept. It also explains why **Save** (data) and **Export** (other formats) are distinct: `.sav` preserves the dictionary, while export formats generally do not.
+**Why the File menu looks like this:** StatsBench treats data, syntax, output, and scripts as separate document types with separate lifecycles. That is why New/Open/Save each have submenus rather than a single "file" concept. It also explains why **Save** (data) and **Export** (other formats) are distinct: `.sav` preserves the dictionary, while export formats generally do not.
 
 **Evidence:** [E22] File menu capture; [E1] version/build; [E4] server config; [E6] `SAVE`, `SAVE TRANSLATE`, `OUTPUT EXPORT`, `DATASET`, `DISPLAY`, `SYSFILE INFO`, `REPOSITORY` commands; [E20] restore-point dialog.
 
@@ -482,7 +485,7 @@ The Edit menu is the clipboard, search, navigation, and options layer for the ac
 | Item | What it does | How it works | Why it exists |
 |---|---|---|---|
 | **Undo / Redo** (`Ctrl+Z`, `Ctrl+Y`) | Reverses or reapplies the last edit | Client-side undo stack | Safe experimentation |
-| **Cut / Copy / Paste** | Standard clipboard operations on cells, variables, or output | Client clipboard with SPSS-aware formats | Move data between SPSS and Office |
+| **Cut / Copy / Paste** | Standard clipboard operations on cells, variables, or output | Client clipboard with StatsBench-aware formats | Move data between StatsBench and Office |
 | **Copy with Variable Names** | Copies data with variable names as headers | Clipboard serialiser | Paste into a tool that needs machine names |
 | **Copy with Variable Labels** | Copies data with labels as headers | Clipboard serialiser | Readable pastes for reports |
 | **Paste Variables...** | Pastes a list of variables into the current dataset | Reads clipboard variable list | Build a dataset from a variable plan |
@@ -500,7 +503,7 @@ The Edit menu is the clipboard, search, navigation, and options layer for the ac
 | **Go to Imputation...** | Jumps to imputed values | Multiple-imputation metadata | Audit imputations |
 | **Options...** | Opens global preferences (view, output, charts, currency, etc.) | Client settings store | Personalise the environment |
 
-**Why:** the Data Editor is an editor as well as a viewer. Analysts spend a large share of time locating, correcting, and copying values, so standard editing plus SPSS-specific copy modes (names vs labels) are first-class features.
+**Why:** the Data Editor is an editor as well as a viewer. Analysts spend a large share of time locating, correcting, and copying values, so standard editing plus StatsBench-specific copy modes (names vs labels) are first-class features.
 
 **Evidence:** [E22] Edit menu capture; [E6] `VARIABLE`, `FILTER`, `WEIGHT` command families; [E5] client JARs.
 
@@ -520,7 +523,7 @@ The View menu controls what the current window shows. In Variable View the obser
 | **Customize Variable View...** | Chooses which metadata columns are visible | Column model | Focus on relevant metadata |
 | **Data** (`Ctrl+T`) | Switches to Data View | View switch | Move between schema and cases |
 
-**Why:** SPSS distinguishes **presentation** from **data**. Value labels can be shown or hidden without changing stored values; grid lines and fonts are display-only; imputation marking is a visual audit aid. That separation is what lets the same dataset serve data entry, analysis, and reporting.
+**Why:** StatsBench distinguishes **presentation** from **data**. Value labels can be shown or hidden without changing stored values; grid lines and fonts are display-only; imputation marking is a visual audit aid. That separation is what lets the same dataset serve data entry, analysis, and reporting.
 
 **Evidence:** [E22] View menu capture; [E13] Variable View; [E14] Data View with labels.
 
@@ -567,7 +570,7 @@ The Data menu is the data-management layer: it changes the dictionary, joins and
 
 - **What:** Wizard for building date/time variables from parts and extracting parts from dates.
 - **How:** `DATE` command (e.g. `DATE ... /FORMAT`, `DATE ... /EXTRACT`).
-- **Why:** Dates are stored as seconds since 1582-10-14 in SPSS; the wizard hides the conversion arithmetic and avoids off-by-one errors.
+- **Why:** Dates are stored as seconds since 1582-10-14 in StatsBench; the wizard hides the conversion arithmetic and avoids off-by-one errors.
 - **Evidence:** [E6]; DateTime type in Variable View [E13].
 
 #### Define Multiple Response Sets...
@@ -661,7 +664,7 @@ Submenu observed: **Add Cases...**, **Add Variables...** [E24].
 #### Rake Weights...
 
 - **What:** Adjusts survey weights so marginal totals match known population margins (raking/iterative proportional fitting).
-- **How:** Extension `SPSSINC_RAKE`.
+- **How:** Extension `EXT_RAKE`.
 - **Why:** Post-stratification weighting reduces non-response bias in surveys.
 - **Evidence:** [E11].
 
@@ -691,7 +694,7 @@ Submenu observed: **Generate...**, **Display...** [E24].
 #### Split into Files
 
 - **What:** Writes one file per group defined by a variable.
-- **How:** Extension `SPSSINC_SPLIT_DATASET`.
+- **How:** Extension `EXT_SPLIT_DATASET`.
 - **Why:** Distributing or processing data by region/site/wave is a common batch need.
 - **Evidence:** [E11].
 
@@ -723,7 +726,7 @@ Submenu observed: **Generate...**, **Display...** [E24].
 - **Why:** Survey and aggregate data are often stored as counts; weighting restores the intended population.
 - **Evidence:** [E6].
 
-**Why the Data menu is so large:** data preparation is usually the longest part of an analysis. SPSS keeps it in the same command language and dictionary model as the analysis, so a prepared dataset is fully reproducible rather than the result of undocumented spreadsheet edits.
+**Why the Data menu is so large:** data preparation is usually the longest part of an analysis. StatsBench keeps it in the same command language and dictionary model as the analysis, so a prepared dataset is fully reproducible rather than the result of undocumented spreadsheet edits.
 
 ### 8.5 Transform
 
@@ -739,9 +742,9 @@ Transformations create or modify variables. Observed items [E22]:
 #### Programmability Transformation...
 
 - **What:** Runs a transformation written in Python or R against the active dataset.
-- **How:** `BEGIN PROGRAM` / `END PROGRAM` with the SPSS Python or R API, or `SPSSINC TRANS`.
+- **How:** `BEGIN PROGRAM` / `END PROGRAM` with the StatsBench Python or R API, or `StatsBenchINC TRANS`.
 - **Why:** When the built-in function library is insufficient, the analyst can extend it without leaving the data step.
-- **Evidence:** [E12], [E11] (`SPSSINC_TRANS`).
+- **Evidence:** [E12], [E11] (`EXT_TRANS`).
 
 #### Count Values within Cases...
 
@@ -781,7 +784,7 @@ Transformations create or modify variables. Observed items [E22]:
 #### Create Dummy Variables
 
 - **What:** Creates k−1 indicator variables for a categorical variable.
-- **How:** Extension `SPSSINC_CREATE_DUMMIES`.
+- **How:** Extension `EXT_CREATE_DUMMIES`.
 - **Why:** Regression and other models need numeric indicators; manual dummy creation is error-prone (wrong reference category, missed level).
 - **Evidence:** [E11].
 
@@ -876,7 +879,7 @@ Power Analysis, Reports, Descriptive Statistics, Bayesian Statistics, Tables, Co
 
 - **What:** Fits candidate probability distributions to a variable and tests goodness of fit.
 - **How:** Extension command `STATS DISTFIT` (bundle `STATS_DISTFIT`, R); parameters `VARIABLE`, `DISTRIBUTION`, `SHAPE1`, `SHAPE2`, `DF1`, `DF2`, `DF`, and `OPTIONS SIMULATEP/MINVALUE/MAXVALUE/QQPLOT` [E11].
-- **Why:** Many models assume a distribution (normal, Poisson, gamma, Weibull); fitting and testing it is a principled precursor to modelling. Shipping it as an R extension shows how SPSS 27 adds specialised methods.
+- **Why:** Many models assume a distribution (normal, Poisson, gamma, Weibull); fitting and testing it is a principled precursor to modelling. Shipping it as an R extension shows how StatsBench 27 adds specialised methods.
 - **Evidence:** [E11] extension descriptor and `Readme.md`.
 
 ##### Explore...
@@ -896,7 +899,7 @@ Power Analysis, Reports, Descriptive Statistics, Bayesian Statistics, Tables, Co
 ##### TURF Analysis
 
 - **What:** Total Unduplicated Reach and Frequency: finds combinations of items (e.g. products, media, features) that maximise unique reach and frequency.
-- **How:** Extension `SPSSINC_TURF`; works on multiple dichotomy sets and searches/evaluates combinations.
+- **How:** Extension `EXT_TURF`; works on multiple dichotomy sets and searches/evaluates combinations.
 - **Why:** Portfolio and media planning ask "which set of options reaches the most people?"; TURF answers it directly instead of by trial and error.
 - **Evidence:** [E11], [E22].
 
@@ -1465,7 +1468,7 @@ Observed submenu [E25]: **Bar...**, **3-D Bar...**, **Line...**, **Area...**, **
 
 - **What:** The classic chart dialogs. Each has a simple/stacked/clustered variant, a data mode (summaries of groups or values of individual cases), and titles/options.
 - **How:** Generates the older `GRAPH` command (e.g. `GRAPH /BAR(SIMPLE)=COUNT BY category`), which is still fully supported.
-- **Why:** The legacy dialogs are faster for standard charts and are the syntax most existing SPSS code uses. Keeping them preserves backward compatibility while Chart Builder serves advanced needs.
+- **Why:** The legacy dialogs are faster for standard charts and are the syntax most existing StatsBench code uses. Keeping them preserves backward compatibility while Chart Builder serves advanced needs.
 - **Evidence:** [E25]; [E6] `GRAPH`.
 
 **Why the Graphs menu has three generations:** Legacy Dialogs (`GRAPH`), Chart Builder (`GGRAPH`/GPL), and Graphboard templates. Each targets a different trade-off between speed, control, and design. The command layer supports all three, so old syntax keeps working while new charts gain richer geometry.
@@ -1496,7 +1499,7 @@ Observed items [E22]: **Variables...**, **OMS Control Panel...**, **OMS Identifi
 | **Map Conversion Utility...** | Converts map files for spatial analysis | Map format converter | Prepare geography for mapping |
 | **Python2 Conversion** | Converts Python 2 extension code to Python 3 | Extension migration tool | The bundled Python is 3.8; old extensions need porting |
 
-**Why Utilities exists:** these are the \"meta\" features that make SPSS operable at scale: naming variables, capturing output, reusing models, running jobs unattended, and migrating extensions. They are not statistical, but they determine whether an analysis can be repeated by someone else.
+**Why Utilities exists:** these are the \"meta\" features that make StatsBench operable at scale: naming variables, capturing output, reusing models, running jobs unattended, and migrating extensions. They are not statistical, but they determine whether an analysis can be repeated by someone else.
 
 **Evidence:** [E22]; [E6] (`OMS`, `DOCUMENT`, `DEFINE`, `VARIABLE SET`, `MODEL HANDLE`, production commands); [E12] Python 3.8.
 
@@ -1505,14 +1508,14 @@ Observed items [E22]: **Variables...**, **OMS Control Panel...**, **OMS Identifi
 Observed items [E22]: **My Extensions**, **Extension Hub...**, **Install Local Extension Bundle...**, **Custom Dialog Builder for Extensions**, **R 3.6 Configuration**, **Correlation Plot**, **Utilities ▸**, **Dynamite Plot**, **String 2 Nominal**, **Custom_Descriptive_Tables**.
 
 - **My Extensions:** Lists installed extension bundles and their commands/dialogs.
-- **Extension Hub...:** Browses and installs bundles from IBM's hub.
+- **Extension Hub...:** Browses and installs bundles from the extension hub.
 - **Install Local Extension Bundle...:** Installs a downloaded bundle.
-- **Custom Dialog Builder for Extensions:** Builds a dialog (`.spd`) for an extension command, so an R/Python routine gets a full SPSS dialog.
+- **Custom Dialog Builder for Extensions:** Builds a dialog (`.spd`) for an extension command, so an R/Python routine gets a full StatsBench dialog.
 - **R 3.6 Configuration:** Configures the R installation used by R-based bundles.
 - **Correlation Plot / Dynamite Plot / String 2 Nominal / Custom_Descriptive_Tables:** Installed example bundles that add menu items and commands.
 - **Utilities ▸:** A submenu of extension utilities.
 
-**How extensions work (observed anatomy):** each bundle under `C:\ProgramData\IBM\SPSS\Statistics\27\extensions\<NAME>` contains:
+**How extensions work (observed anatomy):** each bundle under `C:\ProgramData\StatsBench\Statistics\27\extensions\<NAME>` contains:
 
 - one or more `.R` files (the implementation),
 - a `.spd` dialog specification (a ZIP of dialog resources),
@@ -1522,13 +1525,13 @@ Observed items [E22]: **My Extensions**, **Extension Hub...**, **Install Local E
 
 The Distribution Fit bundle, for example, declares the command `STATS DISTFIT` with parameters `VARIABLE`, `DISTRIBUTION`, `SHAPE1`, `SHAPE2`, `DF1`, `DF2`, `DF`, and options such as `SIMULATEP` and `QQPLOT` [E11]. The Custom Dialog Builder produces the `.spd`; the command XML teaches the syntax editor and the engine about the command.
 
-**Why:** statistics evolves faster than a desktop release cycle. The extension layer lets IBM and third parties ship new procedures (and their dialogs) as bundles, while keeping the core product stable. It also explains a visible SPSS 27 pattern: many of the new menu items are extensions, not core DLL procedures.
+**Why:** statistics evolves faster than a desktop release cycle. The extension layer lets the original developer and third parties ship new procedures (and their dialogs) as bundles, while keeping the core product stable. It also explains a visible StatsBench 27 pattern: many of the new menu items are extensions, not core DLL procedures.
 
 **Evidence:** [E11] bundle inventory and Distribution Fit descriptor; [E12] R/Python; [E22] Extensions menu.
 
 ### 8.10 Window
 
-Observed items [E22]: **Split**, **Minimize All Windows**, **Go to Designated Viewer Window**, **Go to Designated Syntax Window**, **Reset Dialog Sizes and Positions**, and a numbered list of open windows (e.g. `1 Untitled1 [DataSet0] - IBM SPSS Statistics Data Editor`).
+Observed items [E22]: **Split**, **Minimize All Windows**, **Go to Designated Viewer Window**, **Go to Designated Syntax Window**, **Reset Dialog Sizes and Positions**, and a numbered list of open windows (e.g. `1 Untitled1 [DataSet0] - StatsBench Data Editor`).
 
 - **Split:** Tiles the MDI child windows so the Data Editor, Syntax, and Viewer can be seen together.
 - **Minimize All Windows:** Clears the desktop.
@@ -1536,16 +1539,16 @@ Observed items [E22]: **Split**, **Minimize All Windows**, **Go to Designated Vi
 - **Reset Dialog Sizes and Positions:** Restores dialogs that were moved off-screen or resized badly (a real recovery feature on multi-monitor setups).
 - **Window list:** Switches between open documents; the active one is checked.
 
-**Why:** SPSS is a multi-document application (data, syntax, output, scripts, models). Window management is part of the workflow, not a cosmetic extra.
+**Why:** StatsBench is a multi-document application (data, syntax, output, scripts, models). Window management is part of the workflow, not a cosmetic extra.
 
 **Evidence:** [E22].
 
 ### 8.11 Help
 
-Observed items [E22]: **Topics**, **SPSS Support**, **SPSS Forums**, **IBM SPSS Statistics Community**, **Documentation in PDF Format**, **Command Syntax Reference**, **About...**, **Diagnostic Tool...**, **Give Feedback**, **Report an Issue**.
+Observed items [E22]: **Topics**, **StatsBench Support**, **StatsBench Forums**, **StatsBench Community**, **Documentation in PDF Format**, **Command Syntax Reference**, **About...**, **Diagnostic Tool...**, **Give Feedback**, **Report an Issue**.
 
 - **Topics:** Opens the installed help system. The `helpids.csv` file maps 8,992 dialog/help IDs to topics [E9].
-- **SPSS Support / Forums / Community:** Web destinations for support and peer help.
+- **StatsBench Support / Forums / Community:** Web destinations for support and peer help.
 - **Documentation in PDF Format:** The manuals, including `syntaxreference.pdf` (the command syntax reference).
 - **Command Syntax Reference:** Direct entry to the syntax manual.
 - **About...:** Version, build, licence, and installed modules.
@@ -1604,7 +1607,7 @@ The GLM generalises this to:
 
 with factors coded as design columns, covariates as continuous predictors, and sums of squares of Type I–IV depending on the hypothesis. Repeated measures add a within-subject design matrix and a covariance structure; sphericity (Mauchly) determines whether the univariate F is valid or a Greenhouse-Geisser/Huynh-Feldt correction is needed.
 
-**Why the options exist:** the same model can be parameterised in many ways; Type III SS, contrast coding, and estimated marginal means determine what \"the effect\" means. Reporting them explicitly prevents the \"different SPSS output for the same data\" confusion.
+**Why the options exist:** the same model can be parameterised in many ways; Type III SS, contrast coding, and estimated marginal means determine what \"the effect\" means. Reporting them explicitly prevents the \"different StatsBench output for the same data\" confusion.
 
 ### 9.4 Correlation and regression
 
@@ -1614,7 +1617,7 @@ with factors coded as design columns, covariates as continuous predictors, and s
 
 OLS regression estimates \(\hat{\boldsymbol{\beta}}=(\mathbf{X}'\mathbf{X})^{-1}\mathbf{X}'\mathbf{y}\), with \(R^2=1-\frac{SS_{res}}{SS_{tot}}\) and adjusted \(R^2=1-(1-R^2)\frac{n-1}{n-p-1}\). The coefficient covariance is \(\hat{\sigma}^2(\mathbf{X}'\mathbf{X})^{-1}\), giving standard errors, t tests, and CIs. Collinearity is diagnosed by VIF \(=1/(1-R_j^2)\) and tolerance. Durbin-Watson detects first-order autocorrelation. Casewise diagnostics flag standardised residuals beyond \(\pm3\) and influence measures (Cook's distance, leverage, DFBETAS).
 
-**Why the diagnostics are part of the dialog:** an OLS fit is easy; knowing whether its assumptions hold is the actual work. SPSS puts the diagnostics in the same dialog so they are not forgotten.
+**Why the diagnostics are part of the dialog:** an OLS fit is easy; knowing whether its assumptions hold is the actual work. StatsBench puts the diagnostics in the same dialog so they are not forgotten.
 
 ### 9.5 Logistic, ordinal, and loglinear models
 
@@ -1717,24 +1720,24 @@ The procedures use MCMC to sample from the posterior, then report posterior mean
 
 | Procedure family | Command | Engine artefact | Primary output objects |
 |---|---|---|---|
-| Frequencies | `FREQUENCIES` | `spsswfre.dll` | Statistics, frequency table, charts |
+| Frequencies | `FREQUENCIES` | `statswfre.dll` | Statistics, frequency table, charts |
 | Descriptives | `DESCRIPTIVES` | procedure module | Descriptive statistics, z-scores |
 | Crosstabs | `CROSSTABS` | procedure module | Crosstab, chi-square, association measures |
 | t tests | `T-TEST` | procedure module | Group statistics, test table, CI |
 | ANOVA | `ONEWAY` | procedure module | ANOVA table, post hoc, means plot |
-| GLM | `GLM`/`UNIANOVA` | `spsswglm.dll` | Tests of effects, EMMs, contrasts |
-| Mixed | `MIXED` | `spsswmix.dll` | Fixed/random effects, covariance parameters |
-| GENLIN/GEE | `GENLIN` | `spsswgen.dll` | Parameter estimates, model fit |
-| Regression | `REGRESSION` | `spsswreg.dll` | Model summary, ANOVA, coefficients, diagnostics |
+| GLM | `GLM`/`UNIANOVA` | `statswglm.dll` | Tests of effects, EMMs, contrasts |
+| Mixed | `MIXED` | `statswmix.dll` | Fixed/random effects, covariance parameters |
+| GENLIN/GEE | `GENLIN` | `statswgen.dll` | Parameter estimates, model fit |
+| Regression | `REGRESSION` | `statswreg.dll` | Model summary, ANOVA, coefficients, diagnostics |
 | Logistic | `LOGISTIC REGRESSION` | procedure module | Omnibus tests, classification, ORs |
-| Factor | `FACTOR` | `spsswfac.dll` | Communalities, variance explained, rotated matrix |
-| Reliability | `RELIABILITY` | `spsswrel.dll` | Alpha, item-total statistics |
-| Cluster | `CLUSTER`/`QUICK CLUSTER` | `spsswclu.dll` | Cluster memberships, dendrogram, centres |
-| Survival | `KM`/`COXREG` | `spsswkm.dll`/`spsswcox.dll` | Survival table, log-rank, hazard ratios |
-| Missing data | `MVA`/`MULTIPLE IMPUTATION` | `spsswmva.dll`/`spsswmim.dll` | Patterns, imputed datasets, pooled tests |
-| Complex samples | `CS*` | `spsswcs*.dll` | Design-adjusted estimates and tests |
-| Graphics | `GGRAPH`/`GRAPH` | `spsswggr.dll` | Charts |
-| Output control | `OMS`/`OUTPUT EXPORT` | `spsswoms.dll`/`spsswout.dll` | Routed tables, exported files |
+| Factor | `FACTOR` | `statswfac.dll` | Communalities, variance explained, rotated matrix |
+| Reliability | `RELIABILITY` | `statswrel.dll` | Alpha, item-total statistics |
+| Cluster | `CLUSTER`/`QUICK CLUSTER` | `statswclu.dll` | Cluster memberships, dendrogram, centres |
+| Survival | `KM`/`COXREG` | `statswkm.dll`/`statswcox.dll` | Survival table, log-rank, hazard ratios |
+| Missing data | `MVA`/`MULTIPLE IMPUTATION` | `statswmva.dll`/`statswmim.dll` | Patterns, imputed datasets, pooled tests |
+| Complex samples | `CS*` | `statswcs*.dll` | Design-adjusted estimates and tests |
+| Graphics | `GGRAPH`/`GRAPH` | `statswggr.dll` | Charts |
+| Output control | `OMS`/`OUTPUT EXPORT` | `statswoms.dll`/`statswout.dll` | Routed tables, exported files |
 
 The DLL names are the observed module names; the mapping to commands is by naming convention **(inferred)** and by the command families in the XML catalog.
 
@@ -1751,7 +1754,7 @@ The DLL names are the observed module names; the mapping to commands is by namin
 - file-level attributes and documents,
 - optional compression (`.zsav` is the compressed variant).
 
-The native reader/writer is `spssio64.dll` (1.3 MB) [E5]. Because the dictionary travels with the data, a `.sav` opened on another machine keeps its labels, missing codes, and measurement levels. That is why `accidents.sav` displayed `Age category` and `Under 21` without any extra setup [E14].
+The native reader/writer is `savio64.dll` (1.3 MB) [E5]. Because the dictionary travels with the data, a `.sav` opened on another machine keeps its labels, missing codes, and measurement levels. That is why `accidents.sav` displayed `Age category` and `Under 21` without any extra setup [E14].
 
 **Why:** reproducible analysis requires the metadata to be part of the data file, not a separate codebook that can be lost.
 
@@ -1769,15 +1772,15 @@ Command form: `GET DATA /TYPE=TXT /FILE=... /DELIMITERS=... /QUALIFIER=... /ARRA
 
 ### 10.3 Excel and other spreadsheets
 
-Excel files are read through the Excel data-access layer (`spssxls.dll`, `spssexcel.jar`) and the `GET DATA /TYPE=XLS/XLSX` command. The dialog lets the analyst pick a sheet, a range, and whether the first row contains names. **Why:** Excel is where most real-world data live; direct import avoids a lossy CSV round-trip.
+Excel files are read through the Excel data-access layer (`savxls.dll`, `refexcel.jar`) and the `GET DATA /TYPE=XLS/XLSX` command. The dialog lets the analyst pick a sheet, a range, and whether the first row contains names. **Why:** Excel is where most real-world data live; direct import avoids a lossy CSV round-trip.
 
 ### 10.4 Databases
 
-ODBC access (`spssodbc.dll`) supports `GET DATA /TYPE=ODBC` and the Database Wizard: choose a data source, write or build a query, preview, and import. **Why:** enterprise data usually lives in a database; pulling a query result into SPSS is more reliable than exporting to CSV first.
+ODBC access (`savodbc.dll`) supports `GET DATA /TYPE=ODBC` and the Database Wizard: choose a data source, write or build a query, preview, and import. **Why:** enterprise data usually lives in a database; pulling a query result into StatsBench is more reliable than exporting to CSV first.
 
 ### 10.5 SAS and Stata
 
-- `GET SAS` reads SAS transport files (`.xpt`) through `spsswsas.dll`.
+- `GET SAS` reads SAS transport files (`.xpt`) through `statswsas.dll`.
 - `GET STATA` reads Stata `.dta` files.
 - `SAVE TRANSLATE` writes SAS, Stata, Excel, CSV, and tab-delimited files.
 
@@ -1804,13 +1807,13 @@ ODBC access (`spssodbc.dll`) supports `GET DATA /TYPE=ODBC` and the Database Wiz
 
 ### 10.8 Unicode and code pages
 
-The installation uses code page 65001 (UTF-8), and the status bar reports `Unicode: ON` [E1], [E13]. `SAVE CODEPAGE` and the import dialogs can transcode legacy files. **Why:** labels and string data in non-Latin scripts must survive the round trip; Unicode mode is the default in modern SPSS.
+The installation uses code page 65001 (UTF-8), and the status bar reports `Unicode: ON` [E1], [E13]. `SAVE CODEPAGE` and the import dialogs can transcode legacy files. **Why:** labels and string data in non-Latin scripts must survive the round trip; Unicode mode is the default in modern StatsBench.
 
 ---
 
 ## 11. Automation and extensibility
 
-SPSS has five automation layers, from least to most programmatic:
+StatsBench has five automation layers, from least to most programmatic:
 
 1. **Syntax** — the command language; every dialog can paste it.
 2. **Scripts** — Basic or Python scripts that drive the client (`Run Script...`).
@@ -1830,7 +1833,7 @@ OMSEND.
 ```
 
 - **SELECT** chooses by command, subtype, or object identifier (the `OMS Identifiers...` utility lists them).
-- **DESTINATION** can be a file (HTML, XML, SAV, SPSS data), a dataset, or the Viewer.
+- **DESTINATION** can be a file (HTML, XML, SAV, StatsBench data), a dataset, or the Viewer.
 - **COLUMNS/LABELS** reshape the captured table.
 - **OMSEND** closes the capture.
 
@@ -1838,10 +1841,10 @@ OMSEND.
 
 ### 11.2 Scripting and programmability
 
-- **`BEGIN PROGRAM Python3.` / `END PROGRAM.`** runs Python with the SPSS Python API (`spss` module): read/write datasets, run commands, manipulate output.
+- **`BEGIN PROGRAM Python3.` / `END PROGRAM.`** runs Python with the StatsBench Python API (`ref` module): read/write datasets, run commands, manipulate output.
 - **`BEGIN PROGRAM R.` / `END PROGRAM.`** does the same for R.
 - **Basic scripts** (`.sbs`) drive the client UI: open dialogs, set fields, run commands.
-- **`SPSSINC TRANS`** applies an R function to SPSS variables as a transformation.
+- **`StatsBenchINC TRANS`** applies an R function to StatsBench variables as a transformation.
 
 The bundled Python is 3.8.2 [E12]. **Why:** the built-in procedures cannot cover every method; programmability lets analysts add a method in the language they know, with the data and output plumbing already handled.
 
@@ -1858,9 +1861,9 @@ A bundle is a directory containing:
   Readme.md           description and licence
 ```
 
-Installation is through **Extensions > Extension Hub** or **Install Local Extension Bundle**. Once installed, the command appears in the syntax editor and the dialog appears in the menu. **Why this is powerful:** a statistician can ship a new method with a native-looking dialog and syntax, without IBM rebuilding the product.
+Installation is through **Extensions > Extension Hub** or **Install Local Extension Bundle**. Once installed, the command appears in the syntax editor and the dialog appears in the menu. **Why this is powerful:** a statistician can ship a new method with a native-looking dialog and syntax, without rebuilding the product.
 
-The observed bundles include both IBM-authored SPSS 27 features (`STATS_DISTFIT`, `STATS_RELIMP`, `STATS_CANCORR`, `STATS_CLUS_SIL`, `STATS_NONPAR_REGR`, `STATS_PSM`, `STATS_SURVREG`, `STATS_WEIBULL_PLOT`, `STATS_VALLBLS_FROMDATA`, `STATS_ADJUST_WIDTHS`, `STATS_SPLIT_DATASET`) and R packages used by them (`ggplot2`, `dplyr`, `tidyr`, `rstatix`, `ggpubr`, `ggcorrplot`) [E11].
+The observed bundles include both the original StatsBench 27 features (`STATS_DISTFIT`, `STATS_RELIMP`, `STATS_CANCORR`, `STATS_CLUS_SIL`, `STATS_NONPAR_REGR`, `STATS_PSM`, `STATS_SURVREG`, `STATS_WEIBULL_PLOT`, `STATS_VALLBLS_FROMDATA`, `STATS_ADJUST_WIDTHS`, `STATS_SPLIT_DATASET`) and R packages used by them (`ggplot2`, `dplyr`, `tidyr`, `rstatix`, `ggpubr`, `ggcorrplot`) [E11].
 
 ### 11.4 PMML scoring
 
@@ -1872,7 +1875,7 @@ Models can be exported as PMML (Predictive Model Markup Language) and applied to
 
 ---
 
-## 12. Why SPSS is designed this way
+## 12. Why StatsBench is designed this way
 
 ### 12.1 Reproducibility over convenience
 
@@ -1903,7 +1906,7 @@ Pivot tables and the `.spv` schema make output a first-class object. Analysts ca
 ### 12.6 Trade-offs and criticisms visible in the product
 
 - **Menu sprawl.** Analyze has 27 entries and Regression alone has 17. The breadth is powerful but hard to navigate for occasional users.
-- **Extension dependence.** Several SPSS 27 \"new features\" are R bundles; they require a working R configuration and add moving parts outside the core installer.
+- **Extension dependence.** Several StatsBench 27 \"new features\" are R bundles; they require a working R configuration and add moving parts outside the core installer.
 - **Dialog complexity.** A single procedure can have six option sub-dialogs (Statistics, Plots, Save, Options, Style, Bootstrap). The defaults are sensible, but the surface is large.
 - **Two charting generations.** Legacy Dialogs and Chart Builder coexist, which is good for compatibility but confusing for learners.
 - **Startup diagnostics.** In this environment the product showed an unexpected-error report and a session-restore dialog before the Data Editor was usable [E20], [E21]. The recovery features work, but the first-run experience is not clean.
@@ -1917,7 +1920,7 @@ These are design consequences, not bugs: the product optimises for breadth, audi
 
 The following was actually performed during this analysis (not inferred):
 
-1. Located and inventoried the installation at `C:\Program Files\IBM\SPSS\Statistics\27` (binaries, 132 `spssw` DLLs, 142 JARs, 328 command XMLs, 50 templates, samples, schemas) [E1]–[E12].
+1. Located and inventoried the installation at `C:\Program Files\StatsBench\Statistics\27` (binaries, 132 `statsw` DLLs, 142 JARs, 328 command XMLs, 50 templates, samples, schemas) [E1]–[E12].
 2. Launched the application; observed and dismissed the **Error Reporting Service** dialog and the **Session Management** restore-point dialog; confirmed the Data Editor was usable [E20], [E21].
 3. Captured the top-level menus (File, Edit, View, Data, Transform, Analyze, Graphs, Utilities, Extensions, Window, Help) and the Analyze/Data/Graphs/Transform submenus [E22], [E24], [E25].
 4. Captured Variable View and Data View, including the 11 metadata columns and value-label display [E13], [E14].
@@ -1942,7 +1945,7 @@ The following was actually performed during this analysis (not inferred):
 - **File submenus.** File > New/Open/Import/Export submenu contents were not individually screenshotted; their descriptions rely on the command catalog and standard document types. The top-level File items are captured evidence.
 - **Duplicate menu entry.** The Data menu showed `Propensity Score Matching...` twice in the captured session. It is recorded as observed without attributing a cause.
 - **Module-to-command mapping.** The DLL-to-command table uses naming conventions; the exact loader mapping is not exposed in the install.
-- **Startup error.** The unexpected-error dialog may be specific to this machine/session; it is documented as an observed behaviour, not as a universal SPSS 27 defect.
+- **Startup error.** The unexpected-error dialog may be specific to this machine/session; it is documented as an observed behaviour, not as a universal StatsBench 27 defect.
 
 ---
 
@@ -1952,31 +1955,31 @@ All paths are on the analysed machine. \"Capture\" means a PNG screenshot saved 
 
 | ID | Source | What it establishes |
 |---|---|---|
-| **E1** | `C:\Program Files\IBM\SPSS\Statistics\27\spssprod.inf` | ProductName `IBM SPSS Statistics 27`; Version `27.0.1.0`; VersionMajor 27; VersionMinor 0; FixPack 0; VersionPatch 1; FeatureCode 1200; CodePage 65001; RegistryRoot `SPSS Statistics\27` |
+| **E1** | `C:\Program Files\StatsBench\Statistics\27\refprod.inf` | ProductName `StatsBench 27`; Version `27.0.1.0`; VersionMajor 27; VersionMinor 0; FixPack 0; VersionPatch 1; FeatureCode 1200; CodePage 65001; RegistryRoot `StatsBench\27` |
 | **E2** | `...\productnames.ini` | Feature codes and module names: Base, Tables, Regression Models, Advanced Models, Exact Tests, Categories, Missing Values, Custom Tables, Complex Samples, Classification Trees, Data Validation, Programmability, Advanced Visualization, Trends |
 | **E3** | `...\jvmcfg.ini` | J9 JVM (`JRE\bin\j9vm\jvm.dll`); `-Xms256M -Xmx2048M`; `-Xcompressedrefs`; `-Xshareclasses`; default TLS 1.2; `application.home`/`statistics.home` |
 | **E4** | `...\statisticsd.conf` (155 lines) | Server daemon: listen port 3027; `win32` authentication; 4 user / 4 worker threads; `ssl` value 0 (SSL disabled; 2=TLS 1.0, 3=TLS 1.1, 4=TLS 1.2); client data access FULL/NONE; reconnect timeout 100 min; COP port 80; GSK keystore settings |
-| **E5** | Install directory inventory | 132 `spssw*.dll`; `spssstat.dll` 5.0 MB; `spssengine.exe` 86 KB; `stats.exe` 359 KB; `spssio64.dll` 1.3 MB; `spsswout.dll` 678 KB; `spsswoms.dll` 203 KB; 142 JARs incl. `SPSSClientUI.jar` 16.5 MB and `SPSSClientUIRes.jar` 15.0 MB; format libraries `spssodbc.dll`, `spssxls.dll`, `spsswsas.dll`, `spssjson.dll` |
-| **E6** | `...\syntax_xml\` (328 XML files) | Authoritative command definitions. Examples inspected: `FREQUENCIES` (FORMAT, MISSING, BARCHART, PIECHART, HISTOGRAM, GROUPED, NTILES, PERCENTILES, STATISTICS, ORDER); `DESCRIPTIVES` (MISSING, SAVE, STATISTICS, SORT); `CROSSTABS` (TABLES, CELLS, STATISTICS, METHOD, COUNT, FORMAT, BARCHART, HIDESMALLCOUNTS, SHOWDIM); `REGRESSION` (VARIABLES, DEPENDENT, METHOD, STATISTICS, CRITERIA, RESIDUALS, CASEWISE, SCATTERPLOT, PARTIALPLOT, SAVE, OUTFILE, TEMPLATE); `GLM` (WSFACTOR, MEASURE, WSDESIGN, RANDOM, METHOD, CRITERIA, PRINT, PLOT, TEST, LMATRIX, MMATRIX, KMATRIX, POSTHOC, EMMEANS, ROBUST, SAVE, OUTFILE, DESIGN); `GENLIN` (MODEL, CRITERIA, REPEATED, EMMEANS, PRINT, SAVE, OUTFILE); `MIXED`; `ADP` (FIELDS with TARGET, INPUT, ANALYSISWEIGHT); `OMS`; `OUTPUT EXPORT` (DOC, HTML, PDF, PPT, TEXT, XLS, XLSX, XLSM, BMP, EMF, EPS, JPG, PNG, TIF). IBM copyright headers dated 1989–2011+ |
+| **E5** | Install directory inventory | 132 `statsw*.dll`; `statsstat.dll` 5.0 MB; `statsengine.exe` 86 KB; `stats.exe` 359 KB; `savio64.dll` 1.3 MB; `statswout.dll` 678 KB; `statswoms.dll` 203 KB; 142 JARs incl. `StatsBenchClientUI.jar` 16.5 MB and `StatsBenchClientUIRes.jar` 15.0 MB; format libraries `savodbc.dll`, `savxls.dll`, `statswsas.dll`, `savjson.dll` |
+| **E6** | `...\syntax_xml\` (328 XML files) | Authoritative command definitions. Examples inspected: `FREQUENCIES` (FORMAT, MISSING, BARCHART, PIECHART, HISTOGRAM, GROUPED, NTILES, PERCENTILES, STATISTICS, ORDER); `DESCRIPTIVES` (MISSING, SAVE, STATISTICS, SORT); `CROSSTABS` (TABLES, CELLS, STATISTICS, METHOD, COUNT, FORMAT, BARCHART, HIDESMALLCOUNTS, SHOWDIM); `REGRESSION` (VARIABLES, DEPENDENT, METHOD, STATISTICS, CRITERIA, RESIDUALS, CASEWISE, SCATTERPLOT, PARTIALPLOT, SAVE, OUTFILE, TEMPLATE); `GLM` (WSFACTOR, MEASURE, WSDESIGN, RANDOM, METHOD, CRITERIA, PRINT, PLOT, TEST, LMATRIX, MMATRIX, KMATRIX, POSTHOC, EMMEANS, ROBUST, SAVE, OUTFILE, DESIGN); `GENLIN` (MODEL, CRITERIA, REPEATED, EMMEANS, PRINT, SAVE, OUTFILE); `MIXED`; `ADP` (FIELDS with TARGET, INPUT, ANALYSISWEIGHT); `OMS`; `OUTPUT EXPORT` (DOC, HTML, PDF, PPT, TEXT, XLS, XLSX, XLSM, BMP, EMF, EPS, JPG, PNG, TIF). copyright headers dated 1989–2011+ |
 | **E7** | `...\Samples\English\` | 1,328 `.sav`; 209 `.sps`; 22 `.spv`; 55 `.csplan`; 33 `.csaplan`. Used: `accidents.sav` (agecat/gender/accid/pop). Also `automaton.sps`, `validatedata_stroke.sps`, `detectanomaly_stroke.sps`, `conjoint.sps`, `prefscal_*.sps`, `Ridge regression.sps`, `scoring*.sps` |
 | **E8** | `...\template\` | 50 `.viztemplate` chart templates, including Bayesian posterior plots (`bayes.viztemplate`, `BYSPosteriorPlot.viztemplate`) |
-| **E9** | `...\helpids.csv` | 8,992 rows mapping `help_id` to `spss/base/...` help topics |
-| **E10** | `...\spss-output-1.8.xsd` (and 1.4–1.7), `dictionary-1.0/1.1.xsd`, `spss-oms-log-1.1/1.2.xsd`, PMML 2.1–4.3 | Output document model: `outputTree` with `command`, `pageTitle`, `textBlock`, `heading`, `pivotTable`, `chart`, `treeView`, `model`; OMS log and dictionary schemas |
-| **E11** | `C:\ProgramData\IBM\SPSS\Statistics\27\extensions\` and `%LOCALAPPDATA%\IBM\SPSS\Statistics\27\extensions\` | Installed bundles: `STATS_DISTFIT`, `STATS_RELIMP`, `STATS_CANCORR`, `STATS_CLUS_SIL`, `STATS_NONPAR_REGR`, `STATS_PSM`, `STATS_SURVREG`, `STATS_WEIBULL_PLOT`, `STATS_VALLBLS_FROMDATA`, `STATS_ADJUST_WIDTHS`, `STATS_SPLIT_DATASET`, `STATS_GET_R`, `STATS_COXREGR`, `STATS_REGRESS_PLOT`, `STATS_SUBGROUP_PLOTS`, `SPSSINC_TURF`, `SPSSINC_RAKE`, `SPSSINC_CREATE_DUMMIES`, `SPSSINC_TRANS`, `ColPropTest`, `RRegRidge`, `PLS`, `PSM`, `Correlation_Plot`, `Dynamite_Plot`, `Fluctuation_Plot`, `RBoxplotFamily`, `String_2_Nominal`, `Custom_Desriptive_Tables`, `Variable_Tables`, plus R libraries (`ggplot2`, `dplyr`, `tidyr`, `rstatix`, `ggpubr`, `ggcorrplot`, `stringr`). Bundle anatomy: `.R` implementation, `.spd` dialog (ZIP), `.xml` command definition, `.spe` extension spec, `Readme.md` (Apache 2.0). `STATS_DISTFIT` declares `STATS DISTFIT` with VARIABLE, DISTRIBUTION, SHAPE1, SHAPE2, DF1, DF2, DF, OPTIONS SIMULATEP/MINVALUE/MAXVALUE/QQPLOT |
-| **E12** | `...\Python3\python.exe --version`; `spssdxcfg.ini`; extension R config | Bundled Python 3.8.2; Python/R integration configured; `R 3.6 Configuration` bundle present |
-| **E13** | Capture `spss_data.png` / `spss_de2.png` | Data Editor; Variable View columns Name, Type, Width, Decimals, Label, Values, Missing, Columns, Align, Measure, Role; rows agecat/gender/accid/pop with labels and measurement levels; status bar \"IBM SPSS Statistics Processor is ready\" and \"Unicode: ON\"; title `Untitled1 [DataSet0]` |
-| **E14** | Capture `spss_loaded.png`, `spss_dataview.png` | `accidents.sav [DataSet1]` with 4 variables; Data View displaying value labels (`Under 21`, `Female`); toolbar enabled after load |
-| **E15** | Capture `spss_freq_dialog.png`, `spss_freq_selected.png` | Frequencies dialog anatomy; variable list with `label [name]`; `Statistics/Charts/Format/Style/Bootstrap`; `Display frequency tables`; `Create APA style tables`; `OK`/`Paste` disabled until valid |
-| **E16** | Capture `spss_syntax_pasted.png` | Syntax Editor with `DATASET ACTIVATE DataSet1.` and `FREQUENCIES VARIABLES=agecat /ORDER=ANALYSIS.`; navigation pane; line numbers; syntax colouring; Active DataSet dropdown |
-| **E17** | Capture `spss_output.png` | Viewer outline (Log, Frequencies > Title, Notes, Active Dataset, Statistics, Age category); executed log with `GET FILE`, `DATASET NAME`, `DATASET ACTIVATE`, `FREQUENCIES`; Statistics table (N Valid 6, Missing 0); frequency table with Frequency/Percent/Valid Percent/Cumulative Percent |
-| **E18** | Capture `spss_regression_dialog.png` | Linear Regression dialog: Dependent, Independent(s), Block 1 of 1, Previous/Next, Method Enter, Selection Variable, Case Labels, WLS Weight, Statistics/Plots/Save/Options/Style/Bootstrap |
-| **E19** | Captures `spss_chartbuilder.png`, `spss_chartbuilder2.png` | Chart Builder measurement-level advisory with OK / Define Variable Properties / Don't show again; builder with Gallery (Favorites, Bar, Line, Area, Pie/Polar, Scatter/Dot, Histogram, High-Low, Boxplot, Dual Axes), Basic Elements, Groups/Point ID, Titles/Footnotes, Element Properties/Chart Appearance/Options |
-| **E20** | Capture `spss_after_dismiss.png` (Session Management) | Auto-recovery dialog: restore points by Type (Data Editor, Output, Syntax), File, Date/Time; Restore/Cancel/Delete; File menu's Open/Save Restore Point and Auto-Recovery toggle corroborate the feature |
-| **E21** | Capture `spss_de2.png` (Error Reporting Service) | Unexpected-error dialog with More Information / Send / Cancel; dismissed to continue; separate from session recovery |
-| **E22** | Captures under `...\spssmenus2\` and `...\spsssub2\` | Top-level menus File, Edit, View, Data, Transform, Analyze, Graphs, Utilities, Extensions, Window, Help, with item lists as documented in §8; Analyze submenus for Power, Reports, Descriptive, Bayesian, Tables, Compare Means, GLM, GenLin, Mixed, Correlate, Regression, Loglinear, Neural, Classify, Dimension Reduction, Scale, Nonparametric, Forecasting, Survival, Multiple Response, MVA, MI, Complex, Simulation, Quality, Spatial, Direct Marketing |
+| **E9** | `...\helpids.csv` | 8,992 rows mapping `help_id` to `ref/base/...` help topics |
+| **E10** | `...\output-1.8.xsd` (and 1.4–1.7), `dictionary-1.0/1.1.xsd`, `oms-log-1.1/1.2.xsd`, PMML 2.1–4.3 | Output document model: `outputTree` with `command`, `pageTitle`, `textBlock`, `heading`, `pivotTable`, `chart`, `treeView`, `model`; OMS log and dictionary schemas |
+| **E11** | `C:\ProgramData\StatsBench\Statistics\27\extensions\` and `%LOCALAPPDATA%\StatsBench\Statistics\27\extensions\` | Installed bundles: `STATS_DISTFIT`, `STATS_RELIMP`, `STATS_CANCORR`, `STATS_CLUS_SIL`, `STATS_NONPAR_REGR`, `STATS_PSM`, `STATS_SURVREG`, `STATS_WEIBULL_PLOT`, `STATS_VALLBLS_FROMDATA`, `STATS_ADJUST_WIDTHS`, `STATS_SPLIT_DATASET`, `STATS_GET_R`, `STATS_COXREGR`, `STATS_REGRESS_PLOT`, `STATS_SUBGROUP_PLOTS`, `EXT_TURF`, `EXT_RAKE`, `EXT_CREATE_DUMMIES`, `EXT_TRANS`, `ColPropTest`, `RRegRidge`, `PLS`, `PSM`, `Correlation_Plot`, `Dynamite_Plot`, `Fluctuation_Plot`, `RBoxplotFamily`, `String_2_Nominal`, `Custom_Desriptive_Tables`, `Variable_Tables`, plus R libraries (`ggplot2`, `dplyr`, `tidyr`, `rstatix`, `ggpubr`, `ggcorrplot`, `stringr`). Bundle anatomy: `.R` implementation, `.spd` dialog (ZIP), `.xml` command definition, `.spe` extension spec, `Readme.md` (Apache 2.0). `STATS_DISTFIT` declares `STATS DISTFIT` with VARIABLE, DISTRIBUTION, SHAPE1, SHAPE2, DF1, DF2, DF, OPTIONS SIMULATEP/MINVALUE/MAXVALUE/QQPLOT |
+| **E12** | `...\Python3\python.exe --version`; `savdxcfg.ini`; extension R config | Bundled Python 3.8.2; Python/R integration configured; `R 3.6 Configuration` bundle present |
+| **E13** | Capture `ref_data.png` / `ref_de2.png` | Data Editor; Variable View columns Name, Type, Width, Decimals, Label, Values, Missing, Columns, Align, Measure, Role; rows agecat/gender/accid/pop with labels and measurement levels; status bar \"StatsBench Processor is ready\" and \"Unicode: ON\"; title `Untitled1 [DataSet0]` |
+| **E14** | Capture `ref_loaded.png`, `ref_dataview.png` | `accidents.sav [DataSet1]` with 4 variables; Data View displaying value labels (`Under 21`, `Female`); toolbar enabled after load |
+| **E15** | Capture `ref_freq_dialog.png`, `ref_freq_selected.png` | Frequencies dialog anatomy; variable list with `label [name]`; `Statistics/Charts/Format/Style/Bootstrap`; `Display frequency tables`; `Create APA style tables`; `OK`/`Paste` disabled until valid |
+| **E16** | Capture `ref_syntax_pasted.png` | Syntax Editor with `DATASET ACTIVATE DataSet1.` and `FREQUENCIES VARIABLES=agecat /ORDER=ANALYSIS.`; navigation pane; line numbers; syntax colouring; Active DataSet dropdown |
+| **E17** | Capture `ref_output.png` | Viewer outline (Log, Frequencies > Title, Notes, Active Dataset, Statistics, Age category); executed log with `GET FILE`, `DATASET NAME`, `DATASET ACTIVATE`, `FREQUENCIES`; Statistics table (N Valid 6, Missing 0); frequency table with Frequency/Percent/Valid Percent/Cumulative Percent |
+| **E18** | Capture `ref_regression_dialog.png` | Linear Regression dialog: Dependent, Independent(s), Block 1 of 1, Previous/Next, Method Enter, Selection Variable, Case Labels, WLS Weight, Statistics/Plots/Save/Options/Style/Bootstrap |
+| **E19** | Captures `ref_chartbuilder.png`, `ref_chartbuilder2.png` | Chart Builder measurement-level advisory with OK / Define Variable Properties / Don't show again; builder with Gallery (Favorites, Bar, Line, Area, Pie/Polar, Scatter/Dot, Histogram, High-Low, Boxplot, Dual Axes), Basic Elements, Groups/Point ID, Titles/Footnotes, Element Properties/Chart Appearance/Options |
+| **E20** | Capture `ref_after_dismiss.png` (Session Management) | Auto-recovery dialog: restore points by Type (Data Editor, Output, Syntax), File, Date/Time; Restore/Cancel/Delete; File menu's Open/Save Restore Point and Auto-Recovery toggle corroborate the feature |
+| **E21** | Capture `ref_de2.png` (Error Reporting Service) | Unexpected-error dialog with More Information / Send / Cancel; dismissed to continue; separate from session recovery |
+| **E22** | Captures under `...\refmenus2\` and `...\refsub2\` | Top-level menus File, Edit, View, Data, Transform, Analyze, Graphs, Utilities, Extensions, Window, Help, with item lists as documented in §8; Analyze submenus for Power, Reports, Descriptive, Bayesian, Tables, Compare Means, GLM, GenLin, Mixed, Correlate, Regression, Loglinear, Neural, Classify, Dimension Reduction, Scale, Nonparametric, Forecasting, Survival, Multiple Response, MVA, MI, Complex, Simulation, Quality, Spatial, Direct Marketing |
 | **E23** | `...\Samples\English\automaton.sps` | Macro-style sample syntax: `CD @location.`, `GET FILE=@datafile.`, `FREQUENCIES VARIABLES=@varlist /BARCHART.` |
-| **E24** | Captures under `...\spsssub3\` | Data > Validation (Load Predefined Rules, Define Rules, Validate Data); Data > Merge Files (Add Cases, Add Variables); Data > Orthogonal Design (Generate, Display) |
-| **E25** | Capture `...\spsssub3\graph_legacy.png` | Graphs > Legacy Dialogs: Bar, 3-D Bar, Line, Area, Pie, High-Low, Boxplot, Error Bar, Population Pyramid, Scatter/Dot, Histogram |
+| **E24** | Captures under `...\refsub3\` | Data > Validation (Load Predefined Rules, Define Rules, Validate Data); Data > Merge Files (Add Cases, Add Variables); Data > Orthogonal Design (Generate, Display) |
+| **E25** | Capture `...\refsub3\graph_legacy.png` | Graphs > Legacy Dialogs: Bar, 3-D Bar, Line, Area, Pie, High-Low, Boxplot, Error Bar, Population Pyramid, Scatter/Dot, Histogram |
 
 **Note on captures:** screenshots are session-local artefacts; the permanent evidence is the shipped metadata (E1–E12) plus the reproducible commands in the document. The screenshots are cited to show the live UI behind the descriptions.
 
@@ -2390,13 +2393,13 @@ Items marked `▸` open a submenu. Items in *italics* were greyed out in the obs
 - Go to Designated Viewer Window
 - Go to Designated Syntax Window
 - Reset Dialog Sizes and Positions
-- 1 Untitled1 [DataSet0] - IBM SPSS Statistics Data Editor
+- 1 Untitled1 [DataSet0] - StatsBench Data Editor
 
 ### Help
 - Topics
-- SPSS Support
-- SPSS Forums
-- IBM SPSS Statistics Community
+- StatsBench Support
+- StatsBench Forums
+- StatsBench Community
 - Documentation in PDF Format
 - Command Syntax Reference
 - About...
@@ -2410,21 +2413,21 @@ Items marked `▸` open a submenu. Items in *italics* were greyed out in the obs
 
 | File (under `C:\Users\Saurav\AppData\Local\Temp\opencode`) | Content |
 |---|---|
-| `spss_data.png`, `spss_de2.png` | Data Editor; Variable View; error dialog |
-| `spss_after_dismiss.png` | Session Management / restore-point dialog |
-| `spss_open_dialog.png` | File > Open Data dialog |
-| `spss_loaded.png` | `accidents.sav` Variable View |
-| `spss_dataview.png` | Data View with value labels |
-| `spss_freq_dialog.png` | Frequencies dialog, initial state |
-| `spss_freq_selected.png` | Frequencies dialog with `agecat` selected; OK/Paste enabled |
-| `spss_syntax_pasted.png` | Syntax Editor with generated `FREQUENCIES` command |
-| `spss_output.png` | Viewer with Log, Statistics, and frequency table |
-| `spss_regression_dialog.png` | Linear Regression dialog |
-| `spss_chartbuilder.png` | Chart Builder measurement-level advisory |
-| `spss_chartbuilder2.png` | Chart Builder main window |
-| `spssmenus2\*.png` | Top-level menu captures (File, Edit, View, Data, Transform, Analyze, Graphs, Utilities, Extensions, Window, Help) |
-| `spsssub2\*.png` | Analyze submenu captures (27 entries) |
-| `spsssub3\*.png` | Data > Validation/Merge/Orthogonal, Graphs > Legacy, Transform menu captures |
+| `ref_data.png`, `ref_de2.png` | Data Editor; Variable View; error dialog |
+| `ref_after_dismiss.png` | Session Management / restore-point dialog |
+| `ref_open_dialog.png` | File > Open Data dialog |
+| `ref_loaded.png` | `accidents.sav` Variable View |
+| `ref_dataview.png` | Data View with value labels |
+| `ref_freq_dialog.png` | Frequencies dialog, initial state |
+| `ref_freq_selected.png` | Frequencies dialog with `agecat` selected; OK/Paste enabled |
+| `ref_syntax_pasted.png` | Syntax Editor with generated `FREQUENCIES` command |
+| `ref_output.png` | Viewer with Log, Statistics, and frequency table |
+| `ref_regression_dialog.png` | Linear Regression dialog |
+| `ref_chartbuilder.png` | Chart Builder measurement-level advisory |
+| `ref_chartbuilder2.png` | Chart Builder main window |
+| `refmenus2\*.png` | Top-level menu captures (File, Edit, View, Data, Transform, Analyze, Graphs, Utilities, Extensions, Window, Help) |
+| `refsub2\*.png` | Analyze submenu captures (27 entries) |
+| `refsub3\*.png` | Data > Validation/Merge/Orthogonal, Graphs > Legacy, Transform menu captures |
 
 ---
 
@@ -2432,9 +2435,9 @@ Items marked `▸` open a submenu. Items in *italics* were greyed out in the obs
 
 | Term | Meaning in this document |
 |---|---|
-| **`.sav`** | Native SPSS data file: data plus dictionary plus file metadata |
-| **`.spv`** | SPSS output document: a ZIP container of XML parts (conforming to `spss-output-1.8.xsd`) plus binary table-data chunks |
-| **`.sps`** | SPSS command syntax file |
+| **`.sav`** | Native StatsBench data file: data plus dictionary plus file metadata |
+| **`.spv`** | StatsBench output document: a ZIP container of XML parts (conforming to `output-1.8.xsd`) plus binary table-data chunks |
+| **`.sps`** | StatsBench command syntax file |
 | **`.spj`** | Production job file |
 | **`.csplan` / `.csaplan`** | Complex-samples sampling / analysis plan |
 | **`.viztemplate`** | Chart template used by Chart Builder and Graphboard |
@@ -2443,7 +2446,7 @@ Items marked `▸` open a submenu. Items in *italics* were greyed out in the obs
 | **Pivot table** | Editable, multi-dimensional output table (not an image) |
 | **OMS** | Output Management System: selects and routes output objects |
 | **GPL** | Graphics Production Language used by `GGRAPH`/Chart Builder |
-| **Procedure module** | One of the 132 `spssw*.dll` native libraries; most implement commands, a few handle formats |
+| **Procedure module** | One of the 132 `statsw*.dll` native libraries; most implement commands, a few handle formats |
 | **Dictionary** | Variable metadata: names, types, labels, value labels, missing rules, level, role |
 | **Measurement level** | Scale, ordinal, or nominal; drives procedure and chart validity |
 | **Role** | Modelling intent (Input, Target, Both, None, Partition, Split) |
@@ -2454,7 +2457,7 @@ Items marked `▸` open a submenu. Items in *italics* were greyed out in the obs
 
 ## Closing note
 
-The strongest conclusion from the evidence is that SPSS 27 is **one command language with several faces**: a Java client that constructs commands, a native engine that executes them, a structured output document that records them, and an extension layer that adds new commands without changing the core.
+The strongest conclusion from the evidence is that StatsBench 27 is **one command language with several faces**: a Java client that constructs commands, a native engine that executes them, a structured output document that records them, and an extension layer that adds new commands without changing the core.
 
 That design is why a dialog can be turned into syntax, why an old `GRAPH` command still runs beside a new Chart Builder chart, why an R package can appear as a native menu item, and why an `.spv` file remains readable and editable years later. The menus are large and sometimes repetitive, and the extension layer adds operational dependencies, but the underlying model is coherent: **metadata in, commands through, structured output out**.
 

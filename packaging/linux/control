@@ -4,10 +4,10 @@ Section: science
 Priority: optional
 Architecture: @ARCH@
 Depends: libxkbcommon0, libwayland-client0 | libwayland-client, libx11-6, libxcursor1, libxrandr2, libxi6, libgl1, fontconfig
-Maintainer: The SPSS Garage <saurav.sarma@example.com>
-Description: Lightweight SPSS-like statistical workbench
+Maintainer: The StatsCraft Garage <saurav.sarma@example.com>
+Description: Lightweight statistical workbench
  StatsCraft is a native statistical analysis workstation inspired by the
- IBM SPSS Statistics workflow: spreadsheet data editor with Data/Variable
+ classic statistics workflow: spreadsheet data editor with Data/Variable
  views, procedure dialogs that generate syntax, pivot-table output viewer,
- charts, and an SPSS-compatible syntax interface.
+ charts, and a command-syntax interface.
 Homepage: https://github.com/SarmaSaurav/statscraft

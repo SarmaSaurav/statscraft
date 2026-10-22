@@ -1,6 +1,6 @@
 # StatsCraft
 
-Lightweight SPSS-like statistical workbench written in Rust.
+Lightweight statistical workbench written in Rust.
 
 ## Status
 M1–M2 implemented: CSV import, data grid, descriptives, frequencies, output viewer.

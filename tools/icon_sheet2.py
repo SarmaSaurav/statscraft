@@ -12,7 +12,7 @@ import os
 import subprocess
 
 D = r"C:/Users/Saurav/AppData/Local/Temp/opencode"
-ICONS = r"D:/The_SPSS_Garage/StatsCraft/assets/icons"
+ICONS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "icons")
 EDGE = "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"
 
 ORDER = [

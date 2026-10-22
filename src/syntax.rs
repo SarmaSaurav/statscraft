@@ -1,26 +1,26 @@
-﻿use crate::app::StatsCraftApp;
+use crate::app::StatsCraftApp;
 use crate::output::OutputTable;
 use crate::stats;
 
 /// The single execution point for StatsCraft: every procedure (menus, dialogs,
-/// syntax window) produces SPSS syntax text that is executed here.
-/// Commands mirror IBM SPSS keywords: LOAD, DESCRIPTIVES, FREQUENCIES,
+/// syntax window) produces StatsBench syntax text that is executed here.
+/// Commands mirror StatsBench keywords: LOAD, DESCRIPTIVES, FREQUENCIES,
 /// CORRELATIONS, REGRESSION, T-TEST, SORT CASES, CLEAR.
 pub fn run(app: &mut StatsCraftApp, script: &str) {
     for raw in script.lines() {
         let line = raw.trim();
         if line.is_empty() || line.starts_with('*') {
-            continue; // blank lines and SPSS comment commands
+            continue; // blank lines and StatsBench comment commands
         }
         execute_line(app, line);
     }
 }
 
 
-/// A parsed SPSS command line: the positional arguments plus the
+/// A parsed StatsBench command line: the positional arguments plus the
 /// `/SUBCOMMAND=KEYWORD KEYWORD` subcommands.
 ///
-/// IBM SPSS writes procedure options as subcommands, e.g.
+/// StatsBench writes procedure options as subcommands, e.g.
 /// `DESCRIPTIVES score age /STATISTICS=MEAN STDDEV.`
 /// The procedure dialogs generate exactly this shape, so the runner and
 /// the dialogs share one grammar.
@@ -36,7 +36,7 @@ pub struct Command {
 }
 
 impl Command {
-    /// Parse one line of SPSS syntax.
+    /// Parse one line of StatsBench syntax.
     pub fn parse(line: &str) -> Command {
         // Split on whitespace, but keep "/SUB=..." groups together.
         let mut tokens: Vec<String> = Vec::new();
@@ -321,7 +321,7 @@ fn execute_line(app: &mut StatsCraftApp, line: &str) {
                 let mut ok = false;
                 if let Some(&x) = xs.first() {
                     if let Some(r) = stats::linear_regression_xy(t, yi, x) {
-                        // A scatter plot with the fitted line, as SPSS draws
+                        // A scatter plot with the fitted line, as StatsBench draws
                         // it in the regression output.
                         let chart = stats::scatter_points(t, x, yi).map(|s| {
                             crate::output::scatter_chart(&s)
@@ -535,7 +535,7 @@ fn execute_line(app: &mut StatsCraftApp, line: &str) {
                 match stats::one_way_anova_with(t, yi, fi, &posthoc, with_levene) {
                     Some(a) => {
                         // The group descriptives go in their own table,
-                        // as SPSS shows them.
+                        // as StatsBench shows them.
                         app.outputs.push(OutputTable::anova_descriptives(&a));
                         if with_welch {
                             // The group data, for the variance tests.
@@ -1278,7 +1278,7 @@ NONPARAMETRIC /FRIEDMAN= score age response_time
             "no expected counts: {:?}",
             pivot.measures
         );
-        // The totals are levels of the dimensions, as SPSS has them.
+        // The totals are levels of the dimensions, as StatsBench has them.
         assert_eq!(
             pivot.row_dims[0].levels.last().map(|s| s.as_str()),
             Some("Total")

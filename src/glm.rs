@@ -48,7 +48,7 @@ pub enum SumOfSquaresType {
 }
 
 impl SumOfSquaresType {
-    /// The keyword SPSS uses for the type.
+    /// The keyword StatsBench uses for the type.
     pub fn keyword(self) -> &'static str {
         match self {
             SumOfSquaresType::TypeI => "TYPE I",
@@ -83,7 +83,7 @@ pub struct DesignFactor {
 /// The descriptive statistics of one cell of the design.
 #[derive(Debug, Clone)]
 pub struct CellSummary {
-    /// The cell's name, as SPSS writes it: "A=1", "A=1,B=2".
+    /// The cell's name, as StatsBench writes it: "A=1", "A=1,B=2".
     pub name: String,
     /// The number of cases.
     pub n: usize,
@@ -98,7 +98,7 @@ pub struct CellSummary {
 /// One row of the tests table.
 #[derive(Debug, Clone)]
 pub struct GlmEffect {
-    /// The effect's name, as SPSS writes it: "A", "A*B".
+    /// The effect's name, as StatsBench writes it: "A", "A*B".
     pub name: String,
     /// The sum of squares.
     pub ss: f64,
@@ -164,7 +164,7 @@ pub fn glm(
 
     // The levels of each factor.
     //
-    // The levels are SORTED, the way SPSS sorts them: numerically when
+    // The levels are SORTED, the way StatsBench sorts them: numerically when
     // the variable is numeric, and alphabetically when it is a
     // string. The order matters, because the first level is the
     // reference level of the treatment coding and the Type III sums
@@ -636,7 +636,7 @@ fn effect_df(designs: &[DesignFactor], name: &str) -> f64 {
 }
 
 /// The names of the effects: the main effects first, then the
-/// interactions, in the order SPSS writes them.
+/// interactions, in the order StatsBench writes them.
 fn effect_names(designs: &[DesignFactor]) -> Vec<String> {
     let mut names: Vec<String> = designs.iter().map(|d| d.name.clone()).collect();
     for size in 2..=designs.len() {
@@ -701,7 +701,7 @@ fn build_design_columns(
     // natural one.
     //
     // The reference level is the first one because that is the
-    // order SPSS and statsmodels use, and the Type III sums of
+    // order StatsBench and statsmodels use, and the Type III sums of
     // squares depend on which level it is.
     let mut coded: Vec<Vec<Vec<f64>>> = Vec::new();
     for (k, design) in designs.iter().enumerate() {

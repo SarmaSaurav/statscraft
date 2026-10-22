@@ -1,4 +1,4 @@
-# Open a procedure dialog in SPSS Statistics 27 and capture it.
+# Open a procedure dialog in StatsBench 27 and capture it.
 # Strategy: click the menu, hover the submenu, click the leaf - all in one
 # process so no window switch can dismiss the menu. Captures after each step
 # so the geometry can be diagnosed if it fails.
@@ -45,7 +45,7 @@ function Shot([string]$t) {
   $bmp = New-Object System.Drawing.Bitmap $vs.Width, $vs.Height
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   $g.CopyFromScreen($vs.X, $vs.Y, 0, 0, $bmp.Size)
-  $bmp.Save("C:\Users\Saurav\AppData\Local\Temp\spss_ref\d_$t.png", [System.Drawing.Imaging.ImageFormat]::Png)
+  $bmp.Save("C:\Users\Saurav\AppData\Local\Temp\ref_shots\d_$t.png", [System.Drawing.Imaging.ImageFormat]::Png)
   $g.Dispose(); $bmp.Dispose()
 }
 $p = Get-Process stats -EA SilentlyContinue | Select-Object -First 1
@@ -80,7 +80,7 @@ if ($dlg) {
   $bmp = New-Object System.Drawing.Bitmap $dlg.Wd, $dlg.Ht
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   $g.CopyFromScreen($dlg.L, $dlg.TP, 0, 0, $bmp.Size)
-  $bmp.Save('C:\Users\Saurav\AppData\Local\Temp\spss_ref\spss_freq_dialog.png', [System.Drawing.Imaging.ImageFormat]::Png)
+  $bmp.Save('C:\Users\Saurav\AppData\Local\Temp\ref_shots\ref_freq_dialog.png', [System.Drawing.Imaging.ImageFormat]::Png)
   $g.Dispose(); $bmp.Dispose()
   Write-Output ("SAVED dialog {0} {1}x{2}" -f $dlg.T, $dlg.Wd, $dlg.Ht)
 } else { Write-Output 'NO_DIALOG' }

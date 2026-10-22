@@ -181,7 +181,7 @@ pub fn crosstabs_chi2(table: &DataTable, ia: usize, ib: usize) -> Option<Crossta
     let mut n = 0usize;
     for row in 0..table.n_rows {
         let (Some(k1), Some(k2)) = (category_key(ca, row), category_key(cb, row)) else {
-            continue; // pairwise missing excluded (SPSS listwise for crosstabs)
+            continue; // pairwise missing excluded (StatsBench listwise for crosstabs)
         };
         let (Some(i), Some(j)) = (idx1.get(k1.as_str()).copied(), idx2.get(k2.as_str()).copied()) else {
             continue;
@@ -740,7 +740,7 @@ fn run_posthoc(
 
             // ---- Bonferroni ----
             // The Bonferroni p-value is the unadjusted one multiplied by
-            // the number of comparisons, which is how SPSS reports it.
+            // the number of comparisons, which is how StatsBench reports it.
             if which.bonferroni {
                 let se = (ms_within * (1.0 / n1 as f64 + 1.0 / n2 as f64)).sqrt();
                 if se > 0.0 {
@@ -784,7 +784,7 @@ fn run_posthoc(
 
 /// The **two-tailed** p-value for a t statistic.
 ///
-/// The two-tailed value is what SPSS reports, so this already includes
+/// The two-tailed value is what StatsBench reports, so this already includes
 /// both tails - callers must not double it again.
 fn t_cdf(t: f64, df: f64) -> f64 {
     (|| -> Option<f64> {
@@ -1118,7 +1118,7 @@ pub struct Descriptive {
 /// Which descriptive statistics a procedure should report.
 ///
 /// The names match the `STATISTICS` subcommand keywords of the
-/// corresponding IBM SPSS command, so a set parsed from syntax can be
+/// corresponding StatsBench command, so a set parsed from syntax can be
 /// applied directly.
 #[derive(Debug, Clone, Default)]
 pub struct StatSet {
@@ -1141,7 +1141,7 @@ pub struct StatSet {
 }
 
 impl StatSet {
-    /// The SPSS default set for DESCRIPTIVES / FREQUENCIES: mean, std dev,
+    /// The StatsBench default set for DESCRIPTIVES / FREQUENCIES: mean, std dev,
     /// minimum, maximum.
     pub fn defaults() -> Self {
         Self {
@@ -1232,7 +1232,7 @@ pub fn descriptives_in(table: &DataTable, var_idx: &[usize]) -> Vec<Descriptive>
 /// Descriptives with a caller-chosen set of statistics.
 ///
 /// `stats` selects which statistics are computed. An empty set falls back
-/// to the SPSS defaults (mean, std dev, min, max).
+/// to the StatsBench defaults (mean, std dev, min, max).
 pub fn descriptives_with(
     table: &DataTable,
     var_idx: &[usize],
@@ -1273,8 +1273,8 @@ pub fn descriptives_with(
             (vals[n / 2 - 1] + vals[n / 2]) / 2.0
         };
 
-        // Mode: the most frequent value. SPSS reports every mode; we
-        // report the smallest of them, which is what SPSS shows first.
+        // Mode: the most frequent value. StatsBench reports every mode; we
+        // report the smallest of them, which is what StatsBench shows first.
         let mode = {
             let mut counts: Vec<(f64, usize)> = Vec::new();
             for &v in &vals {
@@ -1298,7 +1298,7 @@ pub fn descriptives_with(
             }
         };
 
-        // Skewness and kurtosis use the SPSS (bias-corrected) formulas.
+        // Skewness and kurtosis use the StatsBench (bias-corrected) formulas.
         let m2 = vals.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n_f;
         let m3 = vals.iter().map(|x| (x - mean).powi(3)).sum::<f64>() / n_f;
         let m4 = vals.iter().map(|x| (x - mean).powi(4)).sum::<f64>() / n_f;
@@ -1308,7 +1308,7 @@ pub fn descriptives_with(
             0.0
         };
         let kurtosis = if n_f > 3.0 && m2 > 0.0 {
-            // Excess kurtosis, as SPSS reports it.
+            // Excess kurtosis, as StatsBench reports it.
             let g2 = m4 / (m2 * m2) - 3.0;
             ((n_f + 1.0) * g2 / (n_f - 2.0)) + 3.0 - 3.0
         } else {
@@ -1327,7 +1327,7 @@ pub fn descriptives_with(
         };
 
         // Percentiles: linear interpolation between order statistics,
-        // matching SPSS's default (which is not a simple index lookup).
+        // matching StatsBench's default (which is not a simple index lookup).
         let mut percentiles = Vec::new();
         if stats.percentiles {
             let wanted: Vec<f64> = if stats.percentile_values.is_empty() {
@@ -1363,7 +1363,7 @@ pub fn descriptives_with(
 }
 
 /// The p-th percentile of a sorted vector, by linear interpolation
-/// (SPSS's default PERCENTILES method).
+/// (StatsBench's default PERCENTILES method).
 pub fn percentile_of(sorted: &[f64], p: f64) -> f64 {
     if sorted.is_empty() {
         return f64::NAN;
@@ -1509,7 +1509,7 @@ pub fn correlations_in(table: &DataTable, nums: &[usize]) -> Vec<Correlation> {
                 cov / (vx * vy)
             };
             // The two-tailed significance of r, and the significance star
-            // SPSS prints next to it.
+            // StatsBench prints next to it.
             let df = (xs.len() as f64 - 2.0).max(1.0);
             let p = if (1.0 - r * r).abs() > 1e-12 {
                 let t = r * (df / (1.0 - r * r)).sqrt();
@@ -1637,7 +1637,7 @@ pub fn linear_regression_xy(table: &DataTable, yi: usize, xi: usize) -> Option<R
         f64::NAN
     };
     // A perfect fit has no residual variance, so the standard error of
-    // the slope is zero and the t statistic is unbounded. SPSS reports
+    // the slope is zero and the t statistic is unbounded. StatsBench reports
     // the fit as exact, so the p-value is 0 and the t statistic is
     // reported as infinite.
     let (t, p) = if std_error > 0.0 {
@@ -1877,7 +1877,7 @@ mod validation_tests {
 
     #[test]
     fn descriptives_match_closed_form() {
-        // SPSS-style sample stats: scores 88.5, 92, 75.3, 90.1, 84.2, 79.9
+        // StatsBench-style sample stats: scores 88.5, 92, 75.3, 90.1, 84.2, 79.9
         // mean = 85.0, SD (n-1) = sqrt(41.6) = 6.4498, min = 75.3, max = 92
         let t = table(vec![numeric("score", vec![88.5, 92.0, 75.3, 90.1, 84.2, 79.9])], 6);
         let d = descriptives(&t);
@@ -1914,7 +1914,7 @@ mod validation_tests {
 
     #[test]
     fn user_missing_excluded_from_procedures() {
-        // score 99 marks a user-missing value: SPSS excludes it from analyses
+        // score 99 marks a user-missing value: StatsBench excludes it from analyses
         let mut col = numeric("score", vec![1.0, 2.0, 99.0, 4.0, 5.0]);
         col.meta.user_missing.push(99.0);
         let t = table(vec![col], 5);
@@ -2659,7 +2659,7 @@ pub fn explore(
             let max = vals[n - 1];
             let range = max - min;
             let iqr = percentile_of(&vals, 75.0) - percentile_of(&vals, 25.0);
-            // The 5% trimmed mean, as SPSS reports it.
+            // The 5% trimmed mean, as StatsBench reports it.
             let trim = (n as f64 * 0.05).floor() as usize;
             let trimmed: Vec<f64> = if trim * 2 < n {
                 vals[trim..n - trim].to_vec()
@@ -3249,7 +3249,7 @@ pub struct Scatter {
 /// The result of a reliability analysis.
 #[derive(Debug, Clone)]
 pub struct ReliabilityResult {
-    /// The scale's name, as SPSS reports it.
+    /// The scale's name, as StatsBench reports it.
     pub name: String,
     /// The number of items.
     pub n_items: usize,

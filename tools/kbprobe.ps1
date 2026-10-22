@@ -1,5 +1,5 @@
-param([string]$Out = 'C:/Users/Saurav/AppData/Local/Temp/spss_ref/kb.png')
-# Probe SPSS's menu behaviour with the keyboard, capturing the screen after
+param([string]$Out = 'C:/Users/Saurav/AppData/Local/Temp/ref_shots/kb.png')
+# Probe StatsBench's menu behaviour with the keyboard, capturing the screen after
 # each key so we can see exactly what happens.
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 Add-Type @'
@@ -16,7 +16,7 @@ function Shot([string]$tag) {
   $bmp = New-Object System.Drawing.Bitmap $vs.Width, $vs.Height
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   $g.CopyFromScreen($vs.X, $vs.Y, 0, 0, $bmp.Size)
-  $bmp.Save("C:\Users\Saurav\AppData\Local\Temp\spss_ref\kb_$tag.png", [System.Drawing.Imaging.ImageFormat]::Png)
+  $bmp.Save("C:\Users\Saurav\AppData\Local\Temp\ref_shots\kb_$tag.png", [System.Drawing.Imaging.ImageFormat]::Png)
   $g.Dispose(); $bmp.Dispose()
   Write-Output "SHOT $tag"
 }

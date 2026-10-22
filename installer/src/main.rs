@@ -26,7 +26,7 @@ $wsh = New-Object -ComObject WScript.Shell
 $sc = $wsh.CreateShortcut((Join-Path $start "StatsCraft.lnk"))
 $sc.TargetPath = Join-Path $dest "statscraft.exe"
 $sc.WorkingDirectory = $dest
-$sc.Description = "StatsCraft - lightweight SPSS-like statistical workbench"
+$sc.Description = "StatsCraft - lightweight statistical workbench"
 $sc.IconLocation = Join-Path $dest "statscraft.exe,0"
 $sc.Save()
 $usc = $wsh.CreateShortcut((Join-Path $start "Uninstall StatsCraft.lnk"))

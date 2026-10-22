@@ -1,4 +1,4 @@
-# Open a data file in the running SPSS Statistics 27 and capture the window
+# Open a data file in the running StatsBench 27 and capture the window
 # that results. Uses the app's own File > Open path.
 param(
   [Parameter(Mandatory=$true)][string]$Data,
@@ -36,7 +36,7 @@ public class SP {
 }
 '@
 $p = Get-Process stats -EA SilentlyContinue | Select-Object -First 1
-if (-not $p) { Write-Output 'SPSS_NOT_RUNNING'; exit 1 }
+if (-not $p) { Write-Output 'StatsBench_NOT_RUNNING'; exit 1 }
 $pid0 = [uint32]$p.Id
 $main = [SP]::ForPid($pid0) | Where-Object { $_.T -like '*Data Editor*' } | Select-Object -First 1
 if (-not $main) { Write-Output 'NO_MAIN'; exit 1 }

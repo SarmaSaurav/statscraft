@@ -7,14 +7,14 @@ pub struct OutputTable {
     ///
     /// A pivot table is a grid addressed by a row key and a column key
     /// rather than by a row and a column number, which is what makes
-    /// the SPSS operations - pivoting, drilling into a cell -
+    /// the StatsBench operations - pivoting, drilling into a cell -
     /// possible. The `headers` and `rows` above are the flattened view
     /// of the same table, for the export and for the procedures that do
     /// not need the structure.
     pub pivot: Option<crate::pivot::PivotTable>,
-    /// Footnote rendered beneath the pivot table (SPSS "Notes").
+    /// Footnote rendered beneath the pivot table (StatsBench "Notes").
     pub note: String,
-    /// An optional chart drawn under the table, as SPSS draws one when
+    /// An optional chart drawn under the table, as StatsBench draws one when
     /// the procedure asks for it.
     pub chart: Option<Chart>,
 }
@@ -31,7 +31,7 @@ pub struct Chart {
     /// A horizontal reference line at this value, if there is one.
     ///
     /// The Chart Builder lets the reader put a line on the chart — the
-    /// mean of the data, a threshold — and SPSS's charts carry the
+    /// mean of the data, a threshold — and StatsBench's charts carry the
     /// same thing.
     pub reference_line: Option<f64>,
     /// The label of the reference line.
@@ -70,13 +70,13 @@ pub struct ChartSeries {
 }
 
 /// Format a number with the given number of decimals, rounding the
-/// way SPSS does.
+/// way StatsBench does.
 ///
 /// Rust's own formatter rounds a half to even, so 5.625 comes out as
-/// 5.62. SPSS rounds a half away from zero, so the same value comes
+/// 5.62. StatsBench rounds a half away from zero, so the same value comes
 /// out as 5.63. The difference is visible in a table of expected
 /// counts, so the rounding is done here.
-fn spss_round(value: f64, decimals: usize) -> String {
+fn round_half_away(value: f64, decimals: usize) -> String {
     let factor = 10f64.powi(decimals as i32);
     let scaled = value * factor;
     // A value that is a half in decimal is often a hair below it in
@@ -105,13 +105,13 @@ impl OutputTable {
 
     /// Descriptives rendered with only the statistics the user asked for.
     ///
-    /// SPSS builds one table per variable when several variables are
+    /// StatsBench builds one table per variable when several variables are
     /// analysed, with a row per statistic. We follow that layout.
     pub fn descriptives_with(
         descs: &[crate::stats::Descriptive],
         stats: &crate::stats::StatSet,
     ) -> Self {
-        // The statistic rows, in SPSS's order.
+        // The statistic rows, in StatsBench's order.
         let mut stat_rows: Vec<(
             String,
             Box<dyn Fn(&crate::stats::Descriptive) -> String>,
@@ -179,7 +179,7 @@ impl OutputTable {
 
         let mut rows = Vec::new();
         for d in descs {
-            // One block per variable, laid out the way SPSS does it: the
+            // One block per variable, laid out the way StatsBench does it: the
             // variable name on the first line with its N, then one line per
             // statistic with the statistic's name in the first column and
             // its value under the matching column.
@@ -216,7 +216,7 @@ impl OutputTable {
         }
     }
 
-    /// The correlation matrix, with the significance stars SPSS prints
+    /// The correlation matrix, with the significance stars StatsBench prints
     /// when `Print > Sig.` is on.
     pub fn correlations_with(
         rows_in: &[crate::stats::Correlation],
@@ -224,7 +224,7 @@ impl OutputTable {
         show_descriptives: bool,
         descriptives: &[crate::stats::Descriptive],
     ) -> Self {
-        // Build the symmetric matrix the way SPSS does.
+        // Build the symmetric matrix the way StatsBench does.
         let mut names: Vec<String> = Vec::new();
         for r in rows_in {
             if !names.contains(&r.var1) {
@@ -328,10 +328,10 @@ impl OutputTable {
         }
     }
 
-    /// The SPSS regression output: a model summary, an ANOVA table and a
+    /// The StatsBench regression output: a model summary, an ANOVA table and a
     /// coefficients table.
     pub fn regression_with(r: &crate::stats::RegressionResult) -> Self {
-        // SPSS puts these in three separate tables; we lay them out in one
+        // StatsBench puts these in three separate tables; we lay them out in one
         // grid with section headings, as the earlier tables do.
         let mut headers: Vec<String> = vec!["Model".into(), "R".into(), "R²".into()];
         headers.push("Adjusted R²".into());
@@ -451,7 +451,7 @@ impl OutputTable {
         }
     }
 
-    /// The t-test output, with the effect size table SPSS shows when
+    /// The t-test output, with the effect size table StatsBench shows when
     /// `Options... > Effect size` is ticked.
     pub fn ttest_with(r: &crate::stats::TTestResult, show_effects: bool) -> Self {
         let mut headers = vec![
@@ -482,7 +482,7 @@ impl OutputTable {
         ]];
 
         if show_effects {
-            // The "Effect Size" table, as SPSS writes it.
+            // The "Effect Size" table, as StatsBench writes it.
             rows.push(vec![String::new()]);
             rows.push(vec!["Effect Size".into()]);
             rows.push(vec![
@@ -587,7 +587,7 @@ impl OutputTable {
                 format!("{:.2}", r.percent),
             ]);
         }
-        // trailing Total row like SPSS frequency tables
+        // trailing Total row like StatsBench frequency tables
         let total: usize = rows_in.iter().map(|r| r.count).sum::<usize>();
         rows.push(vec![String::from("Total"), total.to_string(), "100.00".into()]);
         Self {
@@ -600,10 +600,10 @@ impl OutputTable {
         }
     }
 
-    /// SPSS Crosstabs: crosstabulation table + Pearson Chi-Square line in the note.
+    /// StatsBench Crosstabs: crosstabulation table + Pearson Chi-Square line in the note.
     /// A crosstab with the cell counts and statistics the user chose.
     ///
-    /// SPSS shows one table per cell type, each with the counts beneath
+    /// StatsBench shows one table per cell type, each with the counts beneath
     /// the categories. We do the same: a separate block for observed
     /// counts, expected counts, and each percentage type, followed by the
     /// test statistics.
@@ -618,7 +618,7 @@ impl OutputTable {
         let c = ct.levels2.len();
         let n = ct.n.max(1) as f64;
 
-        // The measures the user asked for. SPSS shows the counts, the
+        // The measures the user asked for. StatsBench shows the counts, the
         // expected counts and the percentages of the same cells, so
         // they are measures of one pivot rather than separate tables.
         let mut measures: Vec<String> = Vec::new();
@@ -643,7 +643,7 @@ impl OutputTable {
 
         // The row dimension is the first variable, with a Total level
         // at the end; the column dimension is the second, likewise.
-        // SPSS always shows the totals, so the levels are always
+        // StatsBench always shows the totals, so the levels are always
         // there.
         let row_levels: Vec<String> = ct
             .levels1
@@ -703,7 +703,7 @@ impl OutputTable {
                 for m in &pivot.measures {
                     let v = match m.as_str() {
                         "Count" => count(i, j).to_string(),
-                        "Expected Count" => spss_round(expected(i, j), 2),
+                        "Expected Count" => round_half_away(expected(i, j), 2),
                         // The percentage of the row the cell is in; the
                         // total row is the percentage of the whole.
                         "Row %" => {
@@ -839,13 +839,13 @@ impl OutputTable {
         }
     }
 
-    /// SPSS ANOVA table: Between/Within/Total rows with SS, df, MS, F, Sig.
+    /// StatsBench ANOVA table: Between/Within/Total rows with SS, df, MS, F, Sig.
     /// The full ANOVA output: descriptives per group, the ANOVA table,
     /// Levene's test and the post-hoc comparisons.
-    /// The descriptives of the groups, as SPSS shows them above the
+    /// The descriptives of the groups, as StatsBench shows them above the
     /// ANOVA table.
     /// The Tests of Between-Subjects Effects table of a general
-    /// linear model, laid out the way SPSS lays it out.
+    /// linear model, laid out the way StatsBench lays it out.
     pub fn glm_tests(g: &crate::glm::GlmResult) -> Self {
         let headers = vec![
             "Source".into(),
@@ -1165,7 +1165,7 @@ impl OutputTable {
         }
     }
 
-    /// Paired-samples t-test: SPSS one-row layout.
+    /// Paired-samples t-test: StatsBench one-row layout.
     pub fn from_paired_t(r: &crate::stats::PairedTResult) -> Self {
         Self {
             title: "Paired Samples Test".to_string(),
@@ -1237,7 +1237,7 @@ impl OutputTable {
     }
 
     /// The EXPLORE output: the descriptives for each group, laid out as
-    /// SPSS lays it out.
+    /// StatsBench lays it out.
     pub fn from_explore(e: &crate::stats::ExploreResult) -> Self {
         let headers = vec![String::new(), "Statistic".into(), "Std. Error".into()];
         let mut rows = Vec::new();
@@ -1485,7 +1485,7 @@ impl OutputTable {
     }
 
     /// The frequencies table with a bar chart of the counts, the way
-    /// SPSS draws one when `Charts > Bar chart` is asked for.
+    /// StatsBench draws one when `Charts > Bar chart` is asked for.
     pub fn frequencies_with_chart(
         var: &str,
         rows_in: &[crate::stats::FreqRow],
@@ -1888,7 +1888,7 @@ fn merge_row(all: &[String], row: &[String]) -> Vec<String> {
     out
 }
 
-/// The significance star SPSS prints next to a correlation.
+/// The significance star StatsBench prints next to a correlation.
 pub fn significance_star(p: f64) -> &'static str {
     if !p.is_finite() {
         return "";
@@ -2008,16 +2008,16 @@ mod pivot_tests {
     }
 
     #[test]
-    fn the_rounding_is_the_way_spss_rounds() {
-        // Rust rounds a half to even; SPSS rounds it away from zero.
-        assert_eq!(spss_round(5.625, 2), "5.63");
-        assert_eq!(spss_round(2.675, 2), "2.68");
-        assert_eq!(spss_round(0.125, 2), "0.13");
-        assert_eq!(spss_round(1.005, 2), "1.01");
+    fn the_rounding_is_the_way_round_half_aways() {
+        // Rust rounds a half to even; StatsBench rounds it away from zero.
+        assert_eq!(round_half_away(5.625, 2), "5.63");
+        assert_eq!(round_half_away(2.675, 2), "2.68");
+        assert_eq!(round_half_away(0.125, 2), "0.13");
+        assert_eq!(round_half_away(1.005, 2), "1.01");
         // The ordinary cases are unaffected.
-        assert_eq!(spss_round(5.6249, 2), "5.62");
-        assert_eq!(spss_round(-5.625, 2), "-5.63");
-        assert_eq!(spss_round(12.0, 1), "12.0");
+        assert_eq!(round_half_away(5.6249, 2), "5.62");
+        assert_eq!(round_half_away(-5.625, 2), "-5.63");
+        assert_eq!(round_half_away(12.0, 1), "12.0");
     }
 
     #[test]

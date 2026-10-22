@@ -18,7 +18,7 @@ import subprocess
 import sys
 
 VC = r"C:/Program Files/VectorCraft/vectorcraft-cli.exe"
-OUT = r"D:/The_SPSS_Garage/StatsCraft/assets/icons"
+OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "icons")
 
 # Every icon is drawn on a 24x24 grid, stroke 1.8, round caps/joins.
 # Colour is white: the app tints the icon at draw time, so one asset serves

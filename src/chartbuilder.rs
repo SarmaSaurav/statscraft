@@ -1,6 +1,6 @@
 //! The Chart Builder: the dialog that makes a chart.
 //!
-//! SPSS does not draw a chart straight from a procedure. The Chart
+//! StatsBench does not draw a chart straight from a procedure. The Chart
 //! Builder is where the reader chooses the type of the chart, the
 //! variables it uses, how the data is summarised, the labels, and any
 //! reference line — and the chart is then drawn from those choices.
@@ -355,7 +355,7 @@ impl ChartBuilder {
 
 /// The Chart Builder's window.
 ///
-/// The dialog is the same shape as SPSS's: the chart type, the
+/// The dialog is the same shape as StatsBench's: the chart type, the
 /// variables, the labels, and the action row. The chart is drawn
 /// underneath, so the reader sees what the choices make.
 pub fn show(ctx: &egui::Context, app: &mut crate::app::StatsCraftApp, b: &mut ChartBuilder) {
@@ -564,7 +564,7 @@ pub fn render(ui: &mut egui::Ui, app: &mut crate::app::StatsCraftApp, b: &mut Ch
             *b = ChartBuilder::for_table(table);
         }
         if ui.button("Help").clicked() {
-            app.status = "The Chart Builder makes a chart from the data, the way SPSS's does.".to_string();
+            app.status = "The Chart Builder makes a chart from the current data and settings.".to_string();
         }
     });
 }
@@ -749,7 +749,7 @@ mod tests {
         // One box per group.
         assert_eq!(c.series.len(), 2);
         // The quartiles of A, which is 10 and 30. The upper quartile
-        // is 25, because the percentile is interpolated the way SPSS
+        // is 25, because the percentile is interpolated the way StatsBench
         // interpolates it.
         let q = c.series[0].quartiles.expect("the quartiles");
         assert_eq!(q.0, 10.0);

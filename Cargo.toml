@@ -2,7 +2,7 @@
 name = "statscraft"
 version = "0.1.0"
 edition = "2021"
-description = "Lightweight SPSS-like statistical analysis workstation (Rust)"
+description = "Lightweight statistical analysis workstation (Rust)"
 license = "MIT"
 
 [dependencies]
@@ -35,8 +35,7 @@ arboard = "3.7"
 # thiserror = "2.0"
 # anyhow = "1.0"
 
-# Optional .sav I/O via FFI to IBM SPSS I/O (spssio64.dll)
-# (no crate; hand-rolled FFI in src/io/sav_ffi.rs)
+# Optional .sav I/O through the polars-readstat-rs crate.
 
 [[bin]]
 name = "statscraft"

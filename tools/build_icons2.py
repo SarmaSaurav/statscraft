@@ -24,7 +24,7 @@ import re
 import subprocess
 import sys
 
-OUT = r"D:/The_SPSS_Garage/StatsCraft/assets/icons"
+OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "icons")
 
 # The Dracula accents.
 CYAN = "#8BE9FD"
@@ -112,7 +112,7 @@ ICONS = {
         "M14 14 H17",
     ], []),
     "variables": (PINK, [
-        # the SPSS variable columns
+        # the StatsBench variable columns
         "M4 5 H20 V19 H4 Z",
         "M4 9 H20",
         "M4 13 H20",

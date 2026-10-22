@@ -26,7 +26,7 @@ function Shot([string]$t) {
   $bmp = New-Object System.Drawing.Bitmap $vs.Width, $vs.Height
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   $g.CopyFromScreen($vs.X, $vs.Y, 0, 0, $bmp.Size)
-  $bmp.Save("C:\Users\Saurav\AppData\Local\Temp\spss_ref\g_$Tag`_$t.png", [System.Drawing.Imaging.ImageFormat]::Png)
+  $bmp.Save("C:\Users\Saurav\AppData\Local\Temp\ref_shots\g_$Tag`_$t.png", [System.Drawing.Imaging.ImageFormat]::Png)
   $g.Dispose(); $bmp.Dispose()
 }
 $p = Get-Process stats -EA SilentlyContinue | Select-Object -First 1
