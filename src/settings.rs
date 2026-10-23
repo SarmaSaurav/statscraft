@@ -14,12 +14,25 @@ use std::path::{Path, PathBuf};
 /// The most recent files kept in the File > Recent Files menu.
 pub const MAX_RECENT: usize = 10;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Settings {
     /// Whether the dark theme was active when the program last closed.
     pub dark: bool,
     /// The most recently opened data files, newest first.
     pub recent_files: Vec<String>,
+    /// True when the last session closed cleanly. False means a restore
+    /// snapshot may be offered at start-up.
+    pub session_ok: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            dark: false,
+            recent_files: Vec::new(),
+            session_ok: true,
+        }
+    }
 }
 
 impl Settings {
@@ -42,7 +55,10 @@ pub fn load() -> Settings {
     let Ok(text) = std::fs::read_to_string(&path) else {
         return Settings::default();
     };
-    let mut settings = Settings::default();
+    let mut settings = Settings {
+        session_ok: true,
+        ..Settings::default()
+    };
     for line in text.lines() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
@@ -64,6 +80,12 @@ pub fn load() -> Settings {
                     settings.recent_files.push(value.to_string());
                 }
             }
+            "session_ok" => {
+                settings.session_ok = !matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "0" | "false" | "no" | "off"
+                );
+            }
             _ => {}
         }
     }
@@ -81,6 +103,7 @@ pub fn save(settings: &Settings) {
     let mut text = String::new();
     text.push_str("# StatsCraft settings\n");
     text.push_str(&format!("dark={}\n", if settings.dark { 1 } else { 0 }));
+    text.push_str(&format!("session_ok={}\n", if settings.session_ok { 1 } else { 0 }));
     for file in &settings.recent_files {
         if !file.contains('\n') && !file.contains('\r') {
             text.push_str(&format!("recent={}\n", file));
@@ -132,6 +155,16 @@ fn directory_is_writable(dir: &Path) -> bool {
         }
         Err(_) => false,
     }
+}
+
+/// The `.sav` snapshot written while the session is dirty.
+pub fn recovery_sav_path() -> PathBuf {
+    config_path().with_file_name("statscraft-restore.sav")
+}
+
+/// Sidecar for the recovery snapshot: original path, weight, split.
+pub fn recovery_meta_path() -> PathBuf {
+    config_path().with_file_name("statscraft-restore.meta")
 }
 
 fn user_config_dir() -> PathBuf {

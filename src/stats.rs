@@ -4689,43 +4689,73 @@ mod phase4_tests {
     }
 }
 
-/// Compute a new variable and add it to the dataset.
+/// Compute a new variable or update an existing one.
 ///
 /// The expression language is the small one the syntax runner supports:
 /// the variable names, the four arithmetic operators, parentheses, the
 /// unary minus, and the functions `MEAN`, `MIN`, `MAX`, `SUM`, `ABS`,
 /// `SQRT`, `LN`, `LOG10` and `ROUND`.
+///
+/// When `if_condition` is set, only cases for which the condition is true
+/// receive the expression value. A new variable is system-missing elsewhere;
+/// an existing variable keeps its previous value on false cases.
 pub fn compute_variable(
     table: &mut DataTable,
     name: &str,
     expression: &str,
+    if_condition: Option<&str>,
 ) -> Result<String, String> {
-    // The columns the expression may refer to.
     let names: Vec<String> = table.columns.iter().map(|c| c.name.clone()).collect();
-
-    // The values of each case.
     let rows: Vec<Vec<Value>> = (0..table.n_rows)
         .map(|row| table.columns.iter().map(|c| c.values[row].clone()).collect())
         .collect();
 
+    if let Some(idx) = table.column_index(name) {
+        for (row, case) in rows.iter().enumerate() {
+            if let Some(cond) = if_condition {
+                if !eval_condition(cond, &names, case)? {
+                    continue;
+                }
+            }
+            let v = eval_expression(expression, &names, case)?;
+            table.columns[idx].values[row] = v;
+        }
+        return Ok(name.to_string());
+    }
+
     let mut values: Vec<Value> = Vec::with_capacity(table.n_rows);
-    for row in &rows {
-        let v = eval_expression(expression, &names, row)?;
+    for case in &rows {
+        let v = if let Some(cond) = if_condition {
+            if eval_condition(cond, &names, case)? {
+                eval_expression(expression, &names, case)?
+            } else {
+                Value::Missing
+            }
+        } else {
+            eval_expression(expression, &names, case)?
+        };
         values.push(v);
     }
 
-    // The new column: numeric if every value is a number, otherwise a
-    // string.
     let all_numeric = values.iter().all(|v| matches!(v, Value::Number(_)));
     let kind = if all_numeric {
         ColumnKind::Numeric
     } else {
         ColumnKind::String
     };
+    let meta = default_meta_for_values(&values, kind);
+    table.columns.push(Column {
+        name: name.to_string(),
+        kind,
+        values,
+        meta,
+    });
+    Ok(name.to_string())
+}
+
+fn default_meta_for_values(values: &[Value], kind: ColumnKind) -> crate::data::VariableMeta {
     let mut meta = crate::data::VariableMeta::default_for(kind);
-    if all_numeric {
-        // The standard deviation of the new variable, so the Variable
-        // View shows something sensible.
+    if kind == ColumnKind::Numeric {
         let nums: Vec<f64> = values
             .iter()
             .filter_map(|v| match v {
@@ -4734,19 +4764,1349 @@ pub fn compute_variable(
             })
             .collect();
         if nums.len() > 1 {
-            let m = nums.iter().sum::<f64>() / nums.len() as f64;
-            let var = nums.iter().map(|v| (v - m).powi(2)).sum::<f64>() / (nums.len() as f64 - 1.0);
             meta.decimals = 2;
-            let _ = var;
         }
+    }
+    meta
+}
+
+/// A simple case filter: `var = 1`, `age >= 18`, `group <> "B"`.
+pub fn eval_condition(condition: &str, names: &[String], row: &[Value]) -> Result<bool, String> {
+    let mut cond = condition.trim();
+    while cond.starts_with('(') && cond.ends_with(')') {
+        cond = cond[1..cond.len() - 1].trim();
+    }
+    if cond.is_empty() {
+        return Err("Empty IF condition.".to_string());
+    }
+    const OPS: [(&str, usize); 7] = [
+        (">=", 2),
+        ("<=", 2),
+        ("<>", 2),
+        ("!=", 2),
+        (">", 1),
+        ("<", 1),
+        ("=", 1),
+    ];
+    for (op, len) in OPS {
+        if let Some(idx) = find_comparison_op(cond, op) {
+            let left = cond[..idx].trim();
+            let right = cond[idx + len..].trim();
+            let left_v = resolve_condition_operand(left, names, row)?;
+            let right_v = parse_condition_literal(right)?;
+            return Ok(compare_values(&left_v, op, &right_v));
+        }
+    }
+    Err(format!("IF condition not understood: '{}'", condition))
+}
+
+fn find_comparison_op(cond: &str, op: &str) -> Option<usize> {
+    let mut in_quote: Option<char> = None;
+    let mut byte_idx = 0;
+    while byte_idx < cond.len() {
+        if let Some(q) = in_quote {
+            if let Some((c, next)) = cond[byte_idx..].chars().next().map(|c| (c, byte_idx + c.len_utf8())) {
+                if c == q {
+                    in_quote = None;
+                }
+                byte_idx = next;
+            } else {
+                break;
+            }
+            continue;
+        }
+        if cond[byte_idx..].starts_with(op) {
+            return Some(byte_idx);
+        }
+        if let Some(c) = cond[byte_idx..].chars().next() {
+            if c == '"' || c == '\'' {
+                in_quote = Some(c);
+            }
+            byte_idx += c.len_utf8();
+        } else {
+            break;
+        }
+    }
+    None
+}
+
+fn resolve_condition_operand(word: &str, names: &[String], row: &[Value]) -> Result<Value, String> {
+    if let Some(idx) = names.iter().position(|n| n.eq_ignore_ascii_case(word)) {
+        return Ok(row[idx].clone());
+    }
+    parse_condition_literal(word)
+}
+
+fn parse_condition_literal(text: &str) -> Result<Value, String> {
+    let text = text.trim();
+    if (text.starts_with('"') && text.ends_with('"') && text.len() >= 2)
+        || (text.starts_with('\'') && text.ends_with('\'') && text.len() >= 2)
+    {
+        return Ok(Value::Text(text[1..text.len() - 1].to_string()));
+    }
+    if let Ok(n) = text.parse::<f64>() {
+        return Ok(Value::Number(n));
+    }
+    Err(format!("Bad literal in IF condition: '{}'", text))
+}
+
+fn compare_values(left: &Value, op: &str, right: &Value) -> bool {
+    match (left, right) {
+        (Value::Number(a), Value::Number(b)) => match op {
+            "=" => (a - b).abs() < 1e-12,
+            "<>" | "!=" => (a - b).abs() >= 1e-12,
+            "<" => a < b,
+            "<=" => a <= b,
+            ">" => a > b,
+            ">=" => a >= b,
+            _ => false,
+        },
+        (Value::Text(a), Value::Text(b)) => match op {
+            "=" => a.eq_ignore_ascii_case(b),
+            "<>" | "!=" => !a.eq_ignore_ascii_case(b),
+            _ => false,
+        },
+        (Value::Text(a), Value::Number(b)) => {
+            if let Ok(n) = a.trim().parse::<f64>() {
+                compare_values(&Value::Number(n), op, &Value::Number(*b))
+            } else {
+                false
+            }
+        }
+        (Value::Number(a), Value::Text(b)) => {
+            if let Ok(n) = b.trim().parse::<f64>() {
+                compare_values(&Value::Number(*a), op, &Value::Number(n))
+            } else {
+                false
+            }
+        }
+        _ => false,
+    }
+}
+
+/// Recode values of one or more variables.
+///
+/// Forms:
+/// `RECODE a b (1=2) (2=1) (ELSE=COPY)`
+/// `RECODE score (1 THRU 5=1) (6 THRU HI=2) INTO band`
+/// `RECODE group (MISSING=9)`
+pub fn recode_command(table: &mut DataTable, line: &str) -> Result<String, String> {
+    let (sources, rules, into) = parse_recode(line)?;
+    if sources.is_empty() {
+        return Err("RECODE: no variables.".to_string());
+    }
+    if rules.is_empty() {
+        return Err("RECODE: no value mappings.".to_string());
+    }
+    if !into.is_empty() && into.len() != sources.len() {
+        return Err("RECODE: INTO needs one name per source variable.".to_string());
+    }
+    let dests: Vec<String> = if into.is_empty() {
+        sources.clone()
+    } else {
+        into
+    };
+    for (src_name, dest_name) in sources.iter().zip(dests.iter()) {
+        let src = table
+            .column_index(src_name)
+            .ok_or_else(|| format!("RECODE: unknown variable '{}'.", src_name))?;
+        let mut out: Vec<Value> = Vec::with_capacity(table.n_rows);
+        for row in 0..table.n_rows {
+            let value = table.columns[src].values[row].clone();
+            out.push(apply_recode(&table.columns[src], row, &value, &rules));
+        }
+        write_column(table, dest_name, out);
+    }
+    Ok(dests.join(" "))
+}
+
+/// Count how many of a set of variables match a value list, per case.
+///
+/// `COUNT hits = a b c (1 2)`
+pub fn count_command(table: &mut DataTable, line: &str) -> Result<String, String> {
+    let (dest, sources, atoms) = parse_count(line)?;
+    if sources.is_empty() {
+        return Err("COUNT: no variables.".to_string());
+    }
+    if atoms.is_empty() {
+        return Err("COUNT: expected a value list in parentheses.".to_string());
+    }
+    let src_idx: Result<Vec<usize>, String> = sources
+        .iter()
+        .map(|n| {
+            table
+                .column_index(n)
+                .ok_or_else(|| format!("COUNT: unknown variable '{}'.", n))
+        })
+        .collect();
+    let src_idx = src_idx?;
+    let mut values = Vec::with_capacity(table.n_rows);
+    for row in 0..table.n_rows {
+        let mut n = 0.0;
+        for &si in &src_idx {
+            let v = &table.columns[si].values[row];
+            if atoms.iter().any(|a| atom_matches(a, v)) {
+                n += 1.0;
+            }
+        }
+        values.push(Value::Number(n));
+    }
+    write_column(table, &dest, values);
+    Ok(dest)
+}
+
+/// Rank a numeric variable. Ties take the mean rank.
+///
+/// `RANK score` or `RANK score INTO rscore`
+pub fn rank_command(table: &mut DataTable, line: &str) -> Result<String, String> {
+    let (source, dest) = parse_rank(line)?;
+    let src = table
+        .column_index(&source)
+        .ok_or_else(|| format!("RANK: unknown variable '{}'.", source))?;
+    if table.columns[src].kind != ColumnKind::Numeric {
+        return Err("RANK: the variable must be numeric.".to_string());
+    }
+    let mut items: Vec<(usize, f64)> = Vec::new();
+    for row in 0..table.n_rows {
+        if table.columns[src].is_missing(row) {
+            continue;
+        }
+        if let Value::Number(n) = table.columns[src].values[row] {
+            items.push((row, n));
+        }
+    }
+    items.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    let mut out = vec![Value::Missing; table.n_rows];
+    let mut i = 0;
+    while i < items.len() {
+        let mut j = i;
+        while j + 1 < items.len() && (items[j + 1].1 - items[i].1).abs() < 1e-12 {
+            j += 1;
+        }
+        let mean = ((i + 1) + (j + 1)) as f64 / 2.0;
+        for item in items.iter().take(j + 1).skip(i) {
+            out[item.0] = Value::Number(mean);
+        }
+        i = j + 1;
+    }
+    write_column(table, &dest, out);
+    Ok(dest)
+}
+
+/// Recode unique values of a variable into consecutive integers.
+///
+/// `AUTORECODE group INTO groupn`
+pub fn autorecode_command(table: &mut DataTable, line: &str) -> Result<String, String> {
+    let (source, dest) = parse_autorecode(line)?;
+    let src = table
+        .column_index(&source)
+        .ok_or_else(|| format!("AUTORECODE: unknown variable '{}'.", source))?;
+    let mut seen: Vec<RecodeAtom> = Vec::new();
+    for row in 0..table.n_rows {
+        if table.columns[src].is_missing(row) {
+            continue;
+        }
+        let atom = match &table.columns[src].values[row] {
+            Value::Number(n) => RecodeAtom::Number(*n),
+            Value::Text(s) => RecodeAtom::Text(s.clone()),
+            Value::Missing => continue,
+        };
+        if !seen.iter().any(|a| atom_eq(a, &atom)) {
+            seen.push(atom);
+        }
+    }
+    seen.sort_by(atom_ord);
+    let mut out = vec![Value::Missing; table.n_rows];
+    let mut labels: Vec<(f64, String)> = Vec::new();
+    for (i, atom) in seen.iter().enumerate() {
+        let code = (i + 1) as f64;
+        labels.push((code, atom_label(atom)));
+        for row in 0..table.n_rows {
+            if atom_matches(atom, &table.columns[src].values[row]) {
+                out[row] = Value::Number(code);
+            }
+        }
+    }
+    write_column(table, &dest, out);
+    if let Some(idx) = table.column_index(&dest) {
+        table.columns[idx].meta.value_labels = labels;
+        table.columns[idx].meta.measure = crate::data::Measure::Nominal;
+        table.columns[idx].meta.decimals = 0;
+    }
+    Ok(dest)
+}
+
+/// Keep the cases for which a condition is true. The rest are dropped.
+///
+/// `SELECT IF age >= 18`
+pub fn select_if_command(table: &mut DataTable, condition: &str) -> Result<usize, String> {
+    let names: Vec<String> = table.columns.iter().map(|c| c.name.clone()).collect();
+    let mut keep: Vec<usize> = Vec::new();
+    for row in 0..table.n_rows {
+        let case: Vec<Value> = table.columns.iter().map(|c| c.values[row].clone()).collect();
+        if eval_condition(condition, &names, &case)? {
+            keep.push(row);
+        }
+    }
+    for col in table.columns.iter_mut() {
+        col.values = keep.iter().map(|&i| col.values[i].clone()).collect();
+    }
+    table.n_rows = keep.len();
+    Ok(keep.len())
+}
+
+#[derive(Clone, Copy)]
+enum AggFn {
+    N,
+    Mean,
+    Sum,
+    Min,
+    Max,
+    Sd,
+}
+
+/// `AGGREGATE BREAK group /MEAN(age) /N`
+pub fn aggregate_command(table: &mut DataTable, line: &str) -> Result<String, String> {
+    let (breaks, specs) = parse_aggregate(line)?;
+    let break_idx: Result<Vec<usize>, String> = breaks
+        .iter()
+        .map(|n| {
+            table
+                .column_index(n)
+                .ok_or_else(|| format!("AGGREGATE: unknown variable '{}'.", n))
+        })
+        .collect();
+    let break_idx = break_idx?;
+    let mut groups: std::collections::BTreeMap<String, Vec<usize>> =
+        std::collections::BTreeMap::new();
+    for row in 0..table.n_rows {
+        let key = if break_idx.is_empty() {
+            String::new()
+        } else {
+            break_idx
+                .iter()
+                .map(|&ci| format!("{:?}", table.columns[ci].values.get(row)))
+                .collect::<Vec<_>>()
+                .join("\u{1f}")
+        };
+        groups.entry(key).or_default().push(row);
+    }
+    let mut out_cols: Vec<Column> = Vec::new();
+    for (i, name) in breaks.iter().enumerate() {
+        let src = break_idx[i];
+        let mut values = Vec::new();
+        for rows in groups.values() {
+            values.push(
+                table.columns[src]
+                    .values
+                    .get(rows[0])
+                    .cloned()
+                    .unwrap_or(Value::Missing),
+            );
+        }
+        out_cols.push(Column {
+            name: name.clone(),
+            kind: table.columns[src].kind,
+            values,
+            meta: table.columns[src].meta.clone(),
+        });
+    }
+    for (fun, var) in &specs {
+        let dest = match fun {
+            AggFn::N => "n".to_string(),
+            AggFn::Mean => format!("mean_{}", var),
+            AggFn::Sum => format!("sum_{}", var),
+            AggFn::Min => format!("min_{}", var),
+            AggFn::Max => format!("max_{}", var),
+            AggFn::Sd => format!("sd_{}", var),
+        };
+        let src = if matches!(fun, AggFn::N) && var.is_empty() {
+            None
+        } else {
+            Some(
+                table
+                    .column_index(var)
+                    .ok_or_else(|| format!("AGGREGATE: unknown variable '{}'.", var))?,
+            )
+        };
+        let mut values = Vec::new();
+        for rows in groups.values() {
+            values.push(agg_value(table, src, rows, *fun));
+        }
+        out_cols.push(Column {
+            name: dest,
+            kind: ColumnKind::Numeric,
+            values,
+            meta: crate::data::VariableMeta::default_for(ColumnKind::Numeric),
+        });
+    }
+    let n_rows = groups.len();
+    *table = DataTable {
+        columns: out_cols,
+        n_rows,
+    };
+    Ok(format!("{} group(s)", n_rows))
+}
+
+fn agg_value(table: &DataTable, src: Option<usize>, rows: &[usize], fun: AggFn) -> Value {
+    if matches!(fun, AggFn::N) && src.is_none() {
+        return Value::Number(rows.len() as f64);
+    }
+    let Some(si) = src else {
+        return Value::Number(rows.len() as f64);
+    };
+    let nums: Vec<f64> = rows
+        .iter()
+        .filter(|&&r| !table.columns[si].is_missing(r))
+        .filter_map(|&r| match table.columns[si].values.get(r) {
+            Some(Value::Number(n)) => Some(*n),
+            _ => None,
+        })
+        .collect();
+    if nums.is_empty() && !matches!(fun, AggFn::N) {
+        return Value::Missing;
+    }
+    match fun {
+        AggFn::N => Value::Number(nums.len() as f64),
+        AggFn::Mean => Value::Number(nums.iter().sum::<f64>() / nums.len() as f64),
+        AggFn::Sum => Value::Number(nums.iter().sum()),
+        AggFn::Min => Value::Number(nums.iter().cloned().fold(f64::INFINITY, f64::min)),
+        AggFn::Max => Value::Number(nums.iter().cloned().fold(f64::NEG_INFINITY, f64::max)),
+        AggFn::Sd => {
+            if nums.len() < 2 {
+                return Value::Missing;
+            }
+            let m = nums.iter().sum::<f64>() / nums.len() as f64;
+            let v = nums.iter().map(|x| (x - m).powi(2)).sum::<f64>() / (nums.len() as f64 - 1.0);
+            Value::Number(v.sqrt())
+        }
+    }
+}
+
+fn parse_aggregate(line: &str) -> Result<(Vec<String>, Vec<(AggFn, String)>), String> {
+    let mut scan = Scan::new(line);
+    if !scan.eat_word_ignore("AGGREGATE") {
+        return Err("AGGREGATE: expected AGGREGATE.".to_string());
+    }
+    let mut breaks = Vec::new();
+    if scan.eat_word_ignore("BREAK") {
+        while let Some(name) = scan.ident() {
+            if name.eq_ignore_ascii_case("BREAK") {
+                continue;
+            }
+            breaks.push(name);
+        }
+    }
+    let mut specs = Vec::new();
+    loop {
+        scan.skip_ws();
+        if scan.peek() != Some('/') {
+            break;
+        }
+        scan.i += 1;
+        let ident = scan
+            .ident()
+            .ok_or_else(|| "AGGREGATE: expected a function after '/'.".to_string())?;
+        let fun = match ident.to_uppercase().as_str() {
+            "N" | "NU" => AggFn::N,
+            "MEAN" => AggFn::Mean,
+            "SUM" => AggFn::Sum,
+            "MIN" => AggFn::Min,
+            "MAX" => AggFn::Max,
+            "SD" | "STDDEV" => AggFn::Sd,
+            other => return Err(format!("AGGREGATE: unknown function '{}'.", other)),
+        };
+        scan.skip_ws();
+        let var = if scan.peek() == Some('(') {
+            let inner = scan.paren_group()?;
+            inner.trim().to_string()
+        } else {
+            String::new()
+        };
+        if !matches!(fun, AggFn::N) && var.is_empty() {
+            return Err("AGGREGATE: MEAN/SUM/MIN/MAX/SD need a variable.".to_string());
+        }
+        specs.push((fun, var));
+    }
+    if specs.is_empty() {
+        specs.push((AggFn::N, String::new()));
+    }
+    Ok((breaks, specs))
+}
+
+/// `ADD FILES "other.csv"`
+pub fn add_files_command(table: &mut DataTable, path: &str) -> Result<String, String> {
+    let other = DataTable::from_path(std::path::Path::new(path))?;
+    let extra: Vec<Column> = other
+        .columns
+        .iter()
+        .filter(|c| table.column_index(&c.name).is_none())
+        .map(|c| Column {
+            name: c.name.clone(),
+            kind: c.kind,
+            values: vec![Value::Missing; table.n_rows],
+            meta: c.meta.clone(),
+        })
+        .collect();
+    table.columns.extend(extra);
+    for col in table.columns.iter_mut() {
+        if let Some(oi) = other.column_index(&col.name) {
+            col.values.extend(other.columns[oi].values.clone());
+            while col.values.len() < table.n_rows + other.n_rows {
+                col.values.push(Value::Missing);
+            }
+        } else {
+            col.values.extend(vec![Value::Missing; other.n_rows]);
+        }
+    }
+    table.n_rows += other.n_rows;
+    Ok(format!("{} case(s) now", table.n_rows))
+}
+
+/// `MATCH FILES "other.csv" BY id`
+pub fn match_files_command(table: &mut DataTable, path: &str, by: &[String]) -> Result<String, String> {
+    if by.is_empty() {
+        return Err("MATCH FILES: expected BY.".to_string());
+    }
+    let other = DataTable::from_path(std::path::Path::new(path))?;
+    let left_by: Result<Vec<usize>, String> = by
+        .iter()
+        .map(|n| {
+            table
+                .column_index(n)
+                .ok_or_else(|| format!("MATCH FILES: unknown variable '{}'.", n))
+        })
+        .collect();
+    let left_by = left_by?;
+    let right_by: Result<Vec<usize>, String> = by
+        .iter()
+        .map(|n| {
+            other
+                .column_index(n)
+                .ok_or_else(|| format!("MATCH FILES: '{}' is missing in the other file.", n))
+        })
+        .collect();
+    let right_by = right_by?;
+    let mut index: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for row in 0..other.n_rows {
+        let key = match_key(&other, &right_by, row);
+        index.entry(key).or_insert(row);
+    }
+    let new_names: Vec<usize> = other
+        .columns
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| table.column_index(&c.name).is_none())
+        .map(|(i, _)| i)
+        .collect();
+    for &oi in &new_names {
+        table.columns.push(Column {
+            name: other.columns[oi].name.clone(),
+            kind: other.columns[oi].kind,
+            values: vec![Value::Missing; table.n_rows],
+            meta: other.columns[oi].meta.clone(),
+        });
+    }
+    for row in 0..table.n_rows {
+        let key = match_key(table, &left_by, row);
+        if let Some(&orow) = index.get(&key) {
+            for &oi in &new_names {
+                let dest = table.column_index(&other.columns[oi].name).unwrap();
+                table.columns[dest].values[row] = other.columns[oi].values[orow].clone();
+            }
+        }
+    }
+    Ok(format!("matched on {}", by.join(" ")))
+}
+
+fn match_key(table: &DataTable, cols: &[usize], row: usize) -> String {
+    cols.iter()
+        .map(|&ci| format!("{:?}", table.columns[ci].values.get(row)))
+        .collect::<Vec<_>>()
+        .join("\u{1f}")
+}
+
+/// `VARSTOCASES MAKE score FROM s1 s2 /INDEX=wave`
+pub fn vars_to_cases_from_line(table: &mut DataTable, line: &str) -> Result<String, String> {
+    let mut scan = Scan::new(line);
+    if !scan.eat_word_ignore("VARSTOCASES") {
+        return Err("VARSTOCASES: expected VARSTOCASES.".to_string());
+    }
+    if !scan.eat_word_ignore("MAKE") {
+        return Err("VARSTOCASES: expected MAKE.".to_string());
+    }
+    let make = scan
+        .ident()
+        .ok_or_else(|| "VARSTOCASES: expected a name after MAKE.".to_string())?;
+    if !scan.eat_word_ignore("FROM") {
+        return Err("VARSTOCASES: expected FROM.".to_string());
+    }
+    let mut from = Vec::new();
+    loop {
+        scan.skip_ws();
+        if scan.peek() == Some('/') || scan.rest().is_empty() {
+            break;
+        }
+        match scan.ident() {
+            Some(n) => from.push(n),
+            None => break,
+        }
+    }
+    let mut index = None;
+    if scan.peek() == Some('/') {
+        scan.i += 1;
+        if scan.eat_word_ignore("INDEX") {
+            scan.skip_ws();
+            if scan.peek() == Some('=') {
+                scan.i += 1;
+            }
+            index = scan.ident();
+        }
+    }
+    vars_to_cases_command(table, &make, &from, index.as_deref())
+}
+
+/// `CASESTOVARS ID=id /INDEX=wave`
+pub fn cases_to_vars_from_line(table: &mut DataTable, line: &str) -> Result<String, String> {
+    let mut scan = Scan::new(line);
+    if !scan.eat_word_ignore("CASESTOVARS") {
+        return Err("CASESTOVARS: expected CASESTOVARS.".to_string());
+    }
+    let mut id = None;
+    let mut index = None;
+    loop {
+        scan.skip_ws();
+        if scan.rest().is_empty() {
+            break;
+        }
+        if scan.peek() == Some('/') {
+            scan.i += 1;
+            continue;
+        }
+        if scan.eat_word_ignore("ID") {
+            scan.skip_ws();
+            if scan.peek() == Some('=') {
+                scan.i += 1;
+            }
+            id = scan.ident();
+            continue;
+        }
+        if scan.eat_word_ignore("INDEX") {
+            scan.skip_ws();
+            if scan.peek() == Some('=') {
+                scan.i += 1;
+            }
+            index = scan.ident();
+            continue;
+        }
+        let _ = scan.ident();
+    }
+    let id = id.ok_or_else(|| "CASESTOVARS: expected ID.".to_string())?;
+    let index = index.ok_or_else(|| "CASESTOVARS: expected INDEX.".to_string())?;
+    cases_to_vars_command(table, &id, &index)
+}
+
+/// `VARSTOCASES MAKE score FROM s1 s2 /INDEX=wave`
+pub fn vars_to_cases_command(
+    table: &mut DataTable,
+    make: &str,
+    from: &[String],
+    index: Option<&str>,
+) -> Result<String, String> {
+    if from.is_empty() {
+        return Err("VARSTOCASES: expected FROM variables.".to_string());
+    }
+    let from_idx: Result<Vec<usize>, String> = from
+        .iter()
+        .map(|n| {
+            table
+                .column_index(n)
+                .ok_or_else(|| format!("VARSTOCASES: unknown variable '{}'.", n))
+        })
+        .collect();
+    let from_idx = from_idx?;
+    let keep: Vec<usize> = (0..table.columns.len())
+        .filter(|i| !from_idx.contains(i))
+        .collect();
+    let mut out = Vec::new();
+    for &ki in &keep {
+        out.push(Column {
+            name: table.columns[ki].name.clone(),
+            kind: table.columns[ki].kind,
+            values: Vec::new(),
+            meta: table.columns[ki].meta.clone(),
+        });
+    }
+    if let Some(idx) = index {
+        out.push(Column {
+            name: idx.to_string(),
+            kind: ColumnKind::String,
+            values: Vec::new(),
+            meta: crate::data::VariableMeta::default_for(ColumnKind::String),
+        });
+    }
+    out.push(Column {
+        name: make.to_string(),
+        kind: ColumnKind::Numeric,
+        values: Vec::new(),
+        meta: crate::data::VariableMeta::default_for(ColumnKind::Numeric),
+    });
+    for row in 0..table.n_rows {
+        for (fi, &src) in from_idx.iter().enumerate() {
+            for (oi, &ki) in keep.iter().enumerate() {
+                out[oi]
+                    .values
+                    .push(table.columns[ki].values[row].clone());
+            }
+            let mut pos = keep.len();
+            if index.is_some() {
+                out[pos]
+                    .values
+                    .push(Value::Text(from[fi].clone()));
+                pos += 1;
+            }
+            out[pos]
+                .values
+                .push(table.columns[src].values[row].clone());
+        }
+    }
+    let n_rows = table.n_rows * from.len();
+    *table = DataTable {
+        columns: out,
+        n_rows,
+    };
+    Ok(format!("{} case(s) now", n_rows))
+}
+
+/// `CASESTOVARS ID=id /INDEX=wave`
+pub fn cases_to_vars_command(table: &mut DataTable, id: &str, index: &str) -> Result<String, String> {
+    let id_i = table
+        .column_index(id)
+        .ok_or_else(|| format!("CASESTOVARS: unknown variable '{}'.", id))?;
+    let idx_i = table
+        .column_index(index)
+        .ok_or_else(|| format!("CASESTOVARS: unknown variable '{}'.", index))?;
+    let mut index_levels: Vec<String> = Vec::new();
+    for row in 0..table.n_rows {
+        if table.columns[idx_i].is_missing(row) {
+            continue;
+        }
+        let k = format!("{}", display_cell(&table.columns[idx_i].values[row]));
+        if !index_levels.iter().any(|x| x == &k) {
+            index_levels.push(k);
+        }
+    }
+    let measures: Vec<usize> = (0..table.columns.len())
+        .filter(|&i| i != id_i && i != idx_i)
+        .collect();
+    let mut ids: Vec<String> = Vec::new();
+    let mut id_values: Vec<Value> = Vec::new();
+    let mut row_of: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for row in 0..table.n_rows {
+        let key = format!("{:?}", table.columns[id_i].values.get(row));
+        if !row_of.contains_key(&key) {
+            row_of.insert(key.clone(), ids.len());
+            ids.push(key);
+            id_values.push(table.columns[id_i].values[row].clone());
+        }
+    }
+    let mut out = vec![Column {
+        name: id.to_string(),
+        kind: table.columns[id_i].kind,
+        values: id_values,
+        meta: table.columns[id_i].meta.clone(),
+    }];
+    for &mi in &measures {
+        for level in &index_levels {
+            let name = format!("{}_{}", table.columns[mi].name, sanitize_ident(level));
+            out.push(Column {
+                name,
+                kind: table.columns[mi].kind,
+                values: vec![Value::Missing; ids.len()],
+                meta: table.columns[mi].meta.clone(),
+            });
+        }
+    }
+    for row in 0..table.n_rows {
+        let idk = format!("{:?}", table.columns[id_i].values.get(row));
+        let Some(&out_row) = row_of.get(&idk) else {
+            continue;
+        };
+        if table.columns[idx_i].is_missing(row) {
+            continue;
+        }
+        let level = format!("{}", display_cell(&table.columns[idx_i].values[row]));
+        let Some(li) = index_levels.iter().position(|x| x == &level) else {
+            continue;
+        };
+        for (mi_pos, &mi) in measures.iter().enumerate() {
+            let dest = 1 + mi_pos * index_levels.len() + li;
+            out[dest].values[out_row] = table.columns[mi].values[row].clone();
+        }
+    }
+    let n_rows = ids.len();
+    *table = DataTable {
+        columns: out,
+        n_rows,
+    };
+    Ok(format!("{} case(s) now", n_rows))
+}
+
+fn display_cell(v: &Value) -> String {
+    match v {
+        Value::Missing => ".".to_string(),
+        Value::Number(n) => format!("{}", n),
+        Value::Text(s) => s.clone(),
+    }
+}
+
+fn sanitize_ident(s: &str) -> String {
+    let t: String = s
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    if t.is_empty() {
+        "x".to_string()
+    } else {
+        t
+    }
+}
+
+fn write_column(table: &mut DataTable, name: &str, values: Vec<Value>) {
+    let has_text = values.iter().any(|v| matches!(v, Value::Text(_)));
+    let kind = if has_text {
+        ColumnKind::String
+    } else {
+        ColumnKind::Numeric
+    };
+    if let Some(idx) = table.column_index(name) {
+        table.columns[idx].values = values;
+        table.columns[idx].kind = kind;
+        return;
     }
     table.columns.push(Column {
         name: name.to_string(),
         kind,
         values,
-        meta,
+        meta: crate::data::VariableMeta::default_for(kind),
     });
-    Ok(name.to_string())
+}
+
+#[derive(Debug, Clone)]
+enum RecodeBound {
+    Lo,
+    Hi,
+    Number(f64),
+}
+
+#[derive(Debug, Clone)]
+enum RecodeAtom {
+    Number(f64),
+    Text(String),
+}
+
+#[derive(Debug, Clone)]
+enum RecodeOld {
+    Values(Vec<RecodeAtom>),
+    Range { lo: RecodeBound, hi: RecodeBound },
+    Missing,
+    Sysmis,
+    Else,
+}
+
+#[derive(Debug, Clone)]
+enum RecodeNew {
+    Copy,
+    Sysmis,
+    Number(f64),
+    Text(String),
+}
+
+#[derive(Debug, Clone)]
+struct RecodeRule {
+    old: RecodeOld,
+    new: RecodeNew,
+}
+
+struct Scan<'a> {
+    s: &'a str,
+    i: usize,
+}
+
+impl<'a> Scan<'a> {
+    fn new(s: &'a str) -> Self {
+        Self { s, i: 0 }
+    }
+
+    fn skip_ws(&mut self) {
+        while let Some(c) = self.peek() {
+            if c.is_whitespace() {
+                self.i += c.len_utf8();
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn peek(&self) -> Option<char> {
+        self.s[self.i..].chars().next()
+    }
+
+    fn rest(&self) -> &'a str {
+        &self.s[self.i..]
+    }
+
+    fn eat_word_ignore(&mut self, word: &str) -> bool {
+        self.skip_ws();
+        if self.rest().len() >= word.len()
+            && self.rest()[..word.len()].eq_ignore_ascii_case(word)
+        {
+            let after = self.i + word.len();
+            let ok = after == self.s.len()
+                || self.s[after..]
+                    .chars()
+                    .next()
+                    .map(|c| !c.is_ascii_alphanumeric() && c != '_')
+                    .unwrap_or(true);
+            if ok {
+                self.i = after;
+                return true;
+            }
+        }
+        false
+    }
+
+    fn ident(&mut self) -> Option<String> {
+        self.skip_ws();
+        let start = self.i;
+        let mut chars = self.rest().chars();
+        let first = chars.next()?;
+        if !(first.is_ascii_alphabetic() || first == '_' || first == '@' || first == '#') {
+            return None;
+        }
+        self.i += first.len_utf8();
+        while let Some(c) = self.peek() {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '@' || c == '#' {
+                self.i += c.len_utf8();
+            } else {
+                break;
+            }
+        }
+        Some(self.s[start..self.i].to_string())
+    }
+
+    fn paren_group(&mut self) -> Result<String, String> {
+        self.skip_ws();
+        if self.peek() != Some('(') {
+            return Err("Expected '('.".to_string());
+        }
+        self.i += 1;
+        let start = self.i;
+        let mut depth = 1;
+        let mut quote: Option<char> = None;
+        while self.i < self.s.len() {
+            let c = self.s[self.i..].chars().next().unwrap();
+            let n = c.len_utf8();
+            if let Some(q) = quote {
+                if c == q {
+                    quote = None;
+                }
+                self.i += n;
+                continue;
+            }
+            if c == '"' || c == '\'' {
+                quote = Some(c);
+                self.i += n;
+                continue;
+            }
+            if c == '(' {
+                depth += 1;
+            } else if c == ')' {
+                depth -= 1;
+                if depth == 0 {
+                    let inner = self.s[start..self.i].to_string();
+                    self.i += n;
+                    return Ok(inner);
+                }
+            }
+            self.i += n;
+        }
+        Err("Unclosed '('.".to_string())
+    }
+}
+
+fn parse_recode(line: &str) -> Result<(Vec<String>, Vec<RecodeRule>, Vec<String>), String> {
+    let mut scan = Scan::new(line);
+    if !scan.eat_word_ignore("RECODE") {
+        return Err("RECODE: expected RECODE.".to_string());
+    }
+    let mut sources = Vec::new();
+    loop {
+        scan.skip_ws();
+        if scan.peek() == Some('(') || scan.rest().is_empty() {
+            break;
+        }
+        if scan.eat_word_ignore("INTO") {
+            return Err("RECODE: mappings must come before INTO.".to_string());
+        }
+        match scan.ident() {
+            Some(name) => sources.push(name),
+            None => break,
+        }
+    }
+    let mut rules = Vec::new();
+    loop {
+        scan.skip_ws();
+        if scan.peek() != Some('(') {
+            break;
+        }
+        let inner = scan.paren_group()?;
+        rules.push(parse_recode_rule(&inner)?);
+    }
+    let mut into = Vec::new();
+    if scan.eat_word_ignore("INTO") {
+        while let Some(name) = scan.ident() {
+            into.push(name);
+        }
+    }
+    scan.skip_ws();
+    if !scan.rest().is_empty() {
+        return Err(format!("RECODE: unexpected '{}'.", scan.rest().trim()));
+    }
+    Ok((sources, rules, into))
+}
+
+fn parse_count(line: &str) -> Result<(String, Vec<String>, Vec<RecodeAtom>), String> {
+    let mut scan = Scan::new(line);
+    if !scan.eat_word_ignore("COUNT") {
+        return Err("COUNT: expected COUNT.".to_string());
+    }
+    let dest = scan
+        .ident()
+        .ok_or_else(|| "COUNT: expected a target name.".to_string())?;
+    scan.skip_ws();
+    if scan.peek() != Some('=') {
+        return Err("COUNT: expected '='.".to_string());
+    }
+    scan.i += 1;
+    let mut sources = Vec::new();
+    loop {
+        scan.skip_ws();
+        if scan.peek() == Some('(') || scan.rest().is_empty() {
+            break;
+        }
+        match scan.ident() {
+            Some(name) => sources.push(name),
+            None => break,
+        }
+    }
+    scan.skip_ws();
+    if scan.peek() != Some('(') {
+        return Err("COUNT: expected a value list in parentheses.".to_string());
+    }
+    let inner = scan.paren_group()?;
+    let atoms = parse_atom_list(&inner)?;
+    Ok((dest, sources, atoms))
+}
+
+fn parse_rank(line: &str) -> Result<(String, String), String> {
+    let mut scan = Scan::new(line);
+    if !scan.eat_word_ignore("RANK") {
+        return Err("RANK: expected RANK.".to_string());
+    }
+    let source = scan
+        .ident()
+        .ok_or_else(|| "RANK: expected a variable.".to_string())?;
+    let dest = if scan.eat_word_ignore("INTO") {
+        scan.ident()
+            .ok_or_else(|| "RANK: expected a name after INTO.".to_string())?
+    } else {
+        format!("{}_r", source)
+    };
+    scan.skip_ws();
+    if !scan.rest().is_empty() {
+        return Err(format!("RANK: unexpected '{}'.", scan.rest().trim()));
+    }
+    Ok((source, dest))
+}
+
+fn parse_autorecode(line: &str) -> Result<(String, String), String> {
+    let mut scan = Scan::new(line);
+    if !scan.eat_word_ignore("AUTORECODE") {
+        return Err("AUTORECODE: expected AUTORECODE.".to_string());
+    }
+    let source = scan
+        .ident()
+        .ok_or_else(|| "AUTORECODE: expected a variable.".to_string())?;
+    if !scan.eat_word_ignore("INTO") {
+        return Err("AUTORECODE: expected INTO.".to_string());
+    }
+    let dest = scan
+        .ident()
+        .ok_or_else(|| "AUTORECODE: expected a name after INTO.".to_string())?;
+    scan.skip_ws();
+    if !scan.rest().is_empty() {
+        return Err(format!("AUTORECODE: unexpected '{}'.", scan.rest().trim()));
+    }
+    Ok((source, dest))
+}
+
+fn parse_recode_rule(inner: &str) -> Result<RecodeRule, String> {
+    let eq = find_bare_eq(inner).ok_or_else(|| {
+        format!("RECODE: mapping '{}' needs '='.", inner.trim())
+    })?;
+    let left = inner[..eq].trim();
+    let right = inner[eq + 1..].trim();
+    if left.is_empty() || right.is_empty() {
+        return Err("RECODE: empty mapping.".to_string());
+    }
+    let old = parse_recode_old(left)?;
+    let new = parse_recode_new(right)?;
+    Ok(RecodeRule { old, new })
+}
+
+fn find_bare_eq(s: &str) -> Option<usize> {
+    let mut quote: Option<char> = None;
+    let mut i = 0;
+    while i < s.len() {
+        let c = s[i..].chars().next()?;
+        let n = c.len_utf8();
+        if let Some(q) = quote {
+            if c == q {
+                quote = None;
+            }
+            i += n;
+            continue;
+        }
+        if c == '"' || c == '\'' {
+            quote = Some(c);
+            i += n;
+            continue;
+        }
+        if c == '=' {
+            return Some(i);
+        }
+        i += n;
+    }
+    None
+}
+
+fn parse_recode_old(left: &str) -> Result<RecodeOld, String> {
+    let tokens = tokenize_recode_side(left)?;
+    if tokens.len() == 1 {
+        match tokens[0].as_str() {
+            "ELSE" => return Ok(RecodeOld::Else),
+            "MISSING" => return Ok(RecodeOld::Missing),
+            "SYSMIS" => return Ok(RecodeOld::Sysmis),
+            _ => {}
+        }
+    }
+    if let Some(thru) = tokens.iter().position(|t| t == "THRU") {
+        if thru == 0 || thru + 1 >= tokens.len() {
+            return Err("RECODE: THRU needs two bounds.".to_string());
+        }
+        let lo = parse_bound(&tokens[thru - 1])?;
+        let hi = parse_bound(&tokens[thru + 1])?;
+        return Ok(RecodeOld::Range { lo, hi });
+    }
+    Ok(RecodeOld::Values(parse_atom_tokens(&tokens)?))
+}
+
+fn parse_recode_new(right: &str) -> Result<RecodeNew, String> {
+    let t = right.trim();
+    let u = t.to_uppercase();
+    if u == "COPY" {
+        return Ok(RecodeNew::Copy);
+    }
+    if u == "SYSMIS" || u == "MISSING" {
+        return Ok(RecodeNew::Sysmis);
+    }
+    if (t.starts_with('"') && t.ends_with('"') && t.len() >= 2)
+        || (t.starts_with('\'') && t.ends_with('\'') && t.len() >= 2)
+    {
+        return Ok(RecodeNew::Text(t[1..t.len() - 1].to_string()));
+    }
+    if let Ok(n) = t.parse::<f64>() {
+        return Ok(RecodeNew::Number(n));
+    }
+    Ok(RecodeNew::Text(t.to_string()))
+}
+
+fn parse_bound(tok: &str) -> Result<RecodeBound, String> {
+    match tok {
+        "LO" | "LOWEST" => Ok(RecodeBound::Lo),
+        "HI" | "HIGHEST" => Ok(RecodeBound::Hi),
+        other => other
+            .parse::<f64>()
+            .map(RecodeBound::Number)
+            .map_err(|_| format!("RECODE: bad bound '{}'.", other)),
+    }
+}
+
+fn parse_atom_list(inner: &str) -> Result<Vec<RecodeAtom>, String> {
+    let tokens = tokenize_recode_side(inner)?;
+    parse_atom_tokens(&tokens)
+}
+
+fn parse_atom_tokens(tokens: &[String]) -> Result<Vec<RecodeAtom>, String> {
+    let mut out = Vec::new();
+    for t in tokens {
+        if t == "THRU" || t == "ELSE" || t == "MISSING" || t == "SYSMIS" || t == "LO" || t == "HI"
+        {
+            return Err(format!("Unexpected '{}' in a value list.", t));
+        }
+        if (t.starts_with('"') && t.ends_with('"') && t.len() >= 2)
+            || (t.starts_with('\'') && t.ends_with('\'') && t.len() >= 2)
+        {
+            out.push(RecodeAtom::Text(t[1..t.len() - 1].to_string()));
+        } else if let Ok(n) = t.parse::<f64>() {
+            out.push(RecodeAtom::Number(n));
+        } else {
+            out.push(RecodeAtom::Text(t.clone()));
+        }
+    }
+    if out.is_empty() {
+        return Err("Empty value list.".to_string());
+    }
+    Ok(out)
+}
+
+fn tokenize_recode_side(s: &str) -> Result<Vec<String>, String> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < s.len() {
+        let c = s[i..].chars().next().unwrap();
+        if c.is_whitespace() || c == ',' {
+            i += c.len_utf8();
+            continue;
+        }
+        if c == '"' || c == '\'' {
+            let q = c;
+            let start = i;
+            i += c.len_utf8();
+            while i < s.len() {
+                let d = s[i..].chars().next().unwrap();
+                i += d.len_utf8();
+                if d == q {
+                    break;
+                }
+            }
+            out.push(s[start..i].to_string());
+            continue;
+        }
+        let start = i;
+        i += c.len_utf8();
+        while i < s.len() {
+            let d = s[i..].chars().next().unwrap();
+            if d.is_whitespace() || d == ',' {
+                break;
+            }
+            i += d.len_utf8();
+        }
+        out.push(s[start..i].to_uppercase());
+    }
+    Ok(out)
+}
+
+fn apply_recode(col: &Column, row: usize, value: &Value, rules: &[RecodeRule]) -> Value {
+    let mut else_new: Option<&RecodeNew> = None;
+    for rule in rules {
+        if matches!(rule.old, RecodeOld::Else) {
+            else_new = Some(&rule.new);
+            continue;
+        }
+        if recode_old_matches(&rule.old, col, row, value) {
+            return recode_new_value(&rule.new, value);
+        }
+    }
+    if let Some(new) = else_new {
+        recode_new_value(new, value)
+    } else {
+        value.clone()
+    }
+}
+
+fn recode_old_matches(old: &RecodeOld, col: &Column, row: usize, value: &Value) -> bool {
+    match old {
+        RecodeOld::Else => true,
+        RecodeOld::Sysmis => matches!(value, Value::Missing),
+        RecodeOld::Missing => col.is_missing(row),
+        RecodeOld::Values(atoms) => {
+            if col.is_missing(row) {
+                false
+            } else {
+                atoms.iter().any(|a| atom_matches(a, value))
+            }
+        }
+        RecodeOld::Range { lo, hi } => {
+            if col.is_missing(row) {
+                return false;
+            }
+            let Value::Number(n) = value else {
+                return false;
+            };
+            bound_ok(lo, *n, true) && bound_ok(hi, *n, false)
+        }
+    }
+}
+
+fn bound_ok(b: &RecodeBound, n: f64, is_lo: bool) -> bool {
+    match b {
+        RecodeBound::Lo => is_lo,
+        RecodeBound::Hi => !is_lo,
+        RecodeBound::Number(x) => {
+            if is_lo {
+                n + 1e-12 >= *x
+            } else {
+                n - 1e-12 <= *x
+            }
+        }
+    }
+}
+
+fn recode_new_value(new: &RecodeNew, original: &Value) -> Value {
+    match new {
+        RecodeNew::Copy => original.clone(),
+        RecodeNew::Sysmis => Value::Missing,
+        RecodeNew::Number(n) => Value::Number(*n),
+        RecodeNew::Text(s) => Value::Text(s.clone()),
+    }
+}
+
+fn atom_matches(atom: &RecodeAtom, value: &Value) -> bool {
+    match (atom, value) {
+        (RecodeAtom::Number(a), Value::Number(b)) => (a - b).abs() < 1e-12,
+        (RecodeAtom::Text(a), Value::Text(b)) => a == b,
+        (RecodeAtom::Text(a), Value::Number(b)) => a.parse::<f64>().ok() == Some(*b),
+        (RecodeAtom::Number(a), Value::Text(b)) => b.trim().parse::<f64>().ok() == Some(*a),
+        _ => false,
+    }
+}
+
+fn atom_eq(a: &RecodeAtom, b: &RecodeAtom) -> bool {
+    match (a, b) {
+        (RecodeAtom::Number(x), RecodeAtom::Number(y)) => (x - y).abs() < 1e-12,
+        (RecodeAtom::Text(x), RecodeAtom::Text(y)) => x == y,
+        _ => false,
+    }
+}
+
+fn atom_ord(a: &RecodeAtom, b: &RecodeAtom) -> std::cmp::Ordering {
+    match (a, b) {
+        (RecodeAtom::Number(x), RecodeAtom::Number(y)) => {
+            x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal)
+        }
+        (RecodeAtom::Text(x), RecodeAtom::Text(y)) => x.cmp(y),
+        (RecodeAtom::Number(_), RecodeAtom::Text(_)) => std::cmp::Ordering::Less,
+        (RecodeAtom::Text(_), RecodeAtom::Number(_)) => std::cmp::Ordering::Greater,
+    }
+}
+
+fn atom_label(atom: &RecodeAtom) -> String {
+    match atom {
+        RecodeAtom::Number(n) => format!("{}", n),
+        RecodeAtom::Text(s) => s.clone(),
+    }
 }
 
 /// Evaluate an expression for one case.

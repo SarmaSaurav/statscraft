@@ -193,6 +193,18 @@ const COMMAND_WORDS: &[&str] = &[
     "ROC",
     "ROC-CURVE",
     "COMPUTE",
+    "RECODE",
+    "COUNT",
+    "RANK",
+    "AUTORECODE",
+    "SELECT",
+    "WEIGHT",
+    "SPLIT",
+    "AGGREGATE",
+    "ADD",
+    "MATCH",
+    "VARSTOCASES",
+    "CASESTOVARS",
     "SORT",
     "DATASET",
     "DATASETNAME",
@@ -320,7 +332,86 @@ impl Command {
     }
 }
 
+fn is_analysis_command(cmd: &str) -> bool {
+    matches!(
+        cmd,
+        "DESCRIPTIVES"
+            | "DESCRIPTIVE"
+            | "FREQUENCIES"
+            | "FREQ"
+            | "CROSSTABS"
+            | "CROSSTAB"
+            | "GLM"
+            | "ONEWAY"
+            | "ANOVA"
+            | "T-TEST"
+            | "TTEST"
+            | "MEANS"
+            | "EXPLORE"
+            | "NONPARAMETRIC"
+            | "NPAR"
+            | "MANN-WHITNEY"
+            | "MW"
+            | "WILCOXON"
+            | "KRUSKAL-WALLIS"
+            | "K-W"
+            | "FRIEDMAN"
+            | "RELIABILITY"
+            | "ALPHA"
+            | "FACTOR"
+            | "FACTORS"
+            | "ROC"
+            | "ROC-CURVE"
+            | "CORR"
+            | "CORRELATIONS"
+            | "REGRESSION"
+    )
+}
+
 fn execute_line(app: &mut StatsCraftApp, line: &str) {
+    let first = line
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_uppercase();
+    if is_analysis_command(&first)
+        && (app.weight_var.is_some() || !app.split_vars.is_empty())
+    {
+        execute_prepared_analysis(app, line);
+        return;
+    }
+    execute_line_inner(app, line);
+}
+
+fn execute_prepared_analysis(app: &mut StatsCraftApp, line: &str) {
+    let Some(table) = app.table.clone() else {
+        execute_line_inner(app, line);
+        return;
+    };
+    match table.analysis_groups(app.weight_var.as_deref(), &app.split_vars) {
+        Ok(groups) => {
+            if groups.is_empty() {
+                app.status = "WEIGHT/SPLIT: no cases remain.".to_string();
+                return;
+            }
+            let saved = app.table.clone();
+            for (label, group) in groups {
+                app.table = Some(group);
+                let start = app.outputs.len();
+                execute_line_inner(app, line);
+                if !label.is_empty() {
+                    for out in app.outputs.iter_mut().skip(start) {
+                        out.title = format!("{} — {}", label, out.title);
+                    }
+                }
+            }
+            app.table = saved;
+        }
+        Err(e) => app.status = e,
+    }
+}
+
+fn execute_line_inner(app: &mut StatsCraftApp, line: &str) {
     let tokens: Vec<String> = line.split_whitespace().map(|s| s.to_string()).collect();
     if tokens.is_empty() {
         return;
@@ -1161,8 +1252,22 @@ fn execute_line(app: &mut StatsCraftApp, line: &str) {
                 return;
             }
             let name = cmd.args[0].clone();
-            // The expression: the words after the '='.
-            let expression = cmd.args[eq + 1..].join(" ");
+            let mut tail = cmd.args[eq + 1..].to_vec();
+            let if_condition = if let Some(pos) = tail
+                .iter()
+                .position(|a| a.eq_ignore_ascii_case("IF"))
+            {
+                let cond = tail[pos + 1..].join(" ");
+                tail.truncate(pos);
+                if cond.trim().is_empty() {
+                    app.status = "COMPUTE: expected a condition after IF.".to_string();
+                    return;
+                }
+                Some(cond)
+            } else {
+                None
+            };
+            let expression = tail.join(" ");
             // The variable and its values are a change to the dataset, so
             // the dataset is remembered as it was before the command.
             let before = app.table.clone();
@@ -1170,7 +1275,7 @@ fn execute_line(app: &mut StatsCraftApp, line: &str) {
                 app.status = "COMPUTE: no data loaded.".to_string();
                 return;
             };
-            match stats::compute_variable(t, &name, &expression) {
+            match stats::compute_variable(t, &name, &expression, if_condition.as_deref()) {
                 Ok(n) => {
                     app.record_table_change(before);
                     app.dirty = true;
@@ -1179,6 +1284,243 @@ fn execute_line(app: &mut StatsCraftApp, line: &str) {
                 Err(e) => {
                     app.status = format!("COMPUTE failed: {}", e);
                 }
+            }
+        }
+        "RECODE" => {
+            let before = app.table.clone();
+            let Some(t) = &mut app.table else {
+                app.status = "RECODE: no data loaded.".to_string();
+                return;
+            };
+            match stats::recode_command(t, line) {
+                Ok(names) => {
+                    app.record_table_change(before);
+                    app.dirty = true;
+                    app.status = format!("RECODE updated {}.", names);
+                }
+                Err(e) => app.status = e,
+            }
+        }
+        "COUNT" => {
+            let before = app.table.clone();
+            let Some(t) = &mut app.table else {
+                app.status = "COUNT: no data loaded.".to_string();
+                return;
+            };
+            match stats::count_command(t, line) {
+                Ok(name) => {
+                    app.record_table_change(before);
+                    app.dirty = true;
+                    app.status = format!("COUNT created the variable {}.", name);
+                }
+                Err(e) => app.status = e,
+            }
+        }
+        "RANK" => {
+            let before = app.table.clone();
+            let Some(t) = &mut app.table else {
+                app.status = "RANK: no data loaded.".to_string();
+                return;
+            };
+            match stats::rank_command(t, line) {
+                Ok(name) => {
+                    app.record_table_change(before);
+                    app.dirty = true;
+                    app.status = format!("RANK created the variable {}.", name);
+                }
+                Err(e) => app.status = e,
+            }
+        }
+        "AUTORECODE" => {
+            let before = app.table.clone();
+            let Some(t) = &mut app.table else {
+                app.status = "AUTORECODE: no data loaded.".to_string();
+                return;
+            };
+            match stats::autorecode_command(t, line) {
+                Ok(name) => {
+                    app.record_table_change(before);
+                    app.dirty = true;
+                    app.status = format!("AUTORECODE created the variable {}.", name);
+                }
+                Err(e) => app.status = e,
+            }
+        }
+        "SELECT" => {
+            let cmd = Command::parse(line);
+            if cmd.args.first().map(|a| a.eq_ignore_ascii_case("IF")) != Some(true) {
+                app.status = "SELECT: expected 'SELECT IF condition'.".to_string();
+                return;
+            }
+            let condition = cmd.args[1..].join(" ");
+            if condition.trim().is_empty() {
+                app.status = "SELECT: expected a condition after IF.".to_string();
+                return;
+            }
+            let before = app.table.clone();
+            let Some(t) = &mut app.table else {
+                app.status = "SELECT: no data loaded.".to_string();
+                return;
+            };
+            match stats::select_if_command(t, &condition) {
+                Ok(n) => {
+                    app.record_table_change(before);
+                    app.dirty = true;
+                    app.status = format!("SELECT IF kept {} case(s).", n);
+                }
+                Err(e) => app.status = format!("SELECT IF failed: {}", e),
+            }
+        }
+        "WEIGHT" => {
+            if tokens.get(1).map(|t| t.eq_ignore_ascii_case("OFF")).unwrap_or(false) {
+                app.weight_var = None;
+                app.status = "WEIGHT OFF.".to_string();
+                return;
+            }
+            let name = if tokens.get(1).map(|t| t.eq_ignore_ascii_case("BY")).unwrap_or(false) {
+                tokens.get(2)
+            } else {
+                tokens.get(1)
+            };
+            let Some(name) = name else {
+                app.status = "WEIGHT: expected 'WEIGHT BY variable' or WEIGHT OFF.".to_string();
+                return;
+            };
+            let Some(t) = &app.table else {
+                app.status = "WEIGHT: no data loaded.".to_string();
+                return;
+            };
+            if t.column_index(name).is_none() {
+                app.status = format!("WEIGHT: unknown variable '{}'.", name);
+                return;
+            }
+            app.weight_var = Some(name.clone());
+            app.status = format!("WEIGHT BY {}.", name);
+        }
+        "SPLIT" => {
+            // SPLIT FILE OFF  /  SPLIT FILE BY a b
+            let rest: Vec<&String> = tokens.iter().skip(1).collect();
+            let words: Vec<&String> = rest
+                .iter()
+                .copied()
+                .filter(|t| !t.eq_ignore_ascii_case("FILE"))
+                .collect();
+            if words.first().map(|t| t.eq_ignore_ascii_case("OFF")).unwrap_or(false) {
+                app.split_vars.clear();
+                app.status = "SPLIT FILE OFF.".to_string();
+                return;
+            }
+            let names: Vec<String> = if words.first().map(|t| t.eq_ignore_ascii_case("BY")).unwrap_or(false) {
+                words.iter().skip(1).map(|s| (*s).clone()).collect()
+            } else {
+                words.iter().map(|s| (*s).clone()).collect()
+            };
+            if names.is_empty() {
+                app.status = "SPLIT FILE: expected 'SPLIT FILE BY variable' or SPLIT FILE OFF.".to_string();
+                return;
+            }
+            let Some(t) = &app.table else {
+                app.status = "SPLIT FILE: no data loaded.".to_string();
+                return;
+            };
+            for n in &names {
+                if t.column_index(n).is_none() {
+                    app.status = format!("SPLIT FILE: unknown variable '{}'.", n);
+                    return;
+                }
+            }
+            app.split_vars = names;
+            app.status = format!("SPLIT FILE BY {}.", app.split_vars.join(" "));
+        }
+        "AGGREGATE" => {
+            let before = app.table.clone();
+            let Some(t) = &mut app.table else {
+                app.status = "AGGREGATE: no data loaded.".to_string();
+                return;
+            };
+            match stats::aggregate_command(t, line) {
+                Ok(msg) => {
+                    app.record_table_change(before);
+                    app.dirty = true;
+                    app.status = format!("AGGREGATE: {}.", msg);
+                }
+                Err(e) => app.status = e,
+            }
+        }
+        "ADD" => {
+            let path = extract_files_path(line);
+            if path.is_empty() || path.eq_ignore_ascii_case("FILES") || path.eq_ignore_ascii_case("ADD") {
+                app.status = "ADD FILES: expected a file path.".to_string();
+                return;
+            }
+            let before = app.table.clone();
+            let Some(t) = &mut app.table else {
+                app.status = "ADD FILES: no data loaded.".to_string();
+                return;
+            };
+            match stats::add_files_command(t, &path) {
+                Ok(msg) => {
+                    app.record_table_change(before);
+                    app.dirty = true;
+                    app.status = format!("ADD FILES: {}.", msg);
+                }
+                Err(e) => app.status = format!("ADD FILES failed: {}", e),
+            }
+        }
+        "MATCH" => {
+            let path = extract_files_path(line);
+            let cmd = Command::parse(line);
+            let by = if let Some(i) = cmd.pos("BY") {
+                cmd.args[i + 1..].to_vec()
+            } else {
+                Vec::new()
+            };
+            if path.is_empty() {
+                app.status = "MATCH FILES: expected a file path.".to_string();
+                return;
+            }
+            let before = app.table.clone();
+            let Some(t) = &mut app.table else {
+                app.status = "MATCH FILES: no data loaded.".to_string();
+                return;
+            };
+            match stats::match_files_command(t, &path, &by) {
+                Ok(msg) => {
+                    app.record_table_change(before);
+                    app.dirty = true;
+                    app.status = format!("MATCH FILES: {}.", msg);
+                }
+                Err(e) => app.status = format!("MATCH FILES failed: {}", e),
+            }
+        }
+        "VARSTOCASES" => {
+            let before = app.table.clone();
+            let Some(t) = &mut app.table else {
+                app.status = "VARSTOCASES: no data loaded.".to_string();
+                return;
+            };
+            match stats::vars_to_cases_from_line(t, line) {
+                Ok(msg) => {
+                    app.record_table_change(before);
+                    app.dirty = true;
+                    app.status = format!("VARSTOCASES: {}.", msg);
+                }
+                Err(e) => app.status = e,
+            }
+        }
+        "CASESTOVARS" => {
+            let before = app.table.clone();
+            let Some(t) = &mut app.table else {
+                app.status = "CASESTOVARS: no data loaded.".to_string();
+                return;
+            };
+            match stats::cases_to_vars_from_line(t, line) {
+                Ok(msg) => {
+                    app.record_table_change(before);
+                    app.dirty = true;
+                    app.status = format!("CASESTOVARS: {}.", msg);
+                }
+                Err(e) => app.status = e,
             }
         }
         "SORT" => {
@@ -1267,6 +1609,31 @@ fn resolve_vars(app: &mut StatsCraftApp, args: &[String], numeric_only: bool) ->
         }
     }
     Some(idxs)
+}
+
+fn extract_files_path(line: &str) -> String {
+    if let quoted @ Some(_) = {
+        let q = extract_path(line);
+        if line.contains('"') || line.contains('\'') {
+            Some(q)
+        } else {
+            None
+        }
+    } {
+        return quoted.unwrap();
+    }
+    let tokens: Vec<&str> = line.split_whitespace().collect();
+    if let Some(i) = tokens
+        .iter()
+        .position(|t| t.eq_ignore_ascii_case("FILES"))
+    {
+        if let Some(next) = tokens.get(i + 1) {
+            if !next.eq_ignore_ascii_case("BY") && !next.eq_ignore_ascii_case("FILE") {
+                return (*next).to_string();
+            }
+        }
+    }
+    String::new()
 }
 
 fn extract_path(line: &str) -> String {
@@ -1627,6 +1994,215 @@ NONPARAMETRIC /FRIEDMAN= score age response_time
         match t.columns[zi].values[3] {
             Value::Number(v) => assert!((v - 44.0).abs() < 1e-9, "z was {}", v),
             _ => panic!("z is not numeric"),
+        }
+    }
+
+    #[test]
+    fn compute_with_if_leaves_other_cases_missing() {
+        let dir = std::env::temp_dir();
+        let csv = dir.join("statscraft_compute_if.csv");
+        std::fs::write(&csv, "age,score\n17,1\n18,2\n19,3\n").unwrap();
+        let mut app = StatsCraftApp::default();
+        app.path_input = csv.display().to_string();
+        app.load();
+
+        run(&mut app, "COMPUTE adult = score IF age >= 18");
+        assert!(
+            !app.status.starts_with("COMPUTE failed"),
+            "COMPUTE failed: {}",
+            app.status
+        );
+        let t = app.table.as_ref().unwrap();
+        let ai = t.column_index("adult").expect("adult");
+        assert!(matches!(t.columns[ai].values[0], Value::Missing));
+        match t.columns[ai].values[1] {
+            Value::Number(v) => assert!((v - 2.0).abs() < 1e-9),
+            _ => panic!("expected numeric"),
+        }
+    }
+
+    #[test]
+    fn compute_with_if_updates_existing_variable_in_place() {
+        let dir = std::env::temp_dir();
+        let csv = dir.join("statscraft_compute_if2.csv");
+        std::fs::write(&csv, "flag,score\n0,10\n1,20\n").unwrap();
+        let mut app = StatsCraftApp::default();
+        app.path_input = csv.display().to_string();
+        app.load();
+
+        run(&mut app, "COMPUTE score = 99 IF flag = 1");
+        let t = app.table.as_ref().unwrap();
+        let si = t.column_index("score").expect("score");
+        match t.columns[si].values[0] {
+            Value::Number(v) => assert!((v - 10.0).abs() < 1e-9),
+            _ => panic!("row 0 unchanged"),
+        }
+        match t.columns[si].values[1] {
+            Value::Number(v) => assert!((v - 99.0).abs() < 1e-9),
+            _ => panic!("row 1 updated"),
+        }
+    }
+
+    #[test]
+    fn recode_into_same_and_different_variables() {
+        let dir = std::env::temp_dir();
+        let csv = dir.join("statscraft_recode.csv");
+        std::fs::write(&csv, "score\n1\n2\n3\n").unwrap();
+        let mut app = StatsCraftApp::default();
+        app.path_input = csv.display().to_string();
+        app.load();
+
+        run(&mut app, "RECODE score (1=10) (2=20) (ELSE=COPY)");
+        let t = app.table.as_ref().unwrap();
+        let i = t.column_index("score").unwrap();
+        match t.columns[i].values[0] {
+            Value::Number(v) => assert!((v - 10.0).abs() < 1e-9),
+            _ => panic!("row 0"),
+        }
+        match t.columns[i].values[2] {
+            Value::Number(v) => assert!((v - 3.0).abs() < 1e-9),
+            _ => panic!("ELSE copy"),
+        }
+
+        run(&mut app, "RECODE score (10 THRU 20=1) (ELSE=0) INTO band");
+        let t = app.table.as_ref().unwrap();
+        let b = t.column_index("band").unwrap();
+        match t.columns[b].values[0] {
+            Value::Number(v) => assert!((v - 1.0).abs() < 1e-9),
+            _ => panic!("band 0"),
+        }
+        match t.columns[b].values[2] {
+            Value::Number(v) => assert!((v - 0.0).abs() < 1e-9),
+            _ => panic!("band else"),
+        }
+    }
+
+    #[test]
+    fn count_rank_autorecode_and_select_if() {
+        let dir = std::env::temp_dir();
+        let csv = dir.join("statscraft_prep.csv");
+        std::fs::write(&csv, "a,b,group,age\n1,1,x,17\n1,2,y,18\n9,9,x,21\n").unwrap();
+        let mut app = StatsCraftApp::default();
+        app.path_input = csv.display().to_string();
+        app.load();
+
+        run(&mut app, "COUNT hits = a b (1)");
+        let t = app.table.as_ref().unwrap();
+        let h = t.column_index("hits").unwrap();
+        match t.columns[h].values[0] {
+            Value::Number(v) => assert!((v - 2.0).abs() < 1e-9),
+            _ => panic!("hits 0"),
+        }
+        match t.columns[h].values[1] {
+            Value::Number(v) => assert!((v - 1.0).abs() < 1e-9),
+            _ => panic!("hits 1"),
+        }
+
+        run(&mut app, "RANK age INTO rage");
+        let t = app.table.as_ref().unwrap();
+        let r = t.column_index("rage").unwrap();
+        match t.columns[r].values[0] {
+            Value::Number(v) => assert!((v - 1.0).abs() < 1e-9),
+            _ => panic!("rank 0"),
+        }
+        match t.columns[r].values[2] {
+            Value::Number(v) => assert!((v - 3.0).abs() < 1e-9),
+            _ => panic!("rank 2"),
+        }
+
+        run(&mut app, "AUTORECODE group INTO gnum");
+        let t = app.table.as_ref().unwrap();
+        let g = t.column_index("gnum").unwrap();
+        // x before y alphabetically -> x=1, y=2
+        match t.columns[g].values[0] {
+            Value::Number(v) => assert!((v - 1.0).abs() < 1e-9),
+            _ => panic!("auto 0"),
+        }
+        match t.columns[g].values[1] {
+            Value::Number(v) => assert!((v - 2.0).abs() < 1e-9),
+            _ => panic!("auto 1"),
+        }
+
+        run(&mut app, "SELECT IF age >= 18");
+        let t = app.table.as_ref().unwrap();
+        assert_eq!(t.n_rows, 2);
+    }
+
+    #[test]
+    fn weight_and_split_change_how_analyses_run() {
+        let dir = std::env::temp_dir();
+        let csv = dir.join("statscraft_weight_split.csv");
+        std::fs::write(&csv, "x,w,g\n1,1,a\n3,3,b\n").unwrap();
+        let mut app = StatsCraftApp::default();
+        app.path_input = csv.display().to_string();
+        app.load();
+
+        run(&mut app, "WEIGHT BY w");
+        run(&mut app, "DESCRIPTIVES x");
+        let d = app.outputs.last().expect("descriptives");
+        // Expanded n is 1+3 = 4; mean is (1+3+3+3)/4 = 2.5
+        assert!(
+            d.rows.iter().any(|r| r.iter().any(|c| c.contains("2.5") || c.contains("2,5"))),
+            "weighted mean missing: {:?}",
+            d.rows
+        );
+
+        app.outputs.clear();
+        run(&mut app, "WEIGHT OFF");
+        run(&mut app, "SPLIT FILE BY g");
+        run(&mut app, "DESCRIPTIVES x");
+        assert!(
+            app.outputs.len() >= 2,
+            "split should produce one table per group, got {}",
+            app.outputs.len()
+        );
+        assert!(
+            app.outputs.iter().any(|o| o.title.contains("g=a")),
+            "split label missing: {:?}",
+            app.outputs.iter().map(|o| &o.title).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn aggregate_match_and_restructure() {
+        let dir = std::env::temp_dir();
+        let csv = dir.join("statscraft_agg.csv");
+        std::fs::write(&csv, "g,x\na,1\na,3\nb,5\n").unwrap();
+        let mut app = StatsCraftApp::default();
+        app.path_input = csv.display().to_string();
+        app.load();
+        run(&mut app, "AGGREGATE BREAK g /MEAN(x) /N");
+        let t = app.table.as_ref().unwrap();
+        assert_eq!(t.n_rows, 2);
+        let m = t.column_index("mean_x").expect("mean_x");
+        match t.columns[m].values[0] {
+            Value::Number(v) => assert!((v - 2.0).abs() < 1e-9, "mean a was {}", v),
+            _ => panic!("mean"),
+        }
+
+        let wide = dir.join("statscraft_wide.csv");
+        std::fs::write(&wide, "id,s1,s2\n1,10,20\n2,30,40\n").unwrap();
+        app.path_input = wide.display().to_string();
+        app.load();
+        run(&mut app, "VARSTOCASES MAKE score FROM s1 s2 /INDEX=wave");
+        assert_eq!(app.table.as_ref().unwrap().n_rows, 4);
+
+        let left = dir.join("statscraft_left.csv");
+        let right = dir.join("statscraft_right.csv");
+        std::fs::write(&left, "id,a\n1,10\n2,20\n").unwrap();
+        std::fs::write(&right, "id,b\n2,99\n").unwrap();
+        app.path_input = left.display().to_string();
+        app.load();
+        run(
+            &mut app,
+            &format!("MATCH FILES \"{}\" BY id", right.display()),
+        );
+        let t = app.table.as_ref().unwrap();
+        let b = t.column_index("b").expect("b");
+        assert!(matches!(t.columns[b].values[0], Value::Missing));
+        match t.columns[b].values[1] {
+            Value::Number(v) => assert!((v - 99.0).abs() < 1e-9),
+            _ => panic!("match"),
         }
     }
 

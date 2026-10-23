@@ -38,6 +38,21 @@ pub struct StatsCraftApp {
     pub missing_dialog: Option<crate::dialog::MissingValues>,
     /// The open Value Labels dialog, if any.
     pub value_labels_dialog: Option<crate::dialog::ValueLabels>,
+    /// The open Compute Variable dialog, if any.
+    pub compute_dialog: Option<crate::dialog::ComputeVariable>,
+    pub recode_dialog: Option<crate::dialog::RecodeVariables>,
+    pub count_dialog: Option<crate::dialog::CountValues>,
+    pub rank_dialog: Option<crate::dialog::RankCases>,
+    pub autorecode_dialog: Option<crate::dialog::AutoRecode>,
+    pub select_dialog: Option<crate::dialog::SelectCases>,
+    pub weight_dialog: Option<crate::dialog::WeightCases>,
+    pub split_dialog: Option<crate::dialog::SplitFile>,
+    pub aggregate_dialog: Option<crate::dialog::Aggregate>,
+    pub file_join_dialog: Option<crate::dialog::FileJoin>,
+    pub restructure_dialog: Option<crate::dialog::Restructure>,
+    pub weight_var: Option<String>,
+    pub split_vars: Vec<String>,
+    pub restore_prompt: bool,
     /// A variable waiting for the delete confirmation, if any.
     pub pending_delete_variable: Option<usize>,
     /// The unsaved-changes prompt shown when the window is closed.
@@ -109,6 +124,20 @@ impl Default for StatsCraftApp {
             dialog: None,
             missing_dialog: None,
             value_labels_dialog: None,
+            compute_dialog: None,
+            recode_dialog: None,
+            count_dialog: None,
+            rank_dialog: None,
+            autorecode_dialog: None,
+            select_dialog: None,
+            weight_dialog: None,
+            split_dialog: None,
+            aggregate_dialog: None,
+            file_join_dialog: None,
+            restructure_dialog: None,
+            weight_var: None,
+            split_vars: Vec::new(),
+            restore_prompt: false,
             pending_delete_variable: None,
             close_prompt: false,
             close_confirmed: false,
@@ -156,13 +185,18 @@ impl StatsCraftApp {
                 // A new dataset starts with a clean history: the changes
                 // of the previous one are not this one's to take back.
                 self.undo.clear();
+                self.weight_var = None;
+                self.split_vars.clear();
                 self.dataset_no += 1;
                 self.add_recent_file(p);
+                self.write_recovery();
             }
             Err(e) => {
                 self.status = format!("Error: {}", e);
                 self.table = None;
                 self.undo.clear();
+                self.weight_var = None;
+                self.split_vars.clear();
             }
         }
     }
@@ -172,6 +206,7 @@ impl StatsCraftApp {
         let settings = crate::settings::Settings {
             dark: self.dark,
             recent_files: self.recent_files.clone(),
+            session_ok: false,
         };
         crate::settings::save(&settings);
     }
@@ -181,6 +216,7 @@ impl StatsCraftApp {
         let mut settings = crate::settings::Settings {
             dark: self.dark,
             recent_files: self.recent_files.clone(),
+            session_ok: false,
         };
         settings.remember_file(path);
         crate::settings::save(&settings);
@@ -197,6 +233,8 @@ impl StatsCraftApp {
         self.dataset_no += 1;
         self.view = View::Data;
         self.dirty = false;
+        self.weight_var = None;
+        self.split_vars.clear();
         self.status =
             "New dataset. Switch to Variable View to create the first variable.".to_string();
     }
@@ -268,6 +306,24 @@ impl StatsCraftApp {
         } else if let Some(syntax) = d.pasted {
             // StatsBench's Paste puts the command in the syntax window without
             // running it.
+            self.syntax_text = if self.syntax_text.trim().is_empty() {
+                syntax.clone()
+            } else {
+                format!("{}\n{}", self.syntax_text.trim_end(), syntax)
+            };
+            self.show_syntax_window = true;
+            self.status = format!("Pasted into Syntax1:\n{}", syntax);
+        }
+    }
+
+    pub fn close_compute_dialog(&mut self, dlg: crate::dialog::ComputeVariable) {
+        self.finish_ok_or_paste(dlg.confirmed, dlg.pasted);
+    }
+
+    fn finish_ok_or_paste(&mut self, confirmed: Option<String>, pasted: Option<String>) {
+        if let Some(syntax) = confirmed {
+            self.paste_and_run(syntax);
+        } else if let Some(syntax) = pasted {
             self.syntax_text = if self.syntax_text.trim().is_empty() {
                 syntax.clone()
             } else {
@@ -383,6 +439,83 @@ impl StatsCraftApp {
     /// now is the state after it.
     pub fn record_table_change(&mut self, before: Option<DataTable>) {
         self.undo.push_table(before, &self.table);
+        self.write_recovery();
+    }
+
+    fn write_recovery(&self) {
+        let Some(t) = &self.table else {
+            return;
+        };
+        let sav = crate::settings::recovery_sav_path();
+        if crate::data::write_sav(t, &sav).is_err() {
+            return;
+        }
+        let meta = format!(
+            "path={}\nweight={}\nsplit={}\n",
+            self.path_input.replace('\n', ""),
+            self.weight_var.clone().unwrap_or_default(),
+            self.split_vars.join(" ")
+        );
+        let _ = std::fs::write(crate::settings::recovery_meta_path(), meta);
+    }
+
+    fn restore_from_recovery(&mut self) {
+        let sav = crate::settings::recovery_sav_path();
+        match DataTable::from_sav_path(&sav) {
+            Ok(t) => {
+                self.table = Some(t);
+                self.dirty = true;
+                self.undo.clear();
+                if let Ok(text) = std::fs::read_to_string(crate::settings::recovery_meta_path()) {
+                    for line in text.lines() {
+                        if let Some((k, v)) = line.split_once('=') {
+                            match k.trim() {
+                                "path" => self.path_input = v.to_string(),
+                                "weight" if !v.trim().is_empty() => {
+                                    self.weight_var = Some(v.trim().to_string());
+                                }
+                                "split" if !v.trim().is_empty() => {
+                                    self.split_vars = v
+                                        .split_whitespace()
+                                        .map(|s| s.to_string())
+                                        .collect();
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                self.status = "Restored the previous session.".to_string();
+            }
+            Err(e) => self.status = format!("Could not restore: {}", e),
+        }
+        self.discard_recovery();
+    }
+
+    fn discard_recovery(&mut self) {
+        let _ = std::fs::remove_file(crate::settings::recovery_sav_path());
+        let _ = std::fs::remove_file(crate::settings::recovery_meta_path());
+        self.restore_prompt = false;
+    }
+
+    pub fn print_output(&mut self) {
+        if self.outputs.is_empty() {
+            self.status = "No output to print.".to_string();
+            return;
+        }
+        let html = output_document_html(&self.outputs, false, "");
+        let path = std::env::temp_dir().join("statscraft_print.html");
+        match std::fs::write(&path, html) {
+            Ok(()) => {
+                let opened = open_path(&path);
+                self.status = if opened {
+                    format!("Opened {} for printing.", path.display())
+                } else {
+                    format!("Wrote {}. Open it to print.", path.display())
+                };
+            }
+            Err(e) => self.status = format!("Print failed: {}", e),
+        }
     }
 
     /// Add an empty numeric variable. This is the same operation as the
@@ -578,6 +711,37 @@ impl StatsCraftApp {
                     }
                 });
             });
+    }
+
+    fn show_restore_prompt(&mut self, ctx: &egui::Context) {
+        let mut restore = false;
+        let mut discard = false;
+        egui::Window::new("Restore previous session")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .show(ctx, |ui| {
+                ui.label(
+                    egui::RichText::new("StatsCraft did not close cleanly.")
+                        .font(crate::theme::semibold(15.0)),
+                );
+                ui.add_space(6.0);
+                ui.label("A snapshot of the last dataset is available.");
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Restore").clicked() {
+                        restore = true;
+                    }
+                    if ui.button("Discard").clicked() {
+                        discard = true;
+                    }
+                });
+            });
+        if restore {
+            self.restore_from_recovery();
+        } else if discard {
+            self.discard_recovery();
+        }
     }
 
     /// Copy the selected cell to the clipboard.
@@ -1484,6 +1648,127 @@ impl eframe::App for StatsCraftApp {
                 self.value_labels_dialog = Some(dlg);
             }
         }
+        if self.compute_dialog.is_some() {
+            let mut dlg = self.compute_dialog.take().expect("compute dialog present");
+            crate::dialog::show_compute(ctx, self, &mut dlg);
+            if dlg.confirmed.is_some() || dlg.pasted.is_some() {
+                self.close_compute_dialog(dlg);
+            } else if dlg.cancelled {
+                self.compute_dialog = None;
+            } else {
+                self.compute_dialog = Some(dlg);
+            }
+        }
+        if self.recode_dialog.is_some() {
+            let mut dlg = self.recode_dialog.take().expect("recode dialog present");
+            crate::dialog::show_recode(ctx, self, &mut dlg);
+            if dlg.confirmed.is_some() || dlg.pasted.is_some() {
+                self.finish_ok_or_paste(dlg.confirmed, dlg.pasted);
+            } else if dlg.cancelled {
+                self.recode_dialog = None;
+            } else {
+                self.recode_dialog = Some(dlg);
+            }
+        }
+        if self.count_dialog.is_some() {
+            let mut dlg = self.count_dialog.take().expect("count dialog present");
+            crate::dialog::show_count(ctx, self, &mut dlg);
+            if dlg.confirmed.is_some() || dlg.pasted.is_some() {
+                self.finish_ok_or_paste(dlg.confirmed, dlg.pasted);
+            } else if dlg.cancelled {
+                self.count_dialog = None;
+            } else {
+                self.count_dialog = Some(dlg);
+            }
+        }
+        if self.rank_dialog.is_some() {
+            let mut dlg = self.rank_dialog.take().expect("rank dialog present");
+            crate::dialog::show_rank(ctx, self, &mut dlg);
+            if dlg.confirmed.is_some() || dlg.pasted.is_some() {
+                self.finish_ok_or_paste(dlg.confirmed, dlg.pasted);
+            } else if dlg.cancelled {
+                self.rank_dialog = None;
+            } else {
+                self.rank_dialog = Some(dlg);
+            }
+        }
+        if self.autorecode_dialog.is_some() {
+            let mut dlg = self.autorecode_dialog.take().expect("autorecode dialog present");
+            crate::dialog::show_autorecode(ctx, self, &mut dlg);
+            if dlg.confirmed.is_some() || dlg.pasted.is_some() {
+                self.finish_ok_or_paste(dlg.confirmed, dlg.pasted);
+            } else if dlg.cancelled {
+                self.autorecode_dialog = None;
+            } else {
+                self.autorecode_dialog = Some(dlg);
+            }
+        }
+        if self.select_dialog.is_some() {
+            let mut dlg = self.select_dialog.take().expect("select dialog present");
+            crate::dialog::show_select(ctx, self, &mut dlg);
+            if dlg.confirmed.is_some() || dlg.pasted.is_some() {
+                self.finish_ok_or_paste(dlg.confirmed, dlg.pasted);
+            } else if dlg.cancelled {
+                self.select_dialog = None;
+            } else {
+                self.select_dialog = Some(dlg);
+            }
+        }
+        if self.weight_dialog.is_some() {
+            let mut dlg = self.weight_dialog.take().expect("weight dialog");
+            crate::dialog::show_weight(ctx, self, &mut dlg);
+            if dlg.confirmed.is_some() || dlg.pasted.is_some() {
+                self.finish_ok_or_paste(dlg.confirmed, dlg.pasted);
+            } else if dlg.cancelled {
+                self.weight_dialog = None;
+            } else {
+                self.weight_dialog = Some(dlg);
+            }
+        }
+        if self.split_dialog.is_some() {
+            let mut dlg = self.split_dialog.take().expect("split dialog");
+            crate::dialog::show_split(ctx, self, &mut dlg);
+            if dlg.confirmed.is_some() || dlg.pasted.is_some() {
+                self.finish_ok_or_paste(dlg.confirmed, dlg.pasted);
+            } else if dlg.cancelled {
+                self.split_dialog = None;
+            } else {
+                self.split_dialog = Some(dlg);
+            }
+        }
+        if self.aggregate_dialog.is_some() {
+            let mut dlg = self.aggregate_dialog.take().expect("aggregate dialog");
+            crate::dialog::show_aggregate(ctx, self, &mut dlg);
+            if dlg.confirmed.is_some() || dlg.pasted.is_some() {
+                self.finish_ok_or_paste(dlg.confirmed, dlg.pasted);
+            } else if dlg.cancelled {
+                self.aggregate_dialog = None;
+            } else {
+                self.aggregate_dialog = Some(dlg);
+            }
+        }
+        if self.file_join_dialog.is_some() {
+            let mut dlg = self.file_join_dialog.take().expect("join dialog");
+            crate::dialog::show_file_join(ctx, self, &mut dlg);
+            if dlg.confirmed.is_some() || dlg.pasted.is_some() {
+                self.finish_ok_or_paste(dlg.confirmed, dlg.pasted);
+            } else if dlg.cancelled {
+                self.file_join_dialog = None;
+            } else {
+                self.file_join_dialog = Some(dlg);
+            }
+        }
+        if self.restructure_dialog.is_some() {
+            let mut dlg = self.restructure_dialog.take().expect("restructure dialog");
+            crate::dialog::show_restructure(ctx, self, &mut dlg);
+            if dlg.confirmed.is_some() || dlg.pasted.is_some() {
+                self.finish_ok_or_paste(dlg.confirmed, dlg.pasted);
+            } else if dlg.cancelled {
+                self.restructure_dialog = None;
+            } else {
+                self.restructure_dialog = Some(dlg);
+            }
+        }
 
         if self.show_syntax_window {
             ctx.show_viewport_immediate(
@@ -1764,6 +2049,7 @@ impl eframe::App for StatsCraftApp {
                                     let settings = crate::settings::Settings {
                                         dark: self.dark,
                                         recent_files: Vec::new(),
+                                        session_ok: false,
                                     };
                                     crate::settings::save(&settings);
                                 }
@@ -1798,7 +2084,7 @@ impl eframe::App for StatsCraftApp {
                             }
                         }
                         ui.separator();
-                        if crate::icon::menu_item(ui, crate::theme::Icon::Print, "Export Output (HTML)…").clicked() {
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Open, "Open…").clicked() {
                             ui.close_menu();
                             if let Some(p) = rfd::FileDialog::new()
                                 .add_filter("Data", &["csv", "sav"])
@@ -1858,8 +2144,15 @@ impl eframe::App for StatsCraftApp {
                                 self.export_output_html_to(&p);
                             }
                         }
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Print, "Print Output…")
+                            .on_hover_text("Open the output as HTML in the system browser.")
+                            .clicked()
+                        {
+                            ui.close_menu();
+                            self.print_output();
+                        }
                         ui.menu_button("Export to Microsoft Office", |ui| {
-                            if ui.button("Word Document (.doc)…").clicked() {
+                            if ui.button("Word-compatible HTML (.doc)…").clicked() {
                                 ui.close_menu();
                                 if let Some(p) = rfd::FileDialog::new()
                                     .add_filter("Word Document", &["doc"])
@@ -1869,7 +2162,7 @@ impl eframe::App for StatsCraftApp {
                                     self.export_output_office_to(&p);
                                 }
                             }
-                            if ui.button("Excel Workbook (.xls)…").clicked() {
+                            if ui.button("Excel-compatible HTML (.xls)…").clicked() {
                                 ui.close_menu();
                                 if let Some(p) = rfd::FileDialog::new()
                                     .add_filter("Excel Workbook", &["xls"])
@@ -2012,12 +2305,97 @@ impl eframe::App for StatsCraftApp {
                         // The preparation layer is not built yet. The
                         // entries are shown greyed out and say so, rather
                         // than failing when they are chosen.
-                        crate::icon::menu_item_disabled(
-                            ui,
-                            crate::theme::Icon::Filter,
-                            "Select Cases…",
-                            "0.4",
-                        );
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Filter, "Select Cases…")
+                            .clicked()
+                        {
+                            ui.close_menu();
+                            if self.table.is_some() {
+                                self.select_dialog = Some(crate::dialog::SelectCases::default());
+                            } else {
+                                self.status = "No data loaded.".to_string();
+                            }
+                        }
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Filter, "Weight Cases…")
+                            .clicked()
+                        {
+                            ui.close_menu();
+                            if self.table.is_some() {
+                                self.weight_dialog = Some(crate::dialog::WeightCases {
+                                    variable: self.weight_var.clone().unwrap_or_default(),
+                                    ..Default::default()
+                                });
+                            } else {
+                                self.status = "No data loaded.".to_string();
+                            }
+                        }
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Filter, "Split File…")
+                            .clicked()
+                        {
+                            ui.close_menu();
+                            if self.table.is_some() {
+                                self.split_dialog = Some(crate::dialog::SplitFile {
+                                    variables: self.split_vars.clone(),
+                                    off: self.split_vars.is_empty(),
+                                    ..Default::default()
+                                });
+                            } else {
+                                self.status = "No data loaded.".to_string();
+                            }
+                        }
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Describe, "Aggregate…")
+                            .clicked()
+                        {
+                            ui.close_menu();
+                            if self.table.is_some() {
+                                self.aggregate_dialog = Some(crate::dialog::Aggregate {
+                                    n: true,
+                                    mean: true,
+                                    ..Default::default()
+                                });
+                            } else {
+                                self.status = "No data loaded.".to_string();
+                            }
+                        }
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Open, "Add Files…")
+                            .clicked()
+                        {
+                            ui.close_menu();
+                            if self.table.is_some() {
+                                self.file_join_dialog = Some(crate::dialog::FileJoin::add());
+                            } else {
+                                self.status = "No data loaded.".to_string();
+                            }
+                        }
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Open, "Match Files…")
+                            .clicked()
+                        {
+                            ui.close_menu();
+                            if self.table.is_some() {
+                                self.file_join_dialog = Some(crate::dialog::FileJoin::match_join());
+                            } else {
+                                self.status = "No data loaded.".to_string();
+                            }
+                        }
+                        ui.menu_button("Restructure", |ui| {
+                            if ui.button("Variables to Cases…").clicked() {
+                                ui.close_menu();
+                                if self.table.is_some() {
+                                    self.restructure_dialog =
+                                        Some(crate::dialog::Restructure::vars_to_cases());
+                                } else {
+                                    self.status = "No data loaded.".to_string();
+                                }
+                            }
+                            if ui.button("Cases to Variables…").clicked() {
+                                ui.close_menu();
+                                if self.table.is_some() {
+                                    self.restructure_dialog =
+                                        Some(crate::dialog::Restructure::cases_to_vars());
+                                } else {
+                                    self.status = "No data loaded.".to_string();
+                                }
+                            }
+                        });
                         if crate::icon::menu_item(ui, crate::theme::Icon::ValueLabels, "Value Labels…").clicked() {
                             ui.close_menu();
                             if self.table.as_ref().is_some_and(|t| !t.columns.is_empty()) {
@@ -2035,15 +2413,81 @@ impl eframe::App for StatsCraftApp {
                     // release will bring them, rather than failing when
                     // they are chosen.
                     ui.menu_button("Transform", |ui| {
-                        for (label, icon) in [
-                            ("Compute Variable…", crate::theme::Icon::Settings),
-                            ("Recode into Same Variables…", crate::theme::Icon::ValueLabels),
-                            ("Recode into Different Variables…", crate::theme::Icon::ValueLabels),
-                            ("Count Values within Cases…", crate::theme::Icon::Describe),
-                            ("Rank Cases…", crate::theme::Icon::Describe),
-                            ("Automatic Recode…", crate::theme::Icon::ValueLabels),
-                        ] {
-                            crate::icon::menu_item_disabled(ui, icon, label, "0.4");
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Settings, "Compute Variable…")
+                            .clicked()
+                        {
+                            ui.close_menu();
+                            if self.table.is_some() {
+                                self.compute_dialog = Some(crate::dialog::ComputeVariable::default());
+                            } else {
+                                self.status = "No data loaded.".to_string();
+                            }
+                        }
+                        if crate::icon::menu_item(
+                            ui,
+                            crate::theme::Icon::ValueLabels,
+                            "Recode into Same Variables…",
+                        )
+                        .clicked()
+                        {
+                            ui.close_menu();
+                            if self.table.is_some() {
+                                self.recode_dialog = Some(crate::dialog::RecodeVariables::same());
+                            } else {
+                                self.status = "No data loaded.".to_string();
+                            }
+                        }
+                        if crate::icon::menu_item(
+                            ui,
+                            crate::theme::Icon::ValueLabels,
+                            "Recode into Different Variables…",
+                        )
+                        .clicked()
+                        {
+                            ui.close_menu();
+                            if self.table.is_some() {
+                                self.recode_dialog = Some(crate::dialog::RecodeVariables::different());
+                            } else {
+                                self.status = "No data loaded.".to_string();
+                            }
+                        }
+                        if crate::icon::menu_item(
+                            ui,
+                            crate::theme::Icon::Describe,
+                            "Count Values within Cases…",
+                        )
+                        .clicked()
+                        {
+                            ui.close_menu();
+                            if self.table.is_some() {
+                                self.count_dialog = Some(crate::dialog::CountValues::default());
+                            } else {
+                                self.status = "No data loaded.".to_string();
+                            }
+                        }
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Describe, "Rank Cases…")
+                            .clicked()
+                        {
+                            ui.close_menu();
+                            if self.table.is_some() {
+                                self.rank_dialog = Some(crate::dialog::RankCases::default());
+                            } else {
+                                self.status = "No data loaded.".to_string();
+                            }
+                        }
+                        if crate::icon::menu_item(
+                            ui,
+                            crate::theme::Icon::ValueLabels,
+                            "Automatic Recode…",
+                        )
+                        .clicked()
+                        {
+                            ui.close_menu();
+                            if self.table.is_some() {
+                                self.autorecode_dialog = Some(crate::dialog::AutoRecode::default());
+                            } else {
+                                self.status = "No data loaded.".to_string();
+                            }
                         }
                     });
                     // ---------------- Analyze ----------------
@@ -2455,6 +2899,25 @@ impl eframe::App for StatsCraftApp {
                                     .size(11.0),
                             );
                             ui.add_space(12.0);
+                            if let Some(w) = &self.weight_var {
+                                ui.label(
+                                    egui::RichText::new(format!("WEIGHT={}", w))
+                                        .color(crate::theme::teal())
+                                        .size(11.0),
+                                );
+                                ui.add_space(10.0);
+                            }
+                            if !self.split_vars.is_empty() {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "SPLIT={}",
+                                        self.split_vars.join(",")
+                                    ))
+                                    .color(crate::theme::teal())
+                                    .size(11.0),
+                                );
+                                ui.add_space(10.0);
+                            }
                         }
                         ui.label(
                             egui::RichText::new(&self.status)
@@ -2849,10 +3312,19 @@ impl eframe::App for StatsCraftApp {
         if self.close_prompt {
             self.show_close_prompt(ctx);
         }
+        if self.restore_prompt {
+            self.show_restore_prompt(ctx);
+        }
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        self.save_settings();
+        let settings = crate::settings::Settings {
+            dark: self.dark,
+            recent_files: self.recent_files.clone(),
+            session_ok: true,
+        };
+        crate::settings::save(&settings);
+        self.discard_recovery();
     }
 }
 
@@ -3232,6 +3704,30 @@ fn output_table_html(t: &OutputTable, include_chart: bool) -> String {
         ));
     }
     h
+}
+
+fn open_path(path: &std::path::Path) -> bool {
+    #[cfg(windows)]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &path.display().to_string()])
+            .spawn()
+            .is_ok()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(path)
+            .spawn()
+            .is_ok()
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .is_ok()
+    }
 }
 
 /// The full HTML document for HTML and Office export.
@@ -4969,7 +5465,14 @@ pub fn run_with(
             // the user switches it.
             app.ctx = cc.egui_ctx.clone();
             app.dark = dark;
-            app.recent_files = settings.recent_files;
+            app.recent_files = settings.recent_files.clone();
+            let recovery = crate::settings::recovery_sav_path();
+            if !settings.session_ok && recovery.exists() {
+                app.restore_prompt = true;
+            }
+            let mut started = settings.clone();
+            started.session_ok = false;
+            crate::settings::save(&started);
             if let Some(p) = initial_path {
                 app.path_input = p;
                 app.load();

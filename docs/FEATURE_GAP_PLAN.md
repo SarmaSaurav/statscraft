@@ -252,14 +252,15 @@ selection or the command under the cursor and lists the commands of the
 buffer. The Output Viewer opens with a **Log** object, and the output can be
 saved to a `.scdoc` document and opened again.
 
-### 0.4 — Preparation and output
+### 0.4 — Preparation and output — **Done (0.4.0)**
 
 1. Compute Variable dialog with `IF`.
 2. Recode into Same/Different Variables, Count, Rank, Automatic Recode.
 3. Select Cases, Weight Cases, Split File.
 4. Aggregate, then Add/Match Files, then Restructure.
-5. Save/load an output document; print; native DOCX/XLSX export.
-6. Restore points.
+5. Save/load an output document (0.3); print; Office exports labelled as
+   Word/Excel-compatible HTML (not native OOXML).
+6. Restore points (`.sav` snapshot after unclean exit).
 
 ### 0.5 — Analytical breadth
 

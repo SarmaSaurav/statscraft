@@ -5,6 +5,46 @@ All the notable changes to StatsCraft.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.4.0 - 2026-10-23
+
+The "preparation and output" release. Transform and Data menus now cover the
+middle of a normal project: compute and recode, filter and weight, aggregate
+and merge, reshape, plus output you can print and a session snapshot if the
+app did not close cleanly.
+
+### Added
+
+- **Transform dialogs and syntax:** Compute Variable (with optional **IF**),
+  Recode into Same/Different Variables, Count Values within Cases, Rank
+  Cases, and Automatic Recode. **OK** runs the command; **Paste** sends it
+  to the Syntax Editor.
+- **Data preparation:** Select Cases, Weight Cases, Split File, Aggregate,
+  Add Files, Match Files, and Restructure (Variables to Cases / Cases to
+  Variables), each with a dialog and matching syntax (`SELECT IF`, `WEIGHT`,
+  `SPLIT FILE`, `AGGREGATE`, `ADD FILES`, `MATCH FILES`, `VARSTOCASES`,
+  `CASESTOVARS`, plus `RECODE`, `COUNT`, `RANK`, `AUTORECODE`, `COMPUTE`).
+- **Weighted and split analyses.** `WEIGHT BY` expands cases by rounded
+  frequency weights. `SPLIT FILE BY` runs each analysis once per group and
+  labels the output tables. The status bar shows active weight and split
+  variables.
+- **Print Output.** **File > Print Output…** writes HTML and opens it in the
+  system browser for printing.
+- **Session restore.** While a dataset is dirty, a `.sav` snapshot is kept
+  beside the settings file. After an unclean exit, the next start offers
+  **Restore** or **Discard**.
+
+### Changed
+
+- **File > Open…** replaces the mistaken menu entry that opened data under an
+  export label.
+- **Export to Microsoft Office** menu items are labelled **Word-compatible
+  HTML** and **Excel-compatible HTML**, matching what the export actually
+  writes.
+
+### Validation
+
+- `cargo test` passes 143 tests.
+
 ## 0.3.0 - 2026-10-23
 
 The "trustworthy editing" release. It adds no statistical procedure: its job

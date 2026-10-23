@@ -2,10 +2,11 @@
 
 Lightweight statistical workbench written in Rust (native desktop app).
 
-**Version 0.3.0** makes the editor trustworthy: undo and redo for every
-table change, value labels shown in Data View, a confirmation before a case
-is deleted, honest menus, scoped syntax execution with a command outline, a
-Log object in the Output Viewer, and a saved output document.
+**Version 0.4.0** adds data preparation and output polish: Transform dialogs
+(compute, recode, count, rank, automatic recode), Data prep (select, weight,
+split, aggregate, add/match files, restructure), weighted and split analyses,
+print output, session restore, and the 0.3 trustworthy editing layer (undo,
+value labels, honest menus, scoped syntax, Log, `.scdoc`).
 
 ![StatsCraft product showcase](docs/showcase/showcase.png)
 

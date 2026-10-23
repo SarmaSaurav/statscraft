@@ -817,6 +817,124 @@ impl DataTable {
         self.columns.iter().position(|c| c.name.to_lowercase() == lower)
     }
 
+    /// A table that keeps only the listed row indices, in that order.
+    pub fn with_rows(&self, rows: &[usize]) -> DataTable {
+        let columns = self
+            .columns
+            .iter()
+            .map(|c| Column {
+                name: c.name.clone(),
+                kind: c.kind,
+                values: rows
+                    .iter()
+                    .map(|&i| c.values.get(i).cloned().unwrap_or(Value::Missing))
+                    .collect(),
+                meta: c.meta.clone(),
+            })
+            .collect();
+        DataTable {
+            columns,
+            n_rows: rows.len(),
+        }
+    }
+
+    /// Tables used for analysis: frequency-weighted, then split.
+    ///
+    /// A weight is rounded to a whole number of copies of the case.
+    /// Non-positive and missing weights drop the case. Split File makes
+    /// one table per combination of the split variables.
+    pub fn analysis_groups(
+        &self,
+        weight: Option<&str>,
+        split: &[String],
+    ) -> Result<Vec<(String, DataTable)>, String> {
+        let weighted = self.frequency_weighted(weight)?;
+        if split.is_empty() {
+            return Ok(vec![(String::new(), weighted)]);
+        }
+        let split_idx: Result<Vec<usize>, String> = split
+            .iter()
+            .map(|n| {
+                weighted
+                    .column_index(n)
+                    .ok_or_else(|| format!("SPLIT FILE: unknown variable '{}'.", n))
+            })
+            .collect();
+        let split_idx = split_idx?;
+        let mut groups: std::collections::BTreeMap<String, Vec<usize>> =
+            std::collections::BTreeMap::new();
+        for row in 0..weighted.n_rows {
+            let key = split_idx
+                .iter()
+                .map(|&ci| {
+                    weighted.columns[ci]
+                        .values
+                        .get(row)
+                        .map(|v| match v {
+                            Value::Missing => ".".to_string(),
+                            Value::Number(n) => format!("{}", n),
+                            Value::Text(s) => s.clone(),
+                        })
+                        .unwrap_or_default()
+                })
+                .collect::<Vec<_>>()
+                .join(" | ");
+            groups.entry(key).or_default().push(row);
+        }
+        Ok(groups
+            .into_iter()
+            .map(|(k, rows)| {
+                let label = split
+                    .iter()
+                    .zip(k.split(" | "))
+                    .map(|(n, v)| format!("{}={}", n, v))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                (label, weighted.with_rows(&rows))
+            })
+            .collect())
+    }
+
+    fn frequency_weighted(&self, weight: Option<&str>) -> Result<DataTable, String> {
+        let Some(name) = weight else {
+            return Ok(self.clone());
+        };
+        let wi = self
+            .column_index(name)
+            .ok_or_else(|| format!("WEIGHT: unknown variable '{}'.", name))?;
+        if self.columns[wi].kind != ColumnKind::Numeric {
+            return Err("WEIGHT: the weight variable must be numeric.".to_string());
+        }
+        let mut rows = Vec::new();
+        for row in 0..self.n_rows {
+            if self.columns[wi].is_missing(row) {
+                continue;
+            }
+            let copies = match self.columns[wi].values[row] {
+                Value::Number(n) if n.is_finite() && n > 0.0 => n.round() as i64,
+                _ => 0,
+            };
+            for _ in 0..copies {
+                rows.push(row);
+            }
+        }
+        Ok(self.with_rows(&rows))
+    }
+
+    /// Load a CSV or `.sav` file, chosen by the extension.
+    pub fn from_path(path: &Path) -> Result<Self, String> {
+        let sav = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("sav"))
+            .unwrap_or(false);
+        if sav {
+            Self::from_sav_path(path)
+        } else {
+            Self::from_csv_path(path)
+        }
+    }
+
     pub fn sort_rows(&mut self, col: usize, ascending: bool) {
         if col >= self.columns.len() || self.n_rows == 0 {
             return;

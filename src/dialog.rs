@@ -1826,3 +1826,1253 @@ pub fn render_value_labels(ui: &mut egui::Ui, app: &mut StatsCraftApp, dlg: &mut
         }
     });
 }
+
+// ---------------------------------------------------------------------------
+// Compute Variable dialog (Transform)
+// ---------------------------------------------------------------------------
+
+/// The state of the "Compute Variable" dialog.
+#[derive(Debug, Clone, Default)]
+pub struct ComputeVariable {
+    pub target: String,
+    pub expression: String,
+    pub use_if: bool,
+    pub if_condition: String,
+    pub error: Option<String>,
+    pub confirmed: Option<String>,
+    pub pasted: Option<String>,
+    pub cancelled: bool,
+}
+
+impl ComputeVariable {
+    pub fn build_syntax(&self) -> Option<String> {
+        let target = self.target.trim();
+        let expression = self.expression.trim();
+        if target.is_empty() || expression.is_empty() {
+            return None;
+        }
+        if !is_valid_var_name(target) {
+            return None;
+        }
+        if self.use_if {
+            let cond = self.if_condition.trim();
+            if cond.is_empty() {
+                return None;
+            }
+            Some(format!("COMPUTE {} = {} IF {}", target, expression, cond))
+        } else {
+            Some(format!("COMPUTE {} = {}", target, expression))
+        }
+    }
+}
+
+fn is_valid_var_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '@' || c == '#' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '@' || c == '#')
+}
+
+/// Draw the "Compute Variable" dialog.
+pub fn show_compute(ctx: &egui::Context, app: &mut StatsCraftApp, dlg: &mut ComputeVariable) {
+    let mut open = true;
+    egui::Window::new("Compute Variable - StatsCraft")
+        .open(&mut open)
+        .resizable(true)
+        .default_width(520.0)
+        .default_height(420.0)
+        .default_pos(egui::pos2(380.0, 160.0))
+        .show(ctx, |ui| {
+            render_compute(ui, app, dlg);
+        });
+    if !open && dlg.confirmed.is_none() && dlg.pasted.is_none() {
+        dlg.cancelled = true;
+    }
+}
+
+pub fn render_compute(ui: &mut egui::Ui, app: &mut StatsCraftApp, dlg: &mut ComputeVariable) {
+    let names: Vec<String> = app
+        .table
+        .as_ref()
+        .map(|t| t.columns.iter().map(|c| c.name.clone()).collect())
+        .unwrap_or_default();
+
+    if names.is_empty() {
+        ui.label(
+            egui::RichText::new("No variables in the data.")
+                .color(theme::text_muted()),
+        );
+        if ui.button("Close").clicked() {
+            dlg.cancelled = true;
+        }
+        return;
+    }
+
+    ui.columns(2, |cols| {
+        cols[0].set_min_width(160.0);
+        cols[0].label(egui::RichText::new("Variables:").strong());
+        egui::ScrollArea::vertical()
+            .max_height(220.0)
+            .show(&mut cols[0], |ui| {
+                for name in &names {
+                    if ui.small_button(name).clicked() {
+                        if dlg.expression.is_empty() {
+                            dlg.expression = name.clone();
+                        } else {
+                            dlg.expression.push(' ');
+                            dlg.expression.push_str(name);
+                        }
+                    }
+                }
+            });
+
+        cols[1].vertical(|ui| {
+            ui.label(egui::RichText::new("Target Variable:").strong());
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut dlg.target)
+                        .desired_width(180.0)
+                        .hint_text("new or existing name"),
+                );
+                egui::ComboBox::from_id_salt("compute_target_pick")
+                    .selected_text("Existing…")
+                    .width(100.0)
+                    .show_ui(ui, |ui| {
+                        for name in &names {
+                            if ui.selectable_label(false, name).clicked() {
+                                dlg.target = name.clone();
+                            }
+                        }
+                    });
+            });
+            ui.add_space(6.0);
+            ui.label(egui::RichText::new("Numeric Expression:").strong());
+            ui.add(
+                egui::TextEdit::multiline(&mut dlg.expression)
+                    .desired_width(f32::INFINITY)
+                    .desired_rows(4)
+                    .font(egui::TextStyle::Monospace),
+            );
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Functions:");
+                for f in [
+                    "MEAN", "MIN", "MAX", "SUM", "ABS", "SQRT", "LN", "LOG10", "ROUND",
+                ] {
+                    if ui.small_button(f).clicked() {
+                        if dlg.expression.is_empty() {
+                            dlg.expression = format!("{}()", f);
+                        } else {
+                            dlg.expression.push(' ');
+                            dlg.expression.push_str(&format!("{}()", f));
+                        }
+                    }
+                }
+            });
+            ui.add_space(6.0);
+            ui.checkbox(&mut dlg.use_if, "If case satisfies condition:");
+            ui.add_enabled(
+                dlg.use_if,
+                egui::TextEdit::singleline(&mut dlg.if_condition)
+                    .desired_width(f32::INFINITY)
+                    .hint_text("e.g. age >= 18"),
+            );
+        });
+    });
+
+    if let Some(error) = &dlg.error {
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new(error)
+                .color(ui.visuals().error_fg_color)
+                .size(11.5),
+        );
+    }
+
+    ui.add_space(10.0);
+    let ok_enabled = dlg.build_syntax().is_some();
+    ui.horizontal(|ui| {
+        if ui.add_enabled(ok_enabled, egui::Button::new("OK")).clicked() {
+            dlg.error = None;
+            if let Some(syntax) = dlg.build_syntax() {
+                dlg.confirmed = Some(syntax);
+            } else {
+                dlg.error = Some(
+                    "Enter a target name, an expression, and a condition when IF is on.".to_string(),
+                );
+            }
+        }
+        if ui.add_enabled(ok_enabled, egui::Button::new("Paste")).clicked() {
+            dlg.error = None;
+            if let Some(syntax) = dlg.build_syntax() {
+                dlg.pasted = Some(syntax);
+            }
+        }
+        if ui.button("Reset").clicked() {
+            *dlg = ComputeVariable::default();
+        }
+        if ui.button("Cancel").clicked() {
+            dlg.cancelled = true;
+        }
+        if ui.button("Help").clicked() {
+            dlg.error = Some(
+                "Build an expression from variables and functions. IF limits which cases change."
+                    .to_string(),
+            );
+        }
+    });
+}
+
+fn syntax_action_row(
+    ui: &mut egui::Ui,
+    syntax: Option<String>,
+    confirmed: &mut Option<String>,
+    pasted: &mut Option<String>,
+    cancelled: &mut bool,
+    error: &mut Option<String>,
+    help: &str,
+) {
+    let ok_enabled = syntax.is_some();
+    ui.horizontal(|ui| {
+        if ui.add_enabled(ok_enabled, egui::Button::new("OK")).clicked() {
+            *error = None;
+            if let Some(syntax) = syntax.clone() {
+                *confirmed = Some(syntax);
+            }
+        }
+        if ui.add_enabled(ok_enabled, egui::Button::new("Paste")).clicked() {
+            *error = None;
+            if let Some(syntax) = syntax.clone() {
+                *pasted = Some(syntax);
+            }
+        }
+        if ui.button("Cancel").clicked() {
+            *cancelled = true;
+        }
+        if ui.button("Help").clicked() {
+            *error = Some(help.to_string());
+        }
+    });
+}
+
+fn var_names(app: &StatsCraftApp) -> Vec<String> {
+    app.table
+        .as_ref()
+        .map(|t| t.columns.iter().map(|c| c.name.clone()).collect())
+        .unwrap_or_default()
+}
+
+/// Recode into the same variables, or into new ones.
+#[derive(Debug, Clone)]
+pub struct RecodeVariables {
+    pub into_different: bool,
+    pub sources: Vec<String>,
+    pub dests: Vec<String>,
+    pub rules: Vec<(String, String)>,
+    pub else_copy: bool,
+    pub else_value: String,
+    pub error: Option<String>,
+    pub confirmed: Option<String>,
+    pub pasted: Option<String>,
+    pub cancelled: bool,
+}
+
+impl RecodeVariables {
+    pub fn same() -> Self {
+        Self {
+            into_different: false,
+            sources: Vec::new(),
+            dests: Vec::new(),
+            rules: vec![(String::new(), String::new())],
+            else_copy: true,
+            else_value: String::new(),
+            error: None,
+            confirmed: None,
+            pasted: None,
+            cancelled: false,
+        }
+    }
+
+    pub fn different() -> Self {
+        let mut s = Self::same();
+        s.into_different = true;
+        s
+    }
+
+    pub fn build_syntax(&self) -> Option<String> {
+        if self.sources.is_empty() {
+            return None;
+        }
+        let mappings: Vec<String> = self
+            .rules
+            .iter()
+            .filter(|(o, n)| !o.trim().is_empty() && !n.trim().is_empty())
+            .map(|(o, n)| format!("({}={})", o.trim(), n.trim()))
+            .collect();
+        if mappings.is_empty() {
+            return None;
+        }
+        let mut cmd = format!("RECODE {} {}", self.sources.join(" "), mappings.join(" "));
+        if self.else_copy {
+            cmd.push_str(" (ELSE=COPY)");
+        } else if !self.else_value.trim().is_empty() {
+            cmd.push_str(&format!(" (ELSE={})", self.else_value.trim()));
+        }
+        if self.into_different {
+            if self.dests.len() != self.sources.len()
+                || self.dests.iter().any(|d| !is_valid_var_name(d.trim()))
+            {
+                return None;
+            }
+            cmd.push_str(" INTO ");
+            cmd.push_str(
+                &self
+                    .dests
+                    .iter()
+                    .map(|d| d.trim().to_string())
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            );
+        }
+        Some(cmd)
+    }
+
+    fn toggle_source(&mut self, name: &str) {
+        if let Some(i) = self
+            .sources
+            .iter()
+            .position(|s| s.eq_ignore_ascii_case(name))
+        {
+            self.sources.remove(i);
+            if i < self.dests.len() {
+                self.dests.remove(i);
+            }
+        } else {
+            self.sources.push(name.to_string());
+            self.dests.push(format!("{}_r", name));
+        }
+    }
+}
+
+pub fn show_recode(ctx: &egui::Context, app: &mut StatsCraftApp, dlg: &mut RecodeVariables) {
+    let mut open = true;
+    let title = if dlg.into_different {
+        "Recode into Different Variables - StatsCraft"
+    } else {
+        "Recode into Same Variables - StatsCraft"
+    };
+    egui::Window::new(title)
+        .open(&mut open)
+        .resizable(true)
+        .default_width(540.0)
+        .default_pos(egui::pos2(360.0, 140.0))
+        .show(ctx, |ui| {
+            render_recode(ui, app, dlg);
+        });
+    if !open && dlg.confirmed.is_none() && dlg.pasted.is_none() {
+        dlg.cancelled = true;
+    }
+}
+
+pub fn render_recode(ui: &mut egui::Ui, app: &mut StatsCraftApp, dlg: &mut RecodeVariables) {
+    let names = var_names(app);
+    if names.is_empty() {
+        ui.label(egui::RichText::new("No variables in the data.").color(theme::text_muted()));
+        if ui.button("Close").clicked() {
+            dlg.cancelled = true;
+        }
+        return;
+    }
+    ui.label(egui::RichText::new("Input Variable(s):").strong());
+    ui.horizontal_wrapped(|ui| {
+        for name in &names {
+            let on = dlg.sources.iter().any(|s| s.eq_ignore_ascii_case(name));
+            if ui.selectable_label(on, name).clicked() {
+                dlg.toggle_source(name);
+            }
+        }
+    });
+    if dlg.into_different && !dlg.sources.is_empty() {
+        ui.add_space(6.0);
+        ui.label(egui::RichText::new("Output Variable(s):").strong());
+        dlg.dests.resize(dlg.sources.len(), String::new());
+        for (i, src) in dlg.sources.iter().enumerate() {
+            ui.horizontal(|ui| {
+                ui.label(format!("{} →", src));
+                ui.add(egui::TextEdit::singleline(&mut dlg.dests[i]).desired_width(160.0));
+            });
+        }
+    }
+    ui.add_space(8.0);
+    ui.label(egui::RichText::new("Old → New:").strong());
+    ui.label(
+        egui::RichText::new("Old can be a value, a list, MISSING, or a range such as 1 THRU 5.")
+            .small()
+            .color(theme::text_muted()),
+    );
+    let mut remove = None;
+    for (i, (old, new)) in dlg.rules.iter_mut().enumerate() {
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(old).desired_width(160.0).hint_text("old"));
+            ui.label("=");
+            ui.add(egui::TextEdit::singleline(new).desired_width(120.0).hint_text("new"));
+            if ui.small_button("Remove").clicked() {
+                remove = Some(i);
+            }
+        });
+    }
+    if let Some(i) = remove {
+        dlg.rules.remove(i);
+        if dlg.rules.is_empty() {
+            dlg.rules.push((String::new(), String::new()));
+        }
+    }
+    if ui.button("Add mapping").clicked() {
+        dlg.rules.push((String::new(), String::new()));
+    }
+    ui.add_space(6.0);
+    ui.checkbox(&mut dlg.else_copy, "Copy remaining values");
+    ui.add_enabled(
+        !dlg.else_copy,
+        egui::TextEdit::singleline(&mut dlg.else_value)
+            .desired_width(120.0)
+            .hint_text("ELSE value or SYSMIS"),
+    );
+    if let Some(error) = &dlg.error {
+        ui.label(egui::RichText::new(error).color(ui.visuals().error_fg_color).size(11.5));
+    }
+    ui.add_space(8.0);
+    let syntax = dlg.build_syntax();
+    syntax_action_row(
+        ui,
+        syntax,
+        &mut dlg.confirmed,
+        &mut dlg.pasted,
+        &mut dlg.cancelled,
+        &mut dlg.error,
+        "Each mapping is (old=new). INTO writes new variables; without INTO the sources change.",
+    );
+}
+
+/// Count how many of the chosen variables hold a listed value.
+#[derive(Debug, Clone, Default)]
+pub struct CountValues {
+    pub dest: String,
+    pub sources: Vec<String>,
+    pub values: String,
+    pub error: Option<String>,
+    pub confirmed: Option<String>,
+    pub pasted: Option<String>,
+    pub cancelled: bool,
+}
+
+impl CountValues {
+    pub fn build_syntax(&self) -> Option<String> {
+        if !is_valid_var_name(self.dest.trim()) || self.sources.is_empty() {
+            return None;
+        }
+        let values = self.values.trim();
+        if values.is_empty() {
+            return None;
+        }
+        Some(format!(
+            "COUNT {} = {} ({})",
+            self.dest.trim(),
+            self.sources.join(" "),
+            values
+        ))
+    }
+
+    fn toggle(&mut self, name: &str) {
+        if let Some(i) = self.sources.iter().position(|s| s.eq_ignore_ascii_case(name)) {
+            self.sources.remove(i);
+        } else {
+            self.sources.push(name.to_string());
+        }
+    }
+}
+
+pub fn show_count(ctx: &egui::Context, app: &mut StatsCraftApp, dlg: &mut CountValues) {
+    let mut open = true;
+    egui::Window::new("Count Values within Cases - StatsCraft")
+        .open(&mut open)
+        .default_width(480.0)
+        .default_pos(egui::pos2(380.0, 160.0))
+        .show(ctx, |ui| render_count(ui, app, dlg));
+    if !open && dlg.confirmed.is_none() && dlg.pasted.is_none() {
+        dlg.cancelled = true;
+    }
+}
+
+pub fn render_count(ui: &mut egui::Ui, app: &mut StatsCraftApp, dlg: &mut CountValues) {
+    let names = var_names(app);
+    if names.is_empty() {
+        ui.label(egui::RichText::new("No variables in the data.").color(theme::text_muted()));
+        if ui.button("Close").clicked() {
+            dlg.cancelled = true;
+        }
+        return;
+    }
+    ui.label(egui::RichText::new("Target Variable:").strong());
+    ui.add(egui::TextEdit::singleline(&mut dlg.dest).desired_width(180.0).hint_text("hits"));
+    ui.add_space(6.0);
+    ui.label(egui::RichText::new("Numeric Variables:").strong());
+    ui.horizontal_wrapped(|ui| {
+        for name in &names {
+            let on = dlg.sources.iter().any(|s| s.eq_ignore_ascii_case(name));
+            if ui.selectable_label(on, name).clicked() {
+                dlg.toggle(name);
+            }
+        }
+    });
+    ui.add_space(6.0);
+    ui.label("Values:");
+    ui.add(
+        egui::TextEdit::singleline(&mut dlg.values)
+            .desired_width(f32::INFINITY)
+            .hint_text("1 2 3"),
+    );
+    if let Some(error) = &dlg.error {
+        ui.label(egui::RichText::new(error).color(ui.visuals().error_fg_color).size(11.5));
+    }
+    ui.add_space(8.0);
+    let syntax = dlg.build_syntax();
+    syntax_action_row(
+        ui,
+        syntax,
+        &mut dlg.confirmed,
+        &mut dlg.pasted,
+        &mut dlg.cancelled,
+        &mut dlg.error,
+        "The target counts how many of the chosen variables equal a listed value.",
+    );
+}
+
+/// Rank cases of one numeric variable.
+#[derive(Debug, Clone, Default)]
+pub struct RankCases {
+    pub source: String,
+    pub dest: String,
+    pub error: Option<String>,
+    pub confirmed: Option<String>,
+    pub pasted: Option<String>,
+    pub cancelled: bool,
+}
+
+impl RankCases {
+    pub fn build_syntax(&self) -> Option<String> {
+        if self.source.trim().is_empty() {
+            return None;
+        }
+        let dest = self.dest.trim();
+        if dest.is_empty() {
+            Some(format!("RANK {}", self.source.trim()))
+        } else if is_valid_var_name(dest) {
+            Some(format!("RANK {} INTO {}", self.source.trim(), dest))
+        } else {
+            None
+        }
+    }
+}
+
+pub fn show_rank(ctx: &egui::Context, app: &mut StatsCraftApp, dlg: &mut RankCases) {
+    let mut open = true;
+    egui::Window::new("Rank Cases - StatsCraft")
+        .open(&mut open)
+        .default_width(420.0)
+        .default_pos(egui::pos2(400.0, 180.0))
+        .show(ctx, |ui| render_rank(ui, app, dlg));
+    if !open && dlg.confirmed.is_none() && dlg.pasted.is_none() {
+        dlg.cancelled = true;
+    }
+}
+
+pub fn render_rank(ui: &mut egui::Ui, app: &mut StatsCraftApp, dlg: &mut RankCases) {
+    let names = var_names(app);
+    if names.is_empty() {
+        ui.label(egui::RichText::new("No variables in the data.").color(theme::text_muted()));
+        if ui.button("Close").clicked() {
+            dlg.cancelled = true;
+        }
+        return;
+    }
+    if dlg.source.is_empty() {
+        dlg.source = names[0].clone();
+    }
+    ui.label(egui::RichText::new("Variable:").strong());
+    egui::ComboBox::from_id_salt("rank_src")
+        .selected_text(&dlg.source)
+        .show_ui(ui, |ui| {
+            for name in &names {
+                if ui.selectable_label(dlg.source == *name, name).clicked() {
+                    dlg.source = name.clone();
+                }
+            }
+        });
+    ui.add_space(6.0);
+    ui.label("Rank into:");
+    ui.add(
+        egui::TextEdit::singleline(&mut dlg.dest)
+            .desired_width(180.0)
+            .hint_text(format!("{}_r", dlg.source)),
+    );
+    if let Some(error) = &dlg.error {
+        ui.label(egui::RichText::new(error).color(ui.visuals().error_fg_color).size(11.5));
+    }
+    ui.add_space(8.0);
+    let syntax = dlg.build_syntax();
+    syntax_action_row(
+        ui,
+        syntax,
+        &mut dlg.confirmed,
+        &mut dlg.pasted,
+        &mut dlg.cancelled,
+        &mut dlg.error,
+        "Tied values share the mean rank. Missing values stay missing.",
+    );
+}
+
+/// Automatic recode of unique values into 1..n.
+#[derive(Debug, Clone, Default)]
+pub struct AutoRecode {
+    pub source: String,
+    pub dest: String,
+    pub error: Option<String>,
+    pub confirmed: Option<String>,
+    pub pasted: Option<String>,
+    pub cancelled: bool,
+}
+
+impl AutoRecode {
+    pub fn build_syntax(&self) -> Option<String> {
+        if self.source.trim().is_empty() || !is_valid_var_name(self.dest.trim()) {
+            return None;
+        }
+        Some(format!(
+            "AUTORECODE {} INTO {}",
+            self.source.trim(),
+            self.dest.trim()
+        ))
+    }
+}
+
+pub fn show_autorecode(ctx: &egui::Context, app: &mut StatsCraftApp, dlg: &mut AutoRecode) {
+    let mut open = true;
+    egui::Window::new("Automatic Recode - StatsCraft")
+        .open(&mut open)
+        .default_width(420.0)
+        .default_pos(egui::pos2(400.0, 180.0))
+        .show(ctx, |ui| render_autorecode(ui, app, dlg));
+    if !open && dlg.confirmed.is_none() && dlg.pasted.is_none() {
+        dlg.cancelled = true;
+    }
+}
+
+pub fn render_autorecode(ui: &mut egui::Ui, app: &mut StatsCraftApp, dlg: &mut AutoRecode) {
+    let names = var_names(app);
+    if names.is_empty() {
+        ui.label(egui::RichText::new("No variables in the data.").color(theme::text_muted()));
+        if ui.button("Close").clicked() {
+            dlg.cancelled = true;
+        }
+        return;
+    }
+    if dlg.source.is_empty() {
+        dlg.source = names[0].clone();
+    }
+    ui.label(egui::RichText::new("Variable:").strong());
+    egui::ComboBox::from_id_salt("auto_src")
+        .selected_text(&dlg.source)
+        .show_ui(ui, |ui| {
+            for name in &names {
+                if ui.selectable_label(dlg.source == *name, name).clicked() {
+                    dlg.source = name.clone();
+                    if dlg.dest.is_empty() {
+                        dlg.dest = format!("{}N", name);
+                    }
+                }
+            }
+        });
+    ui.add_space(6.0);
+    ui.label("Into:");
+    ui.add(
+        egui::TextEdit::singleline(&mut dlg.dest)
+            .desired_width(180.0)
+            .hint_text("groupn"),
+    );
+    if let Some(error) = &dlg.error {
+        ui.label(egui::RichText::new(error).color(ui.visuals().error_fg_color).size(11.5));
+    }
+    ui.add_space(8.0);
+    let syntax = dlg.build_syntax();
+    syntax_action_row(
+        ui,
+        syntax,
+        &mut dlg.confirmed,
+        &mut dlg.pasted,
+        &mut dlg.cancelled,
+        &mut dlg.error,
+        "Unique values become 1, 2, 3… in sorted order. The original values are stored as labels.",
+    );
+}
+
+/// Select Cases: keep rows that match a condition.
+#[derive(Debug, Clone, Default)]
+pub struct SelectCases {
+    pub condition: String,
+    pub error: Option<String>,
+    pub confirmed: Option<String>,
+    pub pasted: Option<String>,
+    pub cancelled: bool,
+}
+
+impl SelectCases {
+    pub fn build_syntax(&self) -> Option<String> {
+        let cond = self.condition.trim();
+        if cond.is_empty() {
+            return None;
+        }
+        Some(format!("SELECT IF {}", cond))
+    }
+}
+
+pub fn show_select(ctx: &egui::Context, app: &mut StatsCraftApp, dlg: &mut SelectCases) {
+    let mut open = true;
+    egui::Window::new("Select Cases - StatsCraft")
+        .open(&mut open)
+        .default_width(460.0)
+        .default_pos(egui::pos2(400.0, 180.0))
+        .show(ctx, |ui| render_select(ui, app, dlg));
+    if !open && dlg.confirmed.is_none() && dlg.pasted.is_none() {
+        dlg.cancelled = true;
+    }
+}
+
+pub fn render_select(ui: &mut egui::Ui, app: &mut StatsCraftApp, dlg: &mut SelectCases) {
+    let names = var_names(app);
+    if names.is_empty() {
+        ui.label(egui::RichText::new("No variables in the data.").color(theme::text_muted()));
+        if ui.button("Close").clicked() {
+            dlg.cancelled = true;
+        }
+        return;
+    }
+    ui.label(
+        egui::RichText::new("Cases that fail the condition are removed. Undo restores them.")
+            .small()
+            .color(theme::text_muted()),
+    );
+    ui.add_space(6.0);
+    ui.label(egui::RichText::new("Condition:").strong());
+    ui.add(
+        egui::TextEdit::singleline(&mut dlg.condition)
+            .desired_width(f32::INFINITY)
+            .hint_text("age >= 18"),
+    );
+    ui.horizontal_wrapped(|ui| {
+        ui.label("Insert:");
+        for name in &names {
+            if ui.small_button(name).clicked() {
+                if dlg.condition.is_empty() {
+                    dlg.condition = name.clone();
+                } else {
+                    dlg.condition.push(' ');
+                    dlg.condition.push_str(name);
+                }
+            }
+        }
+    });
+    if let Some(error) = &dlg.error {
+        ui.label(egui::RichText::new(error).color(ui.visuals().error_fg_color).size(11.5));
+    }
+    ui.add_space(8.0);
+    let syntax = dlg.build_syntax();
+    syntax_action_row(
+        ui,
+        syntax,
+        &mut dlg.confirmed,
+        &mut dlg.pasted,
+        &mut dlg.cancelled,
+        &mut dlg.error,
+        "SELECT IF uses the same comparisons as Compute: =, <>, <, <=, >, >=.",
+    );
+}
+
+fn toggle_name(list: &mut Vec<String>, name: &str) {
+    if let Some(i) = list.iter().position(|s| s.eq_ignore_ascii_case(name)) {
+        list.remove(i);
+    } else {
+        list.push(name.to_string());
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct WeightCases {
+    pub variable: String,
+    pub error: Option<String>,
+    pub confirmed: Option<String>,
+    pub pasted: Option<String>,
+    pub cancelled: bool,
+}
+
+impl WeightCases {
+    pub fn build_syntax(&self) -> Option<String> {
+        if self.variable.trim().eq_ignore_ascii_case("OFF") || self.variable.trim().is_empty() {
+            Some("WEIGHT OFF".to_string())
+        } else {
+            Some(format!("WEIGHT BY {}", self.variable.trim()))
+        }
+    }
+}
+
+pub fn show_weight(ctx: &egui::Context, app: &mut StatsCraftApp, dlg: &mut WeightCases) {
+    let mut open = true;
+    egui::Window::new("Weight Cases - StatsCraft")
+        .open(&mut open)
+        .default_width(420.0)
+        .default_pos(egui::pos2(400.0, 180.0))
+        .show(ctx, |ui| render_weight(ui, app, dlg));
+    if !open && dlg.confirmed.is_none() && dlg.pasted.is_none() {
+        dlg.cancelled = true;
+    }
+}
+
+pub fn render_weight(ui: &mut egui::Ui, app: &mut StatsCraftApp, dlg: &mut WeightCases) {
+    let names = var_names(app);
+    ui.label(egui::RichText::new("Frequency weight:").strong());
+    egui::ComboBox::from_id_salt("weight_var")
+        .selected_text(if dlg.variable.is_empty() {
+            "(none)".to_string()
+        } else {
+            dlg.variable.clone()
+        })
+        .show_ui(ui, |ui| {
+            if ui.selectable_label(dlg.variable.is_empty(), "(none / WEIGHT OFF)").clicked() {
+                dlg.variable.clear();
+            }
+            for name in &names {
+                if ui.selectable_label(dlg.variable == *name, name).clicked() {
+                    dlg.variable = name.clone();
+                }
+            }
+        });
+    ui.add_space(8.0);
+    let syntax = dlg.build_syntax();
+    syntax_action_row(
+        ui,
+        syntax,
+        &mut dlg.confirmed,
+        &mut dlg.pasted,
+        &mut dlg.cancelled,
+        &mut dlg.error,
+        "A positive weight is rounded to a whole number of copies of the case.",
+    );
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SplitFile {
+    pub variables: Vec<String>,
+    pub off: bool,
+    pub error: Option<String>,
+    pub confirmed: Option<String>,
+    pub pasted: Option<String>,
+    pub cancelled: bool,
+}
+
+impl SplitFile {
+    pub fn build_syntax(&self) -> Option<String> {
+        if self.off || self.variables.is_empty() {
+            Some("SPLIT FILE OFF".to_string())
+        } else {
+            Some(format!("SPLIT FILE BY {}", self.variables.join(" ")))
+        }
+    }
+}
+
+pub fn show_split(ctx: &egui::Context, app: &mut StatsCraftApp, dlg: &mut SplitFile) {
+    let mut open = true;
+    egui::Window::new("Split File - StatsCraft")
+        .open(&mut open)
+        .default_width(460.0)
+        .default_pos(egui::pos2(380.0, 170.0))
+        .show(ctx, |ui| render_split(ui, app, dlg));
+    if !open && dlg.confirmed.is_none() && dlg.pasted.is_none() {
+        dlg.cancelled = true;
+    }
+}
+
+pub fn render_split(ui: &mut egui::Ui, app: &mut StatsCraftApp, dlg: &mut SplitFile) {
+    let names = var_names(app);
+    ui.checkbox(&mut dlg.off, "Analyze all cases, no split");
+    ui.add_enabled_ui(!dlg.off, |ui| {
+        ui.label(egui::RichText::new("Groups based on:").strong());
+        ui.horizontal_wrapped(|ui| {
+            for name in &names {
+                let on = dlg.variables.iter().any(|s| s.eq_ignore_ascii_case(name));
+                if ui.selectable_label(on, name).clicked() {
+                    toggle_name(&mut dlg.variables, name);
+                }
+            }
+        });
+    });
+    ui.add_space(8.0);
+    let syntax = dlg.build_syntax();
+    syntax_action_row(
+        ui,
+        syntax,
+        &mut dlg.confirmed,
+        &mut dlg.pasted,
+        &mut dlg.cancelled,
+        &mut dlg.error,
+        "Each analysis runs once per combination of the split variables.",
+    );
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Aggregate {
+    pub breaks: Vec<String>,
+    pub source: String,
+    pub mean: bool,
+    pub sum: bool,
+    pub n: bool,
+    pub sd: bool,
+    pub min: bool,
+    pub max: bool,
+    pub error: Option<String>,
+    pub confirmed: Option<String>,
+    pub pasted: Option<String>,
+    pub cancelled: bool,
+}
+
+impl Aggregate {
+    pub fn build_syntax(&self) -> Option<String> {
+        let mut parts = vec!["AGGREGATE".to_string()];
+        if !self.breaks.is_empty() {
+            parts.push(format!("BREAK {}", self.breaks.join(" ")));
+        }
+        let src = self.source.trim();
+        if self.mean {
+            if src.is_empty() {
+                return None;
+            }
+            parts.push(format!("/MEAN({})", src));
+        }
+        if self.sum && !src.is_empty() {
+            parts.push(format!("/SUM({})", src));
+        }
+        if self.min && !src.is_empty() {
+            parts.push(format!("/MIN({})", src));
+        }
+        if self.max && !src.is_empty() {
+            parts.push(format!("/MAX({})", src));
+        }
+        if self.sd && !src.is_empty() {
+            parts.push(format!("/SD({})", src));
+        }
+        if self.n || parts.len() == 1 {
+            parts.push("/N".to_string());
+        }
+        Some(parts.join(" "))
+    }
+}
+
+pub fn show_aggregate(ctx: &egui::Context, app: &mut StatsCraftApp, dlg: &mut Aggregate) {
+    let mut open = true;
+    egui::Window::new("Aggregate - StatsCraft")
+        .open(&mut open)
+        .default_width(480.0)
+        .default_pos(egui::pos2(380.0, 160.0))
+        .show(ctx, |ui| render_aggregate(ui, app, dlg));
+    if !open && dlg.confirmed.is_none() && dlg.pasted.is_none() {
+        dlg.cancelled = true;
+    }
+}
+
+pub fn render_aggregate(ui: &mut egui::Ui, app: &mut StatsCraftApp, dlg: &mut Aggregate) {
+    let names = var_names(app);
+    if names.is_empty() {
+        ui.label(egui::RichText::new("No variables in the data.").color(theme::text_muted()));
+        if ui.button("Close").clicked() {
+            dlg.cancelled = true;
+        }
+        return;
+    }
+    ui.label(egui::RichText::new("Break variables:").strong());
+    ui.horizontal_wrapped(|ui| {
+        for name in &names {
+            let on = dlg.breaks.iter().any(|s| s.eq_ignore_ascii_case(name));
+            if ui.selectable_label(on, name).clicked() {
+                toggle_name(&mut dlg.breaks, name);
+            }
+        }
+    });
+    ui.add_space(6.0);
+    ui.label(egui::RichText::new("Summarise:").strong());
+    egui::ComboBox::from_id_salt("agg_src")
+        .selected_text(if dlg.source.is_empty() {
+            "(variable)".to_string()
+        } else {
+            dlg.source.clone()
+        })
+        .show_ui(ui, |ui| {
+            for name in &names {
+                if ui.selectable_label(dlg.source == *name, name).clicked() {
+                    dlg.source = name.clone();
+                }
+            }
+        });
+    ui.horizontal_wrapped(|ui| {
+        ui.checkbox(&mut dlg.n, "N");
+        ui.checkbox(&mut dlg.mean, "Mean");
+        ui.checkbox(&mut dlg.sum, "Sum");
+        ui.checkbox(&mut dlg.min, "Min");
+        ui.checkbox(&mut dlg.max, "Max");
+        ui.checkbox(&mut dlg.sd, "SD");
+    });
+    ui.add_space(8.0);
+    let syntax = dlg.build_syntax();
+    syntax_action_row(
+        ui,
+        syntax,
+        &mut dlg.confirmed,
+        &mut dlg.pasted,
+        &mut dlg.cancelled,
+        &mut dlg.error,
+        "The dataset is replaced by one row per break group. Undo restores the cases.",
+    );
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct FileJoin {
+    pub match_files: bool,
+    pub path: String,
+    pub by: String,
+    pub error: Option<String>,
+    pub confirmed: Option<String>,
+    pub pasted: Option<String>,
+    pub cancelled: bool,
+}
+
+impl FileJoin {
+    pub fn add() -> Self {
+        Self::default()
+    }
+    pub fn match_join() -> Self {
+        Self {
+            match_files: true,
+            ..Self::default()
+        }
+    }
+    pub fn build_syntax(&self) -> Option<String> {
+        let path = self.path.trim();
+        if path.is_empty() {
+            return None;
+        }
+        if self.match_files {
+            let by = self.by.trim();
+            if by.is_empty() {
+                return None;
+            }
+            Some(format!("MATCH FILES \"{}\" BY {}", path.replace('"', ""), by))
+        } else {
+            Some(format!("ADD FILES \"{}\"", path.replace('"', "")))
+        }
+    }
+}
+
+pub fn show_file_join(ctx: &egui::Context, app: &mut StatsCraftApp, dlg: &mut FileJoin) {
+    let mut open = true;
+    let title = if dlg.match_files {
+        "Match Files - StatsCraft"
+    } else {
+        "Add Files - StatsCraft"
+    };
+    egui::Window::new(title)
+        .open(&mut open)
+        .default_width(500.0)
+        .default_pos(egui::pos2(360.0, 170.0))
+        .show(ctx, |ui| render_file_join(ui, app, dlg));
+    if !open && dlg.confirmed.is_none() && dlg.pasted.is_none() {
+        dlg.cancelled = true;
+    }
+}
+
+pub fn render_file_join(ui: &mut egui::Ui, app: &mut StatsCraftApp, dlg: &mut FileJoin) {
+    ui.label(egui::RichText::new("Other file:").strong());
+    ui.horizontal(|ui| {
+        ui.add(egui::TextEdit::singleline(&mut dlg.path).desired_width(320.0));
+        if ui.button("Browse…").clicked() {
+            if let Some(p) = rfd::FileDialog::new()
+                .add_filter("Data", &["csv", "sav"])
+                .pick_file()
+            {
+                dlg.path = p.display().to_string();
+            }
+        }
+    });
+    if dlg.match_files {
+        ui.add_space(6.0);
+        ui.label(egui::RichText::new("Key variable:").strong());
+        let names = var_names(app);
+        egui::ComboBox::from_id_salt("match_by")
+            .selected_text(if dlg.by.is_empty() {
+                "(key)".to_string()
+            } else {
+                dlg.by.clone()
+            })
+            .show_ui(ui, |ui| {
+                for name in &names {
+                    if ui.selectable_label(dlg.by == *name, name).clicked() {
+                        dlg.by = name.clone();
+                    }
+                }
+            });
+    }
+    ui.add_space(8.0);
+    let syntax = dlg.build_syntax();
+    syntax_action_row(
+        ui,
+        syntax,
+        &mut dlg.confirmed,
+        &mut dlg.pasted,
+        &mut dlg.cancelled,
+        &mut dlg.error,
+        if dlg.match_files {
+            "Rows of the other file are matched by the key. New columns are added."
+        } else {
+            "Cases of the other file are appended. New columns are added."
+        },
+    );
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Restructure {
+    pub to_long: bool,
+    pub make: String,
+    pub from: Vec<String>,
+    pub index: String,
+    pub id: String,
+    pub error: Option<String>,
+    pub confirmed: Option<String>,
+    pub pasted: Option<String>,
+    pub cancelled: bool,
+}
+
+impl Restructure {
+    pub fn vars_to_cases() -> Self {
+        Self {
+            to_long: true,
+            ..Self::default()
+        }
+    }
+    pub fn cases_to_vars() -> Self {
+        Self::default()
+    }
+    pub fn build_syntax(&self) -> Option<String> {
+        if self.to_long {
+            if self.make.trim().is_empty() || self.from.is_empty() {
+                return None;
+            }
+            let mut s = format!(
+                "VARSTOCASES MAKE {} FROM {}",
+                self.make.trim(),
+                self.from.join(" ")
+            );
+            if !self.index.trim().is_empty() {
+                s.push_str(&format!(" /INDEX={}", self.index.trim()));
+            }
+            Some(s)
+        } else if !self.id.trim().is_empty() && !self.index.trim().is_empty() {
+            Some(format!(
+                "CASESTOVARS ID={} /INDEX={}",
+                self.id.trim(),
+                self.index.trim()
+            ))
+        } else {
+            None
+        }
+    }
+}
+
+pub fn show_restructure(ctx: &egui::Context, app: &mut StatsCraftApp, dlg: &mut Restructure) {
+    let mut open = true;
+    let title = if dlg.to_long {
+        "Restructure (Variables to Cases) - StatsCraft"
+    } else {
+        "Restructure (Cases to Variables) - StatsCraft"
+    };
+    egui::Window::new(title)
+        .open(&mut open)
+        .default_width(520.0)
+        .default_pos(egui::pos2(350.0, 150.0))
+        .show(ctx, |ui| render_restructure(ui, app, dlg));
+    if !open && dlg.confirmed.is_none() && dlg.pasted.is_none() {
+        dlg.cancelled = true;
+    }
+}
+
+pub fn render_restructure(ui: &mut egui::Ui, app: &mut StatsCraftApp, dlg: &mut Restructure) {
+    let names = var_names(app);
+    if names.is_empty() {
+        ui.label(egui::RichText::new("No variables in the data.").color(theme::text_muted()));
+        if ui.button("Close").clicked() {
+            dlg.cancelled = true;
+        }
+        return;
+    }
+    if dlg.to_long {
+        ui.label(egui::RichText::new("New stacked variable:").strong());
+        ui.add(egui::TextEdit::singleline(&mut dlg.make).desired_width(180.0).hint_text("score"));
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new("From:").strong());
+        ui.horizontal_wrapped(|ui| {
+            for name in &names {
+                let on = dlg.from.iter().any(|s| s.eq_ignore_ascii_case(name));
+                if ui.selectable_label(on, name).clicked() {
+                    toggle_name(&mut dlg.from, name);
+                }
+            }
+        });
+        ui.add_space(4.0);
+        ui.label("Index name (optional):");
+        ui.add(egui::TextEdit::singleline(&mut dlg.index).desired_width(180.0).hint_text("wave"));
+    } else {
+        ui.label(egui::RichText::new("ID variable:").strong());
+        egui::ComboBox::from_id_salt("re_id")
+            .selected_text(if dlg.id.is_empty() { "(id)".into() } else { dlg.id.clone() })
+            .show_ui(ui, |ui| {
+                for name in &names {
+                    if ui.selectable_label(dlg.id == *name, name).clicked() {
+                        dlg.id = name.clone();
+                    }
+                }
+            });
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new("Index variable:").strong());
+        egui::ComboBox::from_id_salt("re_idx")
+            .selected_text(if dlg.index.is_empty() {
+                "(index)".into()
+            } else {
+                dlg.index.clone()
+            })
+            .show_ui(ui, |ui| {
+                for name in &names {
+                    if ui.selectable_label(dlg.index == *name, name).clicked() {
+                        dlg.index = name.clone();
+                    }
+                }
+            });
+    }
+    ui.add_space(8.0);
+    let syntax = dlg.build_syntax();
+    syntax_action_row(
+        ui,
+        syntax,
+        &mut dlg.confirmed,
+        &mut dlg.pasted,
+        &mut dlg.cancelled,
+        &mut dlg.error,
+        "The dataset is replaced. Undo restores the previous shape.",
+    );
+}
