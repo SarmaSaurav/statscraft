@@ -9,12 +9,14 @@ mod data;
 mod dialog;
 mod glm;
 mod icon;
+mod outdoc;
 mod output;
 mod pivot;
 mod settings;
 mod stats;
 mod syntax;
 mod theme;
+mod undo;
 
 use dialog::Procedure;
 

@@ -201,6 +201,29 @@ pub fn small_icon_button(
 
 /// A menu entry with a leading icon, used across the menu bar.
 pub fn menu_item(ui: &mut egui::Ui, icon: Icon, label: &str) -> egui::Response {
+    menu_item_enabled(ui, icon, label, true)
+}
+
+/// A menu entry that cannot be chosen.
+///
+/// A command that is not implemented yet is shown greyed out and says so
+/// when the reader hovers over it, rather than pretending to work and
+/// reporting a failure when it is used.
+pub fn menu_item_disabled(ui: &mut egui::Ui, icon: Icon, label: &str, planned: &str) -> egui::Response {
+    let resp = menu_item_enabled(ui, icon, label, false);
+    resp.on_hover_text(format!(
+        "{} is planned for a later release ({}).",
+        label, planned
+    ))
+}
+
+/// A menu entry with a leading icon, enabled or not.
+pub fn menu_item_enabled(
+    ui: &mut egui::Ui,
+    icon: Icon,
+    label: &str,
+    enabled: bool,
+) -> egui::Response {
     let ctx = ui.ctx().clone();
     let (rect, resp) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), 24.0),
@@ -208,7 +231,7 @@ pub fn menu_item(ui: &mut egui::Ui, icon: Icon, label: &str) -> egui::Response {
     );
 
     let p = ui.painter();
-    if resp.hovered() {
+    if resp.hovered() && enabled {
         p.rect_filled(rect, theme::RADIUS_SM, theme::accent_soft());
     }
 
@@ -218,7 +241,9 @@ pub fn menu_item(ui: &mut egui::Ui, icon: Icon, label: &str) -> egui::Response {
     );
     // The line glyph is tinted from the theme so it stays legible on
     // both the light and the dark palette.
-    let text_color = if resp.hovered() {
+    let text_color = if !enabled {
+        theme::text_faint()
+    } else if resp.hovered() {
         theme::accent()
     } else {
         theme::text()
@@ -234,5 +259,10 @@ pub fn menu_item(ui: &mut egui::Ui, icon: Icon, label: &str) -> egui::Response {
         text_color,
     );
 
-    resp
+    if enabled {
+        resp
+    } else {
+        // Swallow the click so a disabled entry does nothing.
+        resp.interact(egui::Sense::hover())
+    }
 }

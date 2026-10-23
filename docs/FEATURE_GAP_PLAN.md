@@ -228,7 +228,7 @@ The largest remaining problems are not missing algorithms. They are:
 
 ## Recommended sequence
 
-### 0.3 — Trustworthy editing
+### 0.3 — Trustworthy editing — **Done (0.3.0)**
 
 1. Undo/redo for table mutations, with tests for cell edit, paste, case
    deletion, and variable deletion.
@@ -240,6 +240,17 @@ The largest remaining problems are not missing algorithms. They are:
 
 This release should not add a single new statistical procedure. Its job is to
 make the existing surface honest.
+
+**What shipped.** The undo history covers cell edits, pastes, cuts, case
+additions and deletions, and variable additions and deletions; `Ctrl+Z` and
+`Ctrl+Y` drive it, and the toolbar buttons show when there is nothing to
+undo. `View > Value Labels` shows the dictionary's labels in Data View
+without changing the stored codes. `Data > Delete Cases` confirms first. The
+Transform menu, `Data > Select Cases`, `Curve Estimation` and `Reports` are
+greyed out and say which release will bring them. The Syntax Editor runs a
+selection or the command under the cursor and lists the commands of the
+buffer. The Output Viewer opens with a **Log** object, and the output can be
+saved to a `.scdoc` document and opened again.
 
 ### 0.4 — Preparation and output
 

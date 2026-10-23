@@ -2,8 +2,10 @@
 
 Lightweight statistical workbench written in Rust (native desktop app).
 
-**Version 0.2.0** adds editable value labels, confirmed variable deletion,
-and a Save / Don't Save / Cancel prompt when closing with unsaved work.
+**Version 0.3.0** makes the editor trustworthy: undo and redo for every
+table change, value labels shown in Data View, a confirmation before a case
+is deleted, honest menus, scoped syntax execution with a command outline, a
+Log object in the Output Viewer, and a saved output document.
 
 ![StatsCraft product showcase](docs/showcase/showcase.png)
 

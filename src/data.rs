@@ -109,7 +109,7 @@ impl VariableMeta {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Column {
     pub name: String,
     pub kind: ColumnKind,
@@ -186,6 +186,38 @@ impl Column {
             .iter()
             .find(|(val, _)| (val - v).abs() < f64::EPSILON)
             .map(|(_, l)| l.as_str())
+    }
+
+    /// Value label for a text value, if any.
+    pub fn text_value_label_for(&self, v: &str) -> Option<&str> {
+        self.meta
+            .text_value_labels
+            .iter()
+            .find(|(val, _)| val == v)
+            .map(|(_, l)| l.as_str())
+    }
+
+    /// The numeric value behind a value label, if the label is one of
+    /// this variable's labels.
+    ///
+    /// The Data Editor uses this so that editing a cell that shows a
+    /// label writes the code back, not the label text.
+    pub fn value_for_label(&self, label: &str) -> Option<f64> {
+        self.meta
+            .value_labels
+            .iter()
+            .find(|(_, l)| l == label)
+            .map(|(v, _)| *v)
+    }
+
+    /// The text value behind a value label, if the label is one of this
+    /// variable's labels.
+    pub fn text_value_for_label(&self, label: &str) -> Option<String> {
+        self.meta
+            .text_value_labels
+            .iter()
+            .find(|(_, l)| l == label)
+            .map(|(v, _)| v.clone())
     }
 }
 
@@ -710,6 +742,71 @@ impl DataTable {
             },
             None => String::new(),
         }
+    }
+
+    /// The text a cell shows in Data View.
+    ///
+    /// With the value labels turned on, a cell shows the label of its
+    /// value rather than the value itself. The stored value does not
+    /// change: the labels are a presentation of the dictionary, not a
+    /// second copy of the data.
+    pub fn cell_display_text(&self, col: usize, row: usize, show_labels: bool) -> String {
+        let Some(c) = self.columns.get(col) else {
+            return String::new();
+        };
+        if show_labels {
+            let label = match c.values.get(row) {
+                Some(Value::Number(n)) => c.value_label_for(*n).map(|s| s.to_string()),
+                Some(Value::Text(s)) => c.text_value_label_for(s).map(|s| s.to_string()),
+                _ => None,
+            };
+            if let Some(label) = label {
+                return label;
+            }
+        }
+        self.cell_text(col, row)
+    }
+
+    /// Write a value into a cell from what the reader typed.
+    ///
+    /// The reader may type the stored value or the label that is shown
+    /// for it, because the grid shows the label when the value labels
+    /// are on. Either way the cell keeps holding a value, never a
+    /// label: the dictionary stays the single source of truth.
+    pub fn set_cell_display(&mut self, col: usize, row: usize, text: &str) -> bool {
+        let Some(c) = self.columns.get_mut(col) else {
+            return false;
+        };
+        if row >= c.values.len() {
+            return false;
+        }
+        let t = text.trim();
+        let value = match c.kind {
+            ColumnKind::Numeric => {
+                if t.is_empty() {
+                    Value::Missing
+                } else if let Ok(n) = t.parse::<f64>() {
+                    Value::Number(n)
+                } else if let Some(v) = c.value_for_label(t) {
+                    // The reader typed the label that is shown for a
+                    // value: the value itself is stored.
+                    Value::Number(v)
+                } else {
+                    return false;
+                }
+            }
+            ColumnKind::String => {
+                if t.is_empty() {
+                    Value::Missing
+                } else if let Some(v) = c.text_value_for_label(t) {
+                    Value::Text(v)
+                } else {
+                    Value::Text(text.to_string())
+                }
+            }
+        };
+        c.values[row] = value;
+        true
     }
 
     /// StatsBench "Sort Cases": stable reorder of all rows by one column.

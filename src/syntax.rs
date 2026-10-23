@@ -6,14 +6,214 @@ use crate::stats;
 /// syntax window) produces StatsBench syntax text that is executed here.
 /// Commands mirror StatsBench keywords: LOAD, DESCRIPTIVES, FREQUENCIES,
 /// CORRELATIONS, REGRESSION, T-TEST, SORT CASES, CLEAR.
+///
+/// The buffer is split into commands first, so a command written over
+/// several lines is run as one command rather than as a row of unknown
+/// words. The commands that were run are recorded in the app's Log, so
+/// the Output Viewer can show what produced the results, as the
+/// reference workbench does.
 pub fn run(app: &mut StatsCraftApp, script: &str) {
-    for raw in script.lines() {
-        let line = raw.trim();
+    let commands: Vec<String> = split_commands(script)
+        .into_iter()
+        .map(|c| c.text)
+        // A comment is a command in the reference workbench, and it is
+        // not run.
+        .filter(|t| !t.starts_with('*'))
+        .collect();
+    run_commands(app, &commands);
+}
+
+/// Run a list of commands, recording them in the Log.
+pub fn run_commands(app: &mut StatsCraftApp, commands: &[String]) {
+    let mut executed: Vec<String> = Vec::new();
+    for command in commands {
+        let line = command.trim();
         if line.is_empty() || line.starts_with('*') {
-            continue; // blank lines and StatsBench comment commands
+            continue;
         }
         execute_line(app, line);
+        executed.push(line.to_string());
     }
+    // The Log of the output document holds the commands of this run.
+    app.log = executed;
+}
+
+/// The commands held in a selection of a syntax buffer.
+///
+/// The selection is given as two character positions, the way the
+/// editor counts them, and the commands of the selected text are
+/// returned. A comment is left out, because it is not run.
+pub fn commands_in(text: &str, from: usize, to: usize) -> Vec<String> {
+    let slice: String = text
+        .chars()
+        .skip(from)
+        .take(to.saturating_sub(from))
+        .collect();
+    split_commands(&slice)
+        .into_iter()
+        .map(|c| c.text)
+        .filter(|t| !t.starts_with('*'))
+        .collect()
+}
+
+/// Run one command of a syntax buffer.
+///
+/// This is what Run Current Command uses: the command is run on its own,
+/// and the Log records it and nothing else.
+pub fn run_command(app: &mut StatsCraftApp, command: &str) {
+    let line = command.trim();
+    if line.is_empty() || line.starts_with('*') {
+        app.log.clear();
+        return;
+    }
+    execute_line(app, line);
+    app.log = vec![line.to_string()];
+}
+
+/// One command of a syntax buffer, with the lines it covers.
+///
+/// A command is a run of lines that ends at a blank line, a comment, or
+/// a line that starts a new command. The reference workbench ends a
+/// command with a period; this one ends it when the next line begins
+/// with a word, so a command written over several lines stays one
+/// command.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommandBlock {
+    /// The command text, with the lines joined by a space.
+    pub text: String,
+    /// The first line of the command, counted from zero.
+    pub first_line: usize,
+    /// The last line of the command, counted from zero.
+    pub last_line: usize,
+}
+
+/// Split a syntax buffer into its commands.
+///
+/// The rules follow the reference workbench: a line beginning with an
+/// asterisk is a comment, a blank line ends the command before it, and
+/// a line that starts with a command word starts a new command. A line
+/// that continues the previous one - a subcommand of the command above
+/// it, for instance - stays with it.
+pub fn split_commands(script: &str) -> Vec<CommandBlock> {
+    let mut out: Vec<CommandBlock> = Vec::new();
+    let mut current: Vec<String> = Vec::new();
+    let mut first_line = 0usize;
+    for (i, raw) in script.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() {
+            // A blank line closes the command above it.
+            if !current.is_empty() {
+                out.push(CommandBlock {
+                    text: current.join(" "),
+                    first_line,
+                    last_line: i.saturating_sub(1),
+                });
+                current.clear();
+            }
+            continue;
+        }
+        if line.starts_with('*') {
+            // A comment is its own command, and it is not run.
+            if !current.is_empty() {
+                out.push(CommandBlock {
+                    text: current.join(" "),
+                    first_line,
+                    last_line: i.saturating_sub(1),
+                });
+                current.clear();
+            }
+            out.push(CommandBlock {
+                text: line.to_string(),
+                first_line: i,
+                last_line: i,
+            });
+            continue;
+        }
+        if starts_new_command(line) && !current.is_empty() {
+            out.push(CommandBlock {
+                text: current.join(" "),
+                first_line,
+                last_line: i - 1,
+            });
+            current.clear();
+        }
+        if current.is_empty() {
+            first_line = i;
+        }
+        current.push(line.to_string());
+    }
+    if !current.is_empty() {
+        let last = script.lines().count().saturating_sub(1);
+        out.push(CommandBlock {
+            text: current.join(" "),
+            first_line,
+            last_line: last,
+        });
+    }
+    out
+}
+
+/// The command words the runner knows.
+///
+/// A line that begins with one of these starts a new command; anything
+/// else continues the command above it.
+const COMMAND_WORDS: &[&str] = &[
+    "LOAD",
+    "GET",
+    "SAVE",
+    "CLEAR",
+    "DESCRIPTIVES",
+    "DESCRIPTIVE",
+    "FREQUENCIES",
+    "FREQ",
+    "CORRELATIONS",
+    "CORR",
+    "REGRESSION",
+    "CROSSTABS",
+    "CROSSTAB",
+    "GLM",
+    "ONEWAY",
+    "ANOVA",
+    "T-TEST",
+    "TTEST",
+    "MEANS",
+    "EXPLORE",
+    "NONPARAMETRIC",
+    "NPAR",
+    "MANN-WHITNEY",
+    "MW",
+    "WILCOXON",
+    "KRUSKAL-WALLIS",
+    "K-W",
+    "FRIEDMAN",
+    "RELIABILITY",
+    "ALPHA",
+    "FACTOR",
+    "FACTORS",
+    "ROC",
+    "ROC-CURVE",
+    "COMPUTE",
+    "SORT",
+    "DATASET",
+    "DATASETNAME",
+];
+
+/// True when the line begins a new command rather than continuing the
+/// one above it.
+fn starts_new_command(line: &str) -> bool {
+    let word = line.split_whitespace().next().unwrap_or("").to_uppercase();
+    // A subcommand belongs to the command above it.
+    if word.starts_with('/') {
+        return false;
+    }
+    COMMAND_WORDS.contains(&word.as_str())
+}
+
+/// The command that covers the given line, if any.
+pub fn command_at_line(script: &str, line: usize) -> Option<CommandBlock> {
+    split_commands(script)
+        .into_iter()
+        .find(|c| line >= c.first_line && line <= c.last_line)
 }
 
 
@@ -963,12 +1163,16 @@ fn execute_line(app: &mut StatsCraftApp, line: &str) {
             let name = cmd.args[0].clone();
             // The expression: the words after the '='.
             let expression = cmd.args[eq + 1..].join(" ");
+            // The variable and its values are a change to the dataset, so
+            // the dataset is remembered as it was before the command.
+            let before = app.table.clone();
             let Some(t) = &mut app.table else {
                 app.status = "COMPUTE: no data loaded.".to_string();
                 return;
             };
             match stats::compute_variable(t, &name, &expression) {
                 Ok(n) => {
+                    app.record_table_change(before);
                     app.dirty = true;
                     app.status = format!("COMPUTE created the variable {}.", n);
                 }
@@ -997,10 +1201,14 @@ fn execute_line(app: &mut StatsCraftApp, line: &str) {
                 .iter()
                 .skip(bi + 2)
                 .any(|t| t.eq_ignore_ascii_case("(D)") || t.eq_ignore_ascii_case("D"));
+            // The rows move, so the order before the sort is remembered
+            // and the sort can be taken back.
+            let before = app.table.clone();
             if let Some(t) = &mut app.table {
                 match t.column_index(&name) {
                     Some(ci) => {
                         t.sort_rows(ci, asc);
+                        app.record_table_change(before);
                         app.dirty = true;
                         app.status = format!(
                             "SORT CASES BY {} ({}) executed.",
@@ -1444,6 +1652,156 @@ NONPARAMETRIC /FRIEDMAN= score age response_time
             Value::Number(v) => assert!((v - 12.0).abs() < 1e-9, "m was {}", v),
             _ => panic!("m is not numeric"),
         }
+    }
+
+    #[test]
+    fn the_buffer_is_split_into_commands() {
+        let script = "DESCRIPTIVES score\nFREQUENCIES group\nREGRESSION score WITH age\n";
+        let commands = split_commands(script);
+        assert_eq!(commands.len(), 3);
+        assert_eq!(commands[0].text, "DESCRIPTIVES score");
+        assert_eq!(commands[0].first_line, 0);
+        assert_eq!(commands[0].last_line, 0);
+        assert_eq!(commands[1].text, "FREQUENCIES group");
+        assert_eq!(commands[2].text, "REGRESSION score WITH age");
+    }
+
+    #[test]
+    fn a_subcommand_line_stays_with_the_command_above_it() {
+        // A line that begins with a slash is a subcommand of the command
+        // above it, so the two lines are one command.
+        let script = "REGRESSION score WITH age\n/PRINT=SIG\nFREQUENCIES group\n";
+        let commands = split_commands(script);
+        assert_eq!(commands.len(), 2);
+        assert_eq!(
+            commands[0].text,
+            "REGRESSION score WITH age /PRINT=SIG",
+            "the subcommand joined the command"
+        );
+        assert_eq!(commands[0].first_line, 0);
+        assert_eq!(commands[0].last_line, 1);
+        assert_eq!(commands[1].text, "FREQUENCIES group");
+    }
+
+    #[test]
+    fn a_comment_is_a_command_of_its_own() {
+        let script = "* a note\nDESCRIPTIVES score\n";
+        let commands = split_commands(script);
+        assert_eq!(commands.len(), 2);
+        assert_eq!(commands[0].text, "* a note");
+        assert_eq!(commands[1].text, "DESCRIPTIVES score");
+    }
+
+    #[test]
+    fn the_command_at_the_cursor_is_found() {
+        let script = "DESCRIPTIVES score\nFREQUENCIES group\nREGRESSION score WITH age\n";
+        let c = command_at_line(script, 1).expect("a command on the second line");
+        assert_eq!(c.text, "FREQUENCIES group");
+        // A line past the end of the buffer has no command.
+        assert!(command_at_line(script, 9).is_none());
+    }
+
+    #[test]
+    fn a_sort_can_be_taken_back() {
+        let path = std::env::temp_dir().join("sc_sort_undo.csv");
+        write_demo_csv(&path);
+        let mut app = StatsCraftApp::default();
+        app.path_input = path.display().to_string();
+        app.load();
+        let before = app.table.as_ref().unwrap().columns[3].values.clone();
+        run_command(&mut app, "SORT CASES BY age (D)");
+        let after = app.table.as_ref().unwrap().columns[3].values.clone();
+        assert_ne!(before, after, "the sort changed the order");
+        // Undo puts the rows back where they were.
+        app.undo();
+        assert_eq!(app.table.as_ref().unwrap().columns[3].values, before);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_computed_variable_can_be_taken_back() {
+        let path = std::env::temp_dir().join("sc_compute_undo.csv");
+        write_demo_csv(&path);
+        let mut app = StatsCraftApp::default();
+        app.path_input = path.display().to_string();
+        app.load();
+        let cols = app.table.as_ref().unwrap().columns.len();
+        run_command(&mut app, "COMPUTE twice = score * 2");
+        assert_eq!(app.table.as_ref().unwrap().columns.len(), cols + 1);
+        // Undo takes the new variable away again.
+        app.undo();
+        assert_eq!(app.table.as_ref().unwrap().columns.len(), cols);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn the_commands_of_a_selection_are_the_ones_it_holds() {
+        let text = "* a comment\nFREQUENCIES region\nDESCRIPTIVES score\nCROSSTABS a BY b\n";
+        // A selection of the second and third lines.
+        let from = text.find("FREQUENCIES").unwrap();
+        let to = text.find("CROSSTABS").unwrap();
+        let commands = commands_in(text, from, to);
+        assert_eq!(
+            commands,
+            vec![
+                "FREQUENCIES region".to_string(),
+                "DESCRIPTIVES score".to_string()
+            ]
+        );
+        // A selection of a comment alone holds no command to run.
+        assert!(commands_in(text, 0, text.find("FREQUENCIES").unwrap()).is_empty());
+    }
+
+    #[test]
+    fn the_log_records_the_commands_that_were_run() {
+        let path = std::env::temp_dir().join("sc_log_test.csv");
+        write_demo_csv(&path);
+        let mut app = StatsCraftApp::default();
+        run(
+            &mut app,
+            &format!(
+                "LOAD \"{}\"\nDESCRIPTIVES score\nFREQUENCIES group\n",
+                path.display()
+            ),
+        );
+        // The Log holds the commands of the run, and nothing else.
+        assert_eq!(app.log.len(), 3, "the log was {:?}", app.log);
+        assert!(app.log[1].starts_with("DESCRIPTIVES"));
+        assert!(app.log[2].starts_with("FREQUENCIES"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn running_one_command_records_only_that_command() {
+        let path = std::env::temp_dir().join("sc_log_one.csv");
+        write_demo_csv(&path);
+        let mut app = StatsCraftApp::default();
+        app.path_input = path.display().to_string();
+        app.load();
+        run_command(&mut app, "DESCRIPTIVES score");
+        assert_eq!(app.log, vec!["DESCRIPTIVES score".to_string()]);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn running_a_selection_records_only_the_selected_commands() {
+        let path = std::env::temp_dir().join("sc_log_sel.csv");
+        write_demo_csv(&path);
+        let mut app = StatsCraftApp::default();
+        app.path_input = path.display().to_string();
+        app.load();
+        // The reader selects three lines and runs them.
+        let selection = "DESCRIPTIVES score\nFREQUENCIES group\nCORRELATIONS score age\n";
+        let commands: Vec<String> = split_commands(selection)
+            .into_iter()
+            .map(|c| c.text)
+            .filter(|t| !t.starts_with('*'))
+            .collect();
+        run_commands(&mut app, &commands);
+        assert_eq!(app.log.len(), 3, "the log was {:?}", app.log);
+        assert!(app.log[0].starts_with("DESCRIPTIVES"));
+        assert!(app.log[2].starts_with("CORRELATIONS"));
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

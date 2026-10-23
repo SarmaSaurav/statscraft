@@ -62,6 +62,29 @@ pub struct StatsCraftApp {
     /// The egui context, so the theme can be re-applied when it
     /// changes.
     pub ctx: egui::Context,
+    /// The undo and redo history of the data editor.
+    pub undo: crate::undo::UndoStack,
+    /// Whether Data View shows the value labels of the dictionary
+    /// instead of the stored codes.
+    pub show_value_labels: bool,
+    /// The commands of the most recent run, in the order they ran. This
+    /// is the Log object of the output document: running a selection
+    /// replaces the Log, so the Log shows the commands that produced
+    /// what is on screen and nothing else.
+    pub log: Vec<String>,
+    /// Whether the Log is the object shown in the Output Viewer, rather
+    /// than one of the result tables.
+    pub log_selected: bool,
+    /// A case waiting for the delete confirmation, if any.
+    pub pending_delete_case: Option<usize>,
+    /// The character range selected in the Syntax Editor, if any.
+    pub syntax_selection: Option<(usize, usize)>,
+    /// The character position of the cursor in the Syntax Editor.
+    pub syntax_cursor: Option<usize>,
+    /// True when the cell editor that opens next should start with its
+    /// content selected, so that typing replaces the value rather than
+    /// being appended to it.
+    pub select_cell_content: bool,
 }
 
 impl Default for StatsCraftApp {
@@ -99,6 +122,14 @@ impl Default for StatsCraftApp {
             // A placeholder context, replaced when the app is created.
             // The theme is applied to the real one there.
             ctx: egui::Context::default(),
+            undo: crate::undo::UndoStack::new(),
+            show_value_labels: false,
+            log: Vec::new(),
+            log_selected: false,
+            pending_delete_case: None,
+            syntax_selection: None,
+            syntax_cursor: None,
+            select_cell_content: false,
         }
     }
 }
@@ -122,12 +153,16 @@ impl StatsCraftApp {
                 self.status = format!("Loaded {} rows x {} cols.", t.n_rows, t.columns.len());
                 self.table = Some(t);
                 self.dirty = false;
+                // A new dataset starts with a clean history: the changes
+                // of the previous one are not this one's to take back.
+                self.undo.clear();
                 self.dataset_no += 1;
                 self.add_recent_file(p);
             }
             Err(e) => {
                 self.status = format!("Error: {}", e);
                 self.table = None;
+                self.undo.clear();
             }
         }
     }
@@ -342,51 +377,102 @@ impl StatsCraftApp {
         self.status = "Table pivoted: the row and column dimensions were exchanged.".to_string();
     }
 
+    /// Record a change to the whole dataset in the undo history.
+    ///
+    /// `before` is the dataset as it was before the change. The dataset
+    /// now is the state after it.
+    pub fn record_table_change(&mut self, before: Option<DataTable>) {
+        self.undo.push_table(before, &self.table);
+    }
+
     /// Add an empty numeric variable. This is the same operation as the
     /// button in Variable View, exposed for the toolbar and the menus.
     pub fn add_variable(&mut self) {
+        let before = self.table.clone();
         let table = self.table.get_or_insert_with(DataTable::default);
         let idx = table.add_variable(crate::data::ColumnKind::Numeric);
+        let name = table.columns[idx].name.clone();
+        self.record_table_change(before);
         self.dirty = true;
         self.status = format!(
             "Added {}. Edit its name, label and measure in Variable View.",
-            table.columns[idx].name
+            name
         );
     }
 
     /// Add a case at the end of the data, as StatsBench's "Add Cases" does.
     pub fn add_case(&mut self) {
+        let before = self.table.clone();
         let Some(t) = self.table.as_mut() else {
             self.status = "No data loaded.".to_string();
             return;
         };
         let row = t.add_case();
+        self.record_table_change(before);
         self.dirty = true;
         self.sel_cell = Some((0, row));
         self.status = format!("Added case {}.", row + 1);
     }
 
-    /// Delete the selected case.
+    /// Ask for the deletion of the selected case.
+    ///
+    /// The deletion is destructive, so it waits for the confirmation, the
+    /// way the reference workbench does it.
     pub fn delete_case(&mut self) {
         let Some((_, row)) = self.sel_cell else {
             self.status = "Select a case first.".to_string();
             return;
         };
+        if self.table.is_none() {
+            self.status = "No data loaded.".to_string();
+            return;
+        }
+        self.pending_delete_case = Some(row);
+    }
+
+    /// Delete the selected case, after the confirmation has been
+    /// accepted.
+    pub fn delete_case_now(&mut self, row: usize) {
+        let before = self.table.clone();
         let Some(t) = self.table.as_mut() else {
             self.status = "No data loaded.".to_string();
             return;
         };
         if t.delete_case(row) {
+            let last = t.n_rows.saturating_sub(1);
+            self.record_table_change(before);
             self.dirty = true;
             self.status = format!("Deleted case {}.", row + 1);
             // The selection moves to the case that took its place.
-            let last = t.n_rows.saturating_sub(1);
             self.sel_cell = Some((0, row.min(last)));
+        }
+    }
+
+    /// Take back the last change to the dataset.
+    pub fn undo(&mut self) {
+        match self.undo.undo(&mut self.table) {
+            Some(what) => {
+                self.dirty = true;
+                self.status = format!("Undone: {}.", what);
+            }
+            None => self.status = "There is nothing to undo.".to_string(),
+        }
+    }
+
+    /// Put back the change that was taken back.
+    pub fn redo(&mut self) {
+        match self.undo.redo(&mut self.table) {
+            Some(what) => {
+                self.dirty = true;
+                self.status = format!("Redone: {}.", what);
+            }
+            None => self.status = "There is nothing to redo.".to_string(),
         }
     }
 
     /// Delete a variable after the confirmation has been accepted.
     pub fn delete_variable(&mut self, idx: usize) {
+        let before = self.table.clone();
         let Some(table) = self.table.as_mut() else {
             self.status = "No data loaded.".to_string();
             return;
@@ -397,6 +483,7 @@ impl StatsCraftApp {
             .map(|c| c.name.clone())
             .unwrap_or_default();
         if table.remove_variable(idx) {
+            self.record_table_change(before);
             self.dirty = true;
             self.status = format!("Deleted variable {}.", name);
             if self.sel_cell.is_some_and(|(col, _)| col >= idx) {
@@ -510,12 +597,53 @@ impl StatsCraftApp {
         }
     }
 
+    /// Cut the selected cell: copy it to the clipboard and clear it.
+    ///
+    /// The change to the cell is remembered, so it can be taken back
+    /// like any other edit.
+    pub fn cut_cell(&mut self) {
+        let Some((col, row)) = self.sel_cell else {
+            self.status = "Select a cell first.".to_string();
+            return;
+        };
+        let Some(t) = self.table.as_ref() else {
+            self.status = "No data loaded.".to_string();
+            return;
+        };
+        let text = t.cell_display_text(col, row, self.show_value_labels);
+        if arboard::Clipboard::new()
+            .and_then(|mut c| c.set_text(text.clone()))
+            .is_err()
+        {
+            self.status = "Could not copy to the clipboard.".to_string();
+            return;
+        }
+        let Some(t) = self.table.as_mut() else {
+            return;
+        };
+        if row < t.n_rows
+            && col < t.columns.len()
+            && t.columns[col].values[row] != crate::data::Value::Missing
+        {
+            let old = t.columns[col].values[row].clone();
+            t.columns[col].values[row] = crate::data::Value::Missing;
+            self.undo.push(crate::undo::UndoAction::Cell {
+                col,
+                row,
+                before: old,
+                after: crate::data::Value::Missing,
+            });
+            self.dirty = true;
+        }
+        self.status = format!("Cut '{}'.", text);
+    }
+
     /// Paste the clipboard into the grid, at the selected cell.
     ///
     /// One line pastes one cell; a block of lines pastes a column of
     /// values down the selected column, which is what a spreadsheet
     /// copy gives.
-    pub fn paste_cell(&mut self, ctx: &egui::Context) {
+    pub fn paste_cell(&mut self) {
         let Some((col, row)) = self.sel_cell else {
             self.status = "Select a cell first.".to_string();
             return;
@@ -531,11 +659,23 @@ impl StatsCraftApp {
             self.status = "The clipboard is empty.".to_string();
             return;
         }
+        self.paste_text_into(col, row, &text);
+    }
+
+    /// Paste text into the table, with the change recorded in the undo
+    /// history.
+    ///
+    /// The paste is kept apart from the clipboard so that the undo
+    /// behaviour can be tested without touching the clipboard of the
+    /// machine the tests run on.
+    pub fn paste_text_into(&mut self, col: usize, row: usize, text: &str) {
+        let before = self.table.clone();
         let Some(t) = self.table.as_mut() else {
             self.status = "No data loaded.".to_string();
             return;
         };
-        let pasted = t.paste_text(col, row, &text);
+        let pasted = t.paste_text(col, row, text);
+        self.record_table_change(before);
         self.dirty = true;
         self.status = format!("Pasted {} row(s).", pasted);
     }
@@ -634,6 +774,39 @@ impl StatsCraftApp {
         match std::fs::write(path, md) {
             Ok(_) => self.status = format!("Exported output to {}", path.display()),
             Err(e) => self.status = format!("Export failed: {}", e),
+        }
+    }
+
+    /// Save the output document.
+    ///
+    /// The document keeps the tables, their titles and the Log of the
+    /// commands that produced them, so it can be opened again later.
+    pub fn save_output_document(&mut self, path: &std::path::Path) {
+        if self.outputs.is_empty() && self.log.is_empty() {
+            self.status = "There is no output to save.".to_string();
+            return;
+        }
+        match crate::outdoc::save(path, &self.outputs, &self.log) {
+            Ok(()) => self.status = format!("Saved the output document to {}.", path.display()),
+            Err(e) => self.status = format!("Save failed: {}", e),
+        }
+    }
+
+    /// Open an output document.
+    ///
+    /// The tables and the Log of the document replace what the Viewer
+    /// holds, so the reader sees what was saved.
+    pub fn open_output_document(&mut self, path: &std::path::Path) {
+        match crate::outdoc::load(path) {
+            Ok((outputs, log)) => {
+                self.outputs = outputs;
+                self.log = log;
+                self.selected_output = 0;
+                self.log_selected = false;
+                self.show_output_window = true;
+                self.status = format!("Opened {}.", path.display());
+            }
+            Err(e) => self.status = format!("Could not open the output: {}", e),
         }
     }
 
@@ -906,6 +1079,18 @@ impl eframe::App for StatsCraftApp {
             self.close_prompt = true;
         }
 
+        // ---- Ctrl+Z and Ctrl+Y: undo and redo of the data edits ----
+        // The shortcuts are only taken when no text editor has the
+        // keyboard, because egui's own text undo belongs to the editor
+        // that has the focus.
+        if !ctx.wants_keyboard_input() {
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Z)) {
+                self.undo();
+            } else if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Y)) {
+                self.redo();
+            }
+        }
+
         // ---- Phase 4: real OS document windows (StatsBench multi-document UX) ----
         // The Output Viewer and Syntax editor live in their own viewports;
         // the Data Editor stays the main window, like StatsBench.
@@ -996,6 +1181,56 @@ impl eframe::App for StatsCraftApp {
                                         .id_salt("output_outline")
                                         .auto_shrink([false, false])
                                         .show(ui, |ui| {
+                                            // The Log is the first object
+                                            // of the document, as it is in
+                                            // the reference workbench: it
+                                            // records the commands that
+                                            // produced the results.
+                                            let log_sel = self.log_selected;
+                                            let log_color = if log_sel {
+                                                crate::theme::accent()
+                                            } else {
+                                                crate::theme::text_muted()
+                                            };
+                                            let galley = ui.painter().layout_no_wrap(
+                                                "Log".to_string(),
+                                                crate::theme::medium(12.0),
+                                                log_color,
+                                            );
+                                            let (rect, resp) = ui.allocate_exact_size(
+                                                egui::vec2(ui.available_width(), 22.0),
+                                                egui::Sense::click(),
+                                            );
+                                            let p = ui.painter();
+                                            if log_sel {
+                                                p.rect_filled(
+                                                    rect,
+                                                    crate::theme::RADIUS_SM,
+                                                    crate::theme::accent_soft(),
+                                                );
+                                            } else if resp.hovered() {
+                                                p.rect_filled(
+                                                    rect,
+                                                    crate::theme::RADIUS_SM,
+                                                    crate::theme::surface_alt(),
+                                                );
+                                            }
+                                            p.circle_filled(
+                                                egui::pos2(rect.left() + 10.0, rect.center().y),
+                                                2.5,
+                                                log_color,
+                                            );
+                                            p.galley(
+                                                egui::pos2(
+                                                    rect.left() + 18.0,
+                                                    rect.center().y - galley.size().y / 2.0,
+                                                ),
+                                                galley,
+                                                log_color,
+                                            );
+                                            if resp.clicked() {
+                                                self.log_selected = true;
+                                            }
                                             for (i, t) in self.outputs.iter().enumerate() {
                                                 let sel = self.selected_output == i;
                                                 let color = if sel {
@@ -1042,6 +1277,7 @@ impl eframe::App for StatsCraftApp {
                                                 );
                                                 if resp.clicked() {
                                                     self.selected_output = i;
+                                                    self.log_selected = false;
                                                 }
                                             }
                                         });
@@ -1049,6 +1285,39 @@ impl eframe::App for StatsCraftApp {
                                 egui::CentralPanel::default()
                                     .frame(egui::Frame::none())
                                     .show_inside(ui, |ui| {
+                                    if self.log_selected {
+                                        // The Log: the commands that were
+                                        // run to produce this output.
+                                        egui::ScrollArea::vertical()
+                                            .id_salt("output_log")
+                                            .auto_shrink([false, false])
+                                            .show(ui, |ui| {
+                                                ui.add_space(2.0);
+                                                ui.add(egui::Label::new(
+                                                    egui::RichText::new("Log")
+                                                        .font(crate::theme::semibold(16.0)),
+                                                ));
+                                                ui.add_space(6.0);
+                                                if self.log.is_empty() {
+                                                    ui.label(
+                                                        egui::RichText::new(
+                                                            "No commands have been run yet.",
+                                                        )
+                                                        .color(crate::theme::text_faint())
+                                                        .size(12.0),
+                                                    );
+                                                } else {
+                                                    for command in &self.log {
+                                                        ui.label(
+                                                            egui::RichText::new(command)
+                                                                .font(crate::theme::monospace(12.0))
+                                                                .color(crate::theme::text()),
+                                                        );
+                                                    }
+                                                }
+                                            });
+                                        return;
+                                    }
                                     let t = &self.outputs[self.selected_output.min(self.outputs.len() - 1)];
                                     egui::ScrollArea::vertical()
                                         .id_salt("output_result")
@@ -1221,9 +1490,64 @@ impl eframe::App for StatsCraftApp {
                 egui::ViewportId::from_hash_of("statscraft_syntax"),
                 egui::ViewportBuilder::default()
                     .with_title(format!("Syntax1 - StatsCraft Syntax Editor"))
-                    .with_inner_size([860.0, 560.0])
-                    .with_min_inner_size([520.0, 320.0]),
+                    .with_inner_size([960.0, 600.0])
+                    .with_min_inner_size([620.0, 360.0]),
                 |vctx, _class| {
+                    // The commands of the buffer, listed beside the
+                    // editor, so the reader can see what the buffer
+                    // holds and run one of them.
+                    let commands = crate::syntax::split_commands(&self.syntax_text);
+                    let cursor_line = self
+                        .syntax_cursor
+                        .map(|c| line_of_char(&self.syntax_text, c))
+                        .unwrap_or(0);
+                    let mut run_from_outline = None;
+                    egui::SidePanel::left("sx_outline")
+                        .exact_width(240.0)
+                        .frame(
+                            egui::Frame::none()
+                                .fill(crate::theme::surface_alt())
+                                .inner_margin(egui::Margin::symmetric(10.0, 10.0)),
+                        )
+                        .show(vctx, |ui| {
+                            ui.label(
+                                egui::RichText::new("Commands")
+                                    .font(crate::theme::semibold(11.0))
+                                    .color(crate::theme::text_faint()),
+                            );
+                            ui.add_space(4.0);
+                            egui::ScrollArea::vertical()
+                                .id_salt("syntax_outline")
+                                .auto_shrink([false, false])
+                                .show(ui, |ui| {
+                                    if commands.is_empty() {
+                                        ui.label(
+                                            egui::RichText::new("The buffer is empty.")
+                                                .color(crate::theme::text_faint())
+                                                .size(11.5),
+                                        );
+                                    }
+                                    for c in &commands {
+                                        let here = cursor_line >= c.first_line
+                                            && cursor_line <= c.last_line;
+                                        let label = format!(
+                                            "{}. {}",
+                                            c.first_line + 1,
+                                            if c.text.starts_with('*') {
+                                                "comment"
+                                            } else {
+                                                c.text.split_whitespace().next().unwrap_or("")
+                                            }
+                                        );
+                                        let resp = ui
+                                            .selectable_label(here, label)
+                                            .on_hover_text(c.text.clone());
+                                        if resp.clicked() && !c.text.starts_with('*') {
+                                            run_from_outline = Some(c.text.clone());
+                                        }
+                                    }
+                                });
+                        });
                     egui::CentralPanel::default()
                         .frame(
                             egui::Frame::none()
@@ -1240,31 +1564,105 @@ impl eframe::App for StatsCraftApp {
                                 .show_inside(ui, |ui| {
                                     ui.add(egui::Label::new(egui::RichText::new("Syntax1").font(crate::theme::semibold(18.0))));
                                     ui.separator();
+                                    // The dataset the commands will run
+                                    // against, so the reader knows which
+                                    // one is active.
+                                    ui.label(
+                                        egui::RichText::new(format!("Active dataset: {}", self.dataset_label()))
+                                            .color(crate::theme::text_muted())
+                                            .size(11.5),
+                                    );
                                 });
-                            egui::ScrollArea::vertical().show(ui, |ui| {
-                                ui.add(
-                                    egui::TextEdit::multiline(&mut self.syntax_text)
-                                        .code_editor()
-                                        .desired_rows(16)
-                                        .desired_width(f32::INFINITY),
-                                );
-                            });
-                            ui.add_space(6.0);
-                            let run = ui.add(
-                                egui::Button::new(
-                                    egui::RichText::new("Run Syntax")
-                                        .font(crate::theme::medium(13.0))
-                                        .color(crate::theme::text_on_accent()),
-                                )
-                                .fill(crate::theme::accent())
-                                .rounding(crate::theme::RADIUS_SM)
-                                .min_size(egui::vec2(110.0, 30.0)),
-                            );
-                            if run.clicked() {
-                                let script = self.syntax_text.clone();
-                                crate::syntax::run(self, &script);
+                            // The editor. Its state is read so that the
+                            // selection and the cursor are known, which
+                            // is what Run Selection and Run Current
+                            // Command act on.
+                            let out = egui::TextEdit::multiline(&mut self.syntax_text)
+                                .code_editor()
+                                .desired_rows(16)
+                                .desired_width(f32::INFINITY)
+                                .show(ui);
+                            if let Some(range) = out.state.cursor.char_range() {
+                                let a = range.primary.index;
+                                let b = range.secondary.index;
+                                self.syntax_cursor = Some(a);
+                                self.syntax_selection = if a == b {
+                                    None
+                                } else {
+                                    Some((a.min(b), a.max(b)))
+                                };
+                            } else {
+                                self.syntax_cursor = None;
+                                self.syntax_selection = None;
                             }
+                            ui.add_space(6.0);
+                            ui.horizontal(|ui| {
+                                let run_all = ui.add(
+                                    egui::Button::new(
+                                        egui::RichText::new("Run All")
+                                            .font(crate::theme::medium(13.0))
+                                            .color(crate::theme::text_on_accent()),
+                                    )
+                                    .fill(crate::theme::accent())
+                                    .rounding(crate::theme::RADIUS_SM)
+                                    .min_size(egui::vec2(96.0, 30.0)),
+                                );
+                                if run_all.clicked() {
+                                    let script = self.syntax_text.clone();
+                                    crate::syntax::run(self, &script);
+                                }
+                                let has_selection = self.syntax_selection.is_some();
+                                let run_selection = ui.add_enabled(
+                                    has_selection,
+                                    egui::Button::new(
+                                        egui::RichText::new("Run Selection")
+                                            .font(crate::theme::medium(13.0)),
+                                    )
+                                    .rounding(crate::theme::RADIUS_SM)
+                                    .min_size(egui::vec2(120.0, 30.0)),
+                                );
+                                if run_selection
+                                    .on_hover_text("Run only the commands in the selection.")
+                                    .clicked()
+                                {
+                                    {
+                                        if let Some((a, b)) = self.syntax_selection {
+                                            let commands = crate::syntax::commands_in(
+                                                &self.syntax_text,
+                                                a,
+                                                b,
+                                            );
+                                            crate::syntax::run_commands(self, &commands);
+                                        }
+                                    }
+                                }
+                                let current = crate::syntax::command_at_line(
+                                    &self.syntax_text,
+                                    cursor_line,
+                                )
+                                .filter(|c| !c.text.starts_with('*'));
+                                let run_current = ui.add_enabled(
+                                    current.is_some(),
+                                    egui::Button::new(
+                                        egui::RichText::new("Run Current Command")
+                                            .font(crate::theme::medium(13.0)),
+                                    )
+                                    .rounding(crate::theme::RADIUS_SM)
+                                    .min_size(egui::vec2(160.0, 30.0)),
+                                );
+                                if run_current
+                                    .on_hover_text("Run the command the cursor is in.")
+                                    .clicked()
+                                {
+                                    if let Some(c) = &current {
+                                        crate::syntax::run_command(self, &c.text);
+                                    }
+                                }
+                            });
                         });
+                    if let Some(command) = run_from_outline {
+                        crate::syntax::run_command(self, &command);
+                    }
                     if vctx.input(|i| i.viewport().close_requested()) {
                         vctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                         self.show_syntax_window = false;
@@ -1372,7 +1770,35 @@ impl eframe::App for StatsCraftApp {
                             }
                         });
                         ui.separator();
-                        if crate::icon::menu_item(ui, crate::theme::Icon::Open, "Open Data…").clicked() {
+                        // The output document: the tables, their titles
+                        // and the Log, saved so they can be opened again.
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Save, "Save Output Document…")
+                            .on_hover_text("Save the output tables and the Log.")
+                            .clicked()
+                        {
+                            ui.close_menu();
+                            if let Some(p) = rfd::FileDialog::new()
+                                .add_filter("Output Document", &["scdoc"])
+                                .set_file_name("Output1.scdoc")
+                                .save_file()
+                            {
+                                self.save_output_document(&p);
+                            }
+                        }
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Open, "Open Output Document…")
+                            .on_hover_text("Open a saved output document.")
+                            .clicked()
+                        {
+                            ui.close_menu();
+                            if let Some(p) = rfd::FileDialog::new()
+                                .add_filter("Output Document", &["scdoc"])
+                                .pick_file()
+                            {
+                                self.open_output_document(&p);
+                            }
+                        }
+                        ui.separator();
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Print, "Export Output (HTML)…").clicked() {
                             ui.close_menu();
                             if let Some(p) = rfd::FileDialog::new()
                                 .add_filter("Data", &["csv", "sav"])
@@ -1474,18 +1900,27 @@ impl eframe::App for StatsCraftApp {
                     });
                     // ---------------- Edit ----------------
                     ui.menu_button("Edit", |ui| {
-                        if crate::icon::menu_item(ui, crate::theme::Icon::Undo, "Undo").clicked() {
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Undo, "Undo")
+                            .on_hover_text("Take back the last change to the data (Ctrl+Z).")
+                            .clicked()
+                        {
                             ui.close_menu();
-                            self.status = "Undo: not implemented yet.".to_string();
+                            self.undo();
                         }
-                        if crate::icon::menu_item(ui, crate::theme::Icon::Redo, "Redo").clicked() {
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Redo, "Redo")
+                            .on_hover_text("Put back the change that was taken back (Ctrl+Y).")
+                            .clicked()
+                        {
                             ui.close_menu();
-                            self.status = "Redo: not implemented yet.".to_string();
+                            self.redo();
                         }
                         ui.separator();
-                        if crate::icon::menu_item(ui, crate::theme::Icon::Cut, "Cut").clicked() {
+                        if crate::icon::menu_item(ui, crate::theme::Icon::Cut, "Cut")
+                            .on_hover_text("Copy the selected cell to the clipboard and clear it.")
+                            .clicked()
+                        {
                             ui.close_menu();
-                            self.status = "Cut: not implemented yet.".to_string();
+                            self.cut_cell();
                         }
                         if crate::icon::menu_item(ui, crate::theme::Icon::Copy, "Copy").clicked() {
                             ui.close_menu();
@@ -1494,8 +1929,7 @@ impl eframe::App for StatsCraftApp {
                         }
                         if crate::icon::menu_item(ui, crate::theme::Icon::Paste, "Paste").clicked() {
                             ui.close_menu();
-                            let ctx = ui.ctx().clone();
-                            self.paste_cell(&ctx);
+                            self.paste_cell();
                         }
                     });
                     // ---------------- View ----------------
@@ -1513,6 +1947,17 @@ impl eframe::App for StatsCraftApp {
                             self.show_syntax_window = true;
                         }
                         ui.separator();
+                        // The value labels are a presentation of the
+                        // dictionary: the grid shows the label of a value
+                        // instead of the value itself, and the stored
+                        // value does not change.
+                        if ui
+                            .checkbox(&mut self.show_value_labels, "Value Labels")
+                            .on_hover_text("Show the value labels of the dictionary in Data View.")
+                            .clicked()
+                        {
+                            ui.close_menu();
+                        }
                         if ui.checkbox(&mut self.grid_lines, "Grid Lines").clicked() {
                             ui.close_menu();
                         }
@@ -1564,10 +2009,15 @@ impl eframe::App for StatsCraftApp {
                             }
                         });
                         ui.separator();
-                        if crate::icon::menu_item(ui, crate::theme::Icon::Filter, "Select Cases…").clicked() {
-                            ui.close_menu();
-                            self.status = "Select Cases: not implemented yet.".to_string();
-                        }
+                        // The preparation layer is not built yet. The
+                        // entries are shown greyed out and say so, rather
+                        // than failing when they are chosen.
+                        crate::icon::menu_item_disabled(
+                            ui,
+                            crate::theme::Icon::Filter,
+                            "Select Cases…",
+                            "0.4",
+                        );
                         if crate::icon::menu_item(ui, crate::theme::Icon::ValueLabels, "Value Labels…").clicked() {
                             ui.close_menu();
                             if self.table.as_ref().is_some_and(|t| !t.columns.is_empty()) {
@@ -1580,13 +2030,21 @@ impl eframe::App for StatsCraftApp {
                         }
                     });
                     // ---------------- Transform ----------------
+                    // The transform layer is the biggest remaining gap.
+                    // The entries are shown greyed out and say which
+                    // release will bring them, rather than failing when
+                    // they are chosen.
                     ui.menu_button("Transform", |ui| {
-                        if ui.button("Compute Variable…").clicked() { ui.close_menu(); self.status = "Compute Variable: not implemented yet.".to_string(); }
-                        if ui.button("Recode into Same Variables…").clicked() { ui.close_menu(); self.status = "Recode into Same Variables: not implemented yet.".to_string(); }
-                        if ui.button("Recode into Different Variables…").clicked() { ui.close_menu(); self.status = "Recode into Different Variables: not implemented yet.".to_string(); }
-                        if ui.button("Count Values within Cases…").clicked() { ui.close_menu(); self.status = "Count Values within Cases: not implemented yet.".to_string(); }
-                        if ui.button("Rank Cases…").clicked() { ui.close_menu(); self.status = "Rank Cases: not implemented yet.".to_string(); }
-                        if ui.button("Automatic Recode…").clicked() { ui.close_menu(); self.status = "Automatic Recode: not implemented yet.".to_string(); }
+                        for (label, icon) in [
+                            ("Compute Variable…", crate::theme::Icon::Settings),
+                            ("Recode into Same Variables…", crate::theme::Icon::ValueLabels),
+                            ("Recode into Different Variables…", crate::theme::Icon::ValueLabels),
+                            ("Count Values within Cases…", crate::theme::Icon::Describe),
+                            ("Rank Cases…", crate::theme::Icon::Describe),
+                            ("Automatic Recode…", crate::theme::Icon::ValueLabels),
+                        ] {
+                            crate::icon::menu_item_disabled(ui, icon, label, "0.4");
+                        }
                     });
                     // ---------------- Analyze ----------------
                     // Every procedure opens a dialog, as in StatsBench: the user
@@ -1610,7 +2068,12 @@ impl eframe::App for StatsCraftApp {
                         });
                         ui.menu_button("Regression", |ui| {
                             if crate::icon::menu_item(ui, crate::theme::Icon::Regression, "Linear…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Regression); }
-                            if ui.button("Curve Estimation…").clicked() { ui.close_menu(); self.status = "Curve Estimation: not implemented yet.".to_string(); }
+                            crate::icon::menu_item_disabled(
+                                ui,
+                                crate::theme::Icon::Regression,
+                                "Curve Estimation…",
+                                "0.5",
+                            );
                         });
                         ui.menu_button("Scale", |ui| {
                             if crate::icon::menu_item(ui, crate::theme::Icon::Variables, "Reliability Analysis…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Reliability); }
@@ -1626,7 +2089,12 @@ impl eframe::App for StatsCraftApp {
                             if crate::icon::menu_item(ui, crate::theme::Icon::TTest, "Friedman…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Friedman); }
                         });
                         ui.separator();
-                        if crate::icon::menu_item(ui, crate::theme::Icon::Output, "Reports").clicked() { ui.close_menu(); self.status = "Reports: not implemented yet.".to_string(); }
+                        crate::icon::menu_item_disabled(
+                            ui,
+                            crate::theme::Icon::Output,
+                            "Reports",
+                            "0.5",
+                        );
                     });
                     // ---------------- Graphs ----------------
                     ui.menu_button("Graphs", |ui| {
@@ -1736,25 +2204,27 @@ impl eframe::App for StatsCraftApp {
                         }
                     }
                     crate::icon::separator(ui);
-                    if crate::icon::icon_button(
+                    if crate::icon::icon_button_enabled(
                         ui,
                         crate::theme::Icon::Undo,
                         "Undo",
-                        "Undo the last edit",
+                        "Undo the last edit (Ctrl+Z)",
+                        self.undo.can_undo(),
                     )
                     .clicked()
                     {
-                        self.status = "Undo: not implemented yet.".to_string();
+                        self.undo();
                     }
-                    if crate::icon::icon_button(
+                    if crate::icon::icon_button_enabled(
                         ui,
                         crate::theme::Icon::Redo,
                         "Redo",
-                        "Redo the last edit",
+                        "Redo the last edit (Ctrl+Y)",
+                        self.undo.can_redo(),
                     )
                     .clicked()
                     {
-                        self.status = "Redo: not implemented yet.".to_string();
+                        self.redo();
                     }
                     crate::icon::separator(ui);
                     if crate::icon::icon_button(
@@ -2021,6 +2491,9 @@ impl eframe::App for StatsCraftApp {
                     editing_cell,
                     edit_buf,
                     dirty,
+                    show_value_labels,
+                    undo,
+                    select_cell_content,
                     ..
                 } = self;
                 data_grid(
@@ -2031,6 +2504,9 @@ impl eframe::App for StatsCraftApp {
                     editing_cell,
                     edit_buf,
                     dirty,
+                    *show_value_labels,
+                    undo,
+                    select_cell_content,
                 );
             }
             View::Variables => {
@@ -2232,12 +2708,15 @@ impl eframe::App for StatsCraftApp {
             }
         }
         if add_variable {
+            let before = self.table.clone();
             let table = self.table.get_or_insert_with(DataTable::default);
             let idx = table.add_variable(crate::data::ColumnKind::Numeric);
+            let name = table.columns[idx].name.clone();
+            self.record_table_change(before);
             self.dirty = true;
             self.status = format!(
                 "Added {}. Edit its name, label and measure in Variable View.",
-                table.columns[idx].name
+                name
             );
         }
         if let Some(idx) = delete_variable {
@@ -2280,7 +2759,7 @@ impl eframe::App for StatsCraftApp {
                     ui.add_space(6.0);
                     ui.label(
                         egui::RichText::new(
-                            "The variable and every value in its column will be removed. This cannot be undone.",
+                            "The variable and every value in its column will be removed. You can undo this with Edit > Undo.",
                         )
                         .color(crate::theme::text_muted()),
                     );
@@ -2311,6 +2790,59 @@ impl eframe::App for StatsCraftApp {
                 self.delete_variable(idx);
             } else if cancel {
                 self.pending_delete_variable = None;
+            }
+        }
+
+        // ---- Delete Case confirmation ----
+        // Deleting a case is destructive in the same way as deleting a
+        // variable, so it asks first.
+        if let Some(row) = self.pending_delete_case {
+            let mut confirm = false;
+            let mut cancel = false;
+            egui::Window::new("Delete Case")
+                .collapsible(false)
+                .resizable(false)
+                .default_width(400.0)
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    ui.label(
+                        egui::RichText::new(format!("Delete case {}?", row + 1))
+                            .font(crate::theme::semibold(15.0)),
+                    );
+                    ui.add_space(6.0);
+                    ui.label(
+                        egui::RichText::new(
+                            "The case and every value in its row will be removed. You can undo this with Edit > Undo.",
+                        )
+                        .color(crate::theme::text_muted()),
+                    );
+                    ui.add_space(12.0);
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new("Delete Case")
+                                        .font(crate::theme::medium(12.5))
+                                        .color(egui::Color32::WHITE),
+                                )
+                                .fill(ui.visuals().error_fg_color)
+                                .rounding(crate::theme::RADIUS_SM)
+                                .min_size(egui::vec2(120.0, 30.0)),
+                            )
+                            .clicked()
+                        {
+                            confirm = true;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            cancel = true;
+                        }
+                    });
+                });
+            if confirm {
+                self.pending_delete_case = None;
+                self.delete_case_now(row);
+            } else if cancel {
+                self.pending_delete_case = None;
             }
         }
 
@@ -2347,6 +2879,9 @@ fn data_grid(
     editing_cell: &mut Option<(usize, usize)>,
     edit_buf: &mut String,
     dirty: &mut bool,
+    show_value_labels: bool,
+    undo: &mut crate::undo::UndoStack,
+    select_cell_content: &mut bool,
 ) {
     use crate::theme;
 
@@ -2477,7 +3012,7 @@ fn data_grid(
                                         (egui::Align2::LEFT_CENTER, r.left() + 8.0)
                                     }
                                 };
-                                let txt = t.cell_text(ci, di);
+                                let txt = t.cell_display_text(ci, di, show_value_labels);
                                 if !txt.is_empty() {
                                     p.text(egui::pos2(px, mid_y), anchor, txt, font.clone(), value_text);
                                 }
@@ -2515,7 +3050,14 @@ fn data_grid(
                                     let dummy = di_of_row(row);
                                     let (ci, di) = (vis_cols[j], dummy);
                                     *editing_cell = Some((ci, di));
-                                    *edit_buf = t.cell_text(ci, di);
+                                    // The editor starts from what the cell
+                                    // shows, so a cell that carries a value
+                                    // label is edited as the label.
+                                    *edit_buf = t.cell_display_text(ci, di, show_value_labels);
+                                    // The value is selected, so that typing
+                                    // replaces it rather than being added
+                                    // to it.
+                                    *select_cell_content = true;
                                 }
                             }
                         }
@@ -2540,13 +3082,37 @@ fn data_grid(
                                     .frame(false),
                             );
                             child.memory_mut(|m| m.request_focus(tresp.id));
+                            if *select_cell_content {
+                                // The value the cell held is selected, so
+                                // that typing over it replaces it.
+                                if let Some(mut state) =
+                                    egui::text_edit::TextEditState::load(child.ctx(), tresp.id)
+                                {
+                                    let len = edit_buf.chars().count();
+                                    state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+                                        egui::text::CCursor::new(0),
+                                        egui::text::CCursor::new(len),
+                                    )));
+                                    state.store(child.ctx(), tresp.id);
+                                }
+                                *select_cell_content = false;
+                            }
                             let enter = child.input(|i| i.key_pressed(egui::Key::Enter));
                             let esc = child.input(|i| i.key_pressed(egui::Key::Escape));
                             if esc {
                                 *editing_cell = None;
                             } else if enter || tresp.lost_focus() {
                                 if let Some(t) = table.as_deref_mut() {
-                                    if commit_edit(t, eci, edi, edit_buf) {
+                                    if let Some((before, after)) = commit_edit(t, eci, edi, edit_buf)
+                                    {
+                                        // The edit is one cell, so it is
+                                        // remembered as one cell.
+                                        undo.push(crate::undo::UndoAction::Cell {
+                                            col: eci,
+                                            row: edi,
+                                            before,
+                                            after,
+                                        });
                                         *dirty = true;
                                     }
                                 }
@@ -2562,8 +3128,15 @@ fn data_grid(
                 if editing_cell.is_none() && ui.input(|i| i.key_pressed(egui::Key::Delete)) {
                     if let Some(t) = table.as_deref_mut() {
                         if di < t.n_rows && ci < t.columns.len() {
-                            if t.columns[ci].values[di] != crate::data::Value::Missing {
+                            let before = t.columns[ci].values[di].clone();
+                            if before != crate::data::Value::Missing {
                                 t.columns[ci].values[di] = crate::data::Value::Missing;
+                                undo.push(crate::undo::UndoAction::Cell {
+                                    col: ci,
+                                    row: di,
+                                    before,
+                                    after: crate::data::Value::Missing,
+                                });
                                 *dirty = true;
                             }
                         }
@@ -2578,28 +3151,43 @@ fn di_of_row(row: usize) -> usize {
     row - 1
 }
 
-/// StatsBench semantics: empty -> missing; unparseable numeric -> missing.
-fn commit_edit(table: &mut DataTable, ci: usize, di: usize, buf: &str) -> bool {
+/// The line a character position falls on, counted from zero.
+///
+/// The editor counts characters, not bytes, so the position is found by
+/// counting the line breaks before it.
+fn line_of_char(text: &str, char_index: usize) -> usize {
+    text.chars()
+        .take(char_index)
+        .filter(|c| *c == '\n')
+        .count()
+}
+
+/// Write the editor's content into a cell.
+///
+/// The reader may have typed the value itself or the label that is
+/// shown for it, so the label is resolved back to the value it stands
+/// for. The cell therefore always holds a value.
+///
+/// The value before and the value after are returned, so the change can
+/// be taken back. `None` means the cell did not change.
+fn commit_edit(
+    table: &mut DataTable,
+    ci: usize,
+    di: usize,
+    buf: &str,
+) -> Option<(crate::data::Value, crate::data::Value)> {
     if ci >= table.columns.len() || di >= table.n_rows {
-        return false;
+        return None;
     }
-    let raw = buf.trim().to_string();
-    let v = if raw.is_empty() {
-        crate::data::Value::Missing
-    } else {
-        match table.columns[ci].kind {
-            crate::data::ColumnKind::Numeric => raw
-                .parse::<f64>()
-                .map(crate::data::Value::Number)
-                .unwrap_or(crate::data::Value::Missing),
-            crate::data::ColumnKind::String => crate::data::Value::Text(raw),
-        }
-    };
-    if table.columns[ci].values[di] == v {
-        return false;
+    let before = table.columns[ci].values[di].clone();
+    if !table.set_cell_display(ci, di, buf) {
+        return None;
     }
-    table.columns[ci].values[di] = v;
-    true
+    let after = table.columns[ci].values[di].clone();
+    if before == after {
+        return None;
+    }
+    Some((before, after))
 }
 
 /// One output object as an Office-friendly HTML table.
@@ -2981,14 +3569,274 @@ mod tests {
         app.add_case();
         assert_eq!(app.table.as_ref().unwrap().n_rows, 3);
         assert_eq!(app.sel_cell, Some((0, 2)));
-        // Deleting it takes the case away again.
+        // The deletion asks first, and the case is still there.
         app.delete_case();
+        assert_eq!(app.table.as_ref().unwrap().n_rows, 3);
+        assert_eq!(app.pending_delete_case, Some(2));
+        // The confirmation performs the deletion.
+        app.delete_case_now(2);
         assert_eq!(app.table.as_ref().unwrap().n_rows, 2);
         // Deleting with nothing selected is refused.
         app.sel_cell = None;
         app.delete_case();
         assert_eq!(app.table.as_ref().unwrap().n_rows, 2);
         assert!(app.status.contains("Select a case"));
+    }
+
+    /// A small dataset with one numeric variable and one string one.
+    fn app_with_table() -> StatsCraftApp {
+        let mut app = StatsCraftApp::default();
+        app.table = Some(crate::data::DataTable {
+            n_rows: 2,
+            columns: vec![
+                crate::data::Column {
+                    name: "x".into(),
+                    kind: crate::data::ColumnKind::Numeric,
+                    values: vec![
+                        crate::data::Value::Number(1.0),
+                        crate::data::Value::Number(2.0),
+                    ],
+                    meta: crate::data::VariableMeta::default_for(
+                        crate::data::ColumnKind::Numeric,
+                    ),
+                },
+                crate::data::Column {
+                    name: "g".into(),
+                    kind: crate::data::ColumnKind::String,
+                    values: vec![
+                        crate::data::Value::Text("A".into()),
+                        crate::data::Value::Text("B".into()),
+                    ],
+                    meta: crate::data::VariableMeta::default_for(
+                        crate::data::ColumnKind::String,
+                    ),
+                },
+            ],
+        });
+        app
+    }
+
+    #[test]
+    fn a_deleted_case_is_brought_back_by_undo() {
+        let mut app = app_with_table();
+        app.sel_cell = Some((0, 1));
+        app.delete_case_now(1);
+        assert_eq!(app.table.as_ref().unwrap().n_rows, 1);
+        // The values of the case are back, not just its number.
+        app.undo();
+        let t = app.table.as_ref().unwrap();
+        assert_eq!(t.n_rows, 2);
+        assert_eq!(t.columns[0].values[1], crate::data::Value::Number(2.0));
+        assert_eq!(t.columns[1].values[1], crate::data::Value::Text("B".into()));
+    }
+
+    #[test]
+    fn a_deleted_variable_is_brought_back_with_its_metadata() {
+        let mut app = app_with_table();
+        app.table.as_mut().unwrap().columns[0].meta.label = "Age in years".into();
+        app.delete_variable(0);
+        assert_eq!(app.table.as_ref().unwrap().columns.len(), 1);
+        assert_eq!(app.table.as_ref().unwrap().columns[0].name, "g");
+        // Undo brings back the variable, its label and every value.
+        app.undo();
+        let t = app.table.as_ref().unwrap();
+        assert_eq!(t.columns.len(), 2);
+        assert_eq!(t.columns[0].name, "x");
+        assert_eq!(t.columns[0].meta.label, "Age in years");
+        assert_eq!(t.columns[0].values[1], crate::data::Value::Number(2.0));
+    }
+
+    #[test]
+    fn a_loaded_dataset_starts_with_a_clean_history() {
+        let mut app = app_with_table();
+        app.undo.push(crate::undo::UndoAction::Cell {
+            col: 0,
+            row: 0,
+            before: crate::data::Value::Number(1.0),
+            after: crate::data::Value::Number(9.0),
+        });
+        assert!(app.undo.can_undo());
+        // A new dataset is a new document: the changes of the old one
+        // are not there to be taken back.
+        app.table = None;
+        app.load();
+        assert!(!app.undo.can_undo());
+        assert!(!app.undo.can_redo());
+    }
+
+    #[test]
+    fn a_paste_is_taken_back_by_undo() {
+        let mut app = app_with_table();
+        app.sel_cell = Some((0, 0));
+        app.paste_text_into(0, 0, "9\n10");
+        let t = app.table.as_ref().unwrap();
+        assert_eq!(t.columns[0].values[0], crate::data::Value::Number(9.0));
+        assert_eq!(t.columns[0].values[1], crate::data::Value::Number(10.0));
+        // Undo puts the pasted values back to what they were.
+        app.undo();
+        let t = app.table.as_ref().unwrap();
+        assert_eq!(t.columns[0].values[0], crate::data::Value::Number(1.0));
+        assert_eq!(t.columns[0].values[1], crate::data::Value::Number(2.0));
+    }
+
+    #[test]
+    fn an_added_case_is_taken_back_by_undo() {
+        let mut app = app_with_table();
+        app.add_case();
+        assert_eq!(app.table.as_ref().unwrap().n_rows, 3);
+        app.undo();
+        assert_eq!(app.table.as_ref().unwrap().n_rows, 2);
+    }
+
+    #[test]
+    fn an_edit_is_put_back_by_redo() {
+        let mut app = app_with_table();
+        app.undo
+            .push(crate::undo::UndoAction::Cell {
+                col: 0,
+                row: 0,
+                before: crate::data::Value::Number(1.0),
+                after: crate::data::Value::Number(9.0),
+            });
+        app.table.as_mut().unwrap().columns[0].values[0] =
+            crate::data::Value::Number(9.0);
+        app.undo();
+        assert_eq!(
+            app.table.as_ref().unwrap().columns[0].values[0],
+            crate::data::Value::Number(1.0)
+        );
+        app.redo();
+        assert_eq!(
+            app.table.as_ref().unwrap().columns[0].values[0],
+            crate::data::Value::Number(9.0)
+        );
+    }
+
+    #[test]
+    fn undoing_without_a_history_says_so() {
+        let mut app = StatsCraftApp::default();
+        app.undo();
+        assert!(app.status.contains("nothing to undo"));
+        app.redo();
+        assert!(app.status.contains("nothing to redo"));
+    }
+
+    #[test]
+    fn the_output_document_keeps_the_table_the_title_and_the_log() {
+        let mut app = StatsCraftApp::default();
+        app.outputs.push(crate::output::OutputTable {
+            title: "Descriptives: score".to_string(),
+            headers: vec!["Statistic".to_string(), "score".to_string()],
+            rows: vec![vec!["Mean".to_string(), "54.2".to_string()]],
+            pivot: None,
+            note: "Valid N = 180".to_string(),
+            chart: None,
+        });
+        app.log = vec!["DESCRIPTIVES score /STATISTICS=MEAN".to_string()];
+        let path = std::env::temp_dir().join("sc_app_out.scdoc");
+        app.save_output_document(&path);
+        assert!(path.exists(), "the document was written");
+
+        // A second app opens it and finds the same table and the log.
+        let mut other = StatsCraftApp::default();
+        other.open_output_document(&path);
+        assert_eq!(other.outputs.len(), 1);
+        assert_eq!(other.outputs[0].title, "Descriptives: score");
+        assert_eq!(other.outputs[0].headers[1], "score");
+        assert_eq!(other.outputs[0].rows[0][1], "54.2");
+        assert_eq!(other.outputs[0].note, "Valid N = 180");
+        assert_eq!(other.log, vec!["DESCRIPTIVES score /STATISTICS=MEAN"]);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn the_log_holds_the_commands_of_the_run_and_nothing_else() {
+        let mut app = StatsCraftApp::default();
+        crate::syntax::run_commands(
+            &mut app,
+            &[
+                "FREQUENCIES region".to_string(),
+                "DESCRIPTIVES score".to_string(),
+            ],
+        );
+        assert_eq!(
+            app.log,
+            vec![
+                "FREQUENCIES region".to_string(),
+                "DESCRIPTIVES score".to_string()
+            ]
+        );
+        // A single command replaces the log, so a scoped run shows only
+        // what it ran.
+        crate::syntax::run_command(&mut app, "FREQUENCIES region");
+        assert_eq!(app.log, vec!["FREQUENCIES region".to_string()]);
+    }
+
+    #[test]
+    fn a_string_variable_shows_its_value_labels() {
+        let mut t = crate::data::DataTable {
+            n_rows: 2,
+            columns: vec![crate::data::Column {
+                name: "group".into(),
+                kind: crate::data::ColumnKind::String,
+                values: vec![
+                    crate::data::Value::Text("Treatment".into()),
+                    crate::data::Value::Text("Control".into()),
+                ],
+                meta: crate::data::VariableMeta::default_for(crate::data::ColumnKind::String),
+            }],
+        };
+        t.set_value_labels(
+            0,
+            &[
+                ("Treatment".to_string(), "Treatment arm".to_string()),
+                ("Control".to_string(), "Control arm".to_string()),
+            ],
+        )
+        .unwrap();
+        assert_eq!(t.cell_display_text(0, 0, true), "Treatment arm");
+        assert_eq!(t.cell_display_text(0, 1, true), "Control arm");
+        assert_eq!(t.cell_display_text(0, 0, false), "Treatment");
+    }
+
+    #[test]
+    fn the_value_labels_switch_shows_the_labels_and_keeps_the_values() {
+        let mut app = app_with_table();
+        app.table.as_mut().unwrap().set_value_labels(
+            0,
+            &[("1".to_string(), "Low".to_string())],
+        )
+        .unwrap();
+        // With the switch off, the cell shows the value.
+        assert_eq!(app.table.as_ref().unwrap().cell_display_text(0, 0, false), "1");
+        // With the switch on, the cell shows the label.
+        assert_eq!(
+            app.table.as_ref().unwrap().cell_display_text(0, 0, true),
+            "Low"
+        );
+        // The stored value is untouched either way.
+        assert_eq!(
+            app.table.as_ref().unwrap().columns[0].values[0],
+            crate::data::Value::Number(1.0)
+        );
+    }
+
+    #[test]
+    fn editing_a_labelled_cell_writes_the_value_and_not_the_label() {
+        let mut app = app_with_table();
+        app.table.as_mut().unwrap().set_value_labels(
+            0,
+            &[("1".to_string(), "Low".to_string())],
+        )
+        .unwrap();
+        let t = app.table.as_mut().unwrap();
+        // The reader types the label that is shown for the value.
+        assert!(t.set_cell_display(0, 0, "Low"));
+        // The cell still holds the value, not the label text.
+        assert_eq!(t.columns[0].values[0], crate::data::Value::Number(1.0));
+        // A number is taken as a number.
+        assert!(t.set_cell_display(0, 0, "7"));
+        assert_eq!(t.columns[0].values[0], crate::data::Value::Number(7.0));
     }
 
     #[test]
@@ -4135,6 +4983,10 @@ pub fn run_with(
                     Ok(text) => {
                         app.syntax_text = text.clone();
                         crate::syntax::run(&mut app, &text);
+                        // The script is in the buffer, so the editor is
+                        // opened on it: the reader can see what ran and
+                        // run part of it again.
+                        app.show_syntax_window = true;
                     }
                     Err(e) => {
                         app.status = format!("Could not read {}: {}", script_path, e);

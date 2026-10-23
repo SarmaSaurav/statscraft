@@ -287,6 +287,11 @@ pub fn semibold(size: f32) -> egui::FontId {
     font(FONT_SEMIBOLD, size)
 }
 
+/// Monospaced — for command syntax.
+pub fn monospace(size: f32) -> egui::FontId {
+    font(FONT_MONO, size)
+}
+
 // ---------------------------------------------------------------------------
 // Style
 // ---------------------------------------------------------------------------
