@@ -1530,6 +1530,44 @@ pub fn correlations_in(table: &DataTable, nums: &[usize]) -> Vec<Correlation> {
     out
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct RegressionOptions {
+    pub collinearity: bool,
+    pub durbin_watson: bool,
+    pub confidence_intervals: bool,
+    pub residuals_summary: bool,
+    pub save_residuals: bool,
+    pub save_predicted: bool,
+    pub save_cooks: bool,
+    pub save_leverage: bool,
+    pub plot_residuals: bool,
+    pub plot_pp: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct RegressionCoefficient {
+    pub name: String,
+    pub b: f64,
+    pub std_error: f64,
+    pub beta: f64,
+    pub t: f64,
+    pub p: f64,
+    pub ci_lower: f64,
+    pub ci_upper: f64,
+    pub tolerance: f64,
+    pub vif: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct SummaryRow {
+    pub name: String,
+    pub min: f64,
+    pub max: f64,
+    pub mean: f64,
+    pub std_dev: f64,
+    pub n: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct RegressionResult {
     pub predictor: String,
@@ -1558,6 +1596,30 @@ pub struct RegressionResult {
     pub ss_resid: f64,
     /// The total sum of squares.
     pub ss_total: f64,
+    /// The predictor names in order.
+    pub predictors: Vec<String>,
+    /// The detailed coefficient estimates (intercept + predictors).
+    pub coefficients: Vec<RegressionCoefficient>,
+    /// The Durbin-Watson statistic (if computed).
+    pub durbin_watson: Option<f64>,
+    /// The casewise residual summary (if requested).
+    pub residual_summary: Option<Vec<SummaryRow>>,
+    /// Original row indices of complete cases.
+    pub valid_rows: Vec<usize>,
+    /// Fitted/predicted values.
+    pub predicted_values: Vec<f64>,
+    /// Unstandardized residuals.
+    pub residuals: Vec<f64>,
+    /// Standardized predicted values.
+    pub std_predicted_values: Vec<f64>,
+    /// Standardized residuals.
+    pub std_residuals: Vec<f64>,
+    /// Studentized residuals.
+    pub studentized_residuals: Vec<f64>,
+    /// Cook's distances.
+    pub cooks_distances: Vec<f64>,
+    /// Leverage (hat matrix diagonal).
+    pub leverages: Vec<f64>,
 }
 
 pub fn linear_regression(table: &DataTable) -> Option<RegressionResult> {
@@ -1575,113 +1637,459 @@ pub fn linear_regression(table: &DataTable) -> Option<RegressionResult> {
 }
 
 pub fn linear_regression_xy(table: &DataTable, yi: usize, xi: usize) -> Option<RegressionResult> {
-    if yi >= table.columns.len() || xi >= table.columns.len() {
+    multiple_regression(table, yi, &[xi], &RegressionOptions::default())
+}
+
+pub fn multiple_regression(
+    table: &DataTable,
+    yi: usize,
+    xs: &[usize],
+    options: &RegressionOptions,
+) -> Option<RegressionResult> {
+    if yi >= table.columns.len() || xs.is_empty() || xs.iter().any(|&x| x >= table.columns.len()) {
         return None;
     }
-    let cx = &table.columns[xi];
     let cy = &table.columns[yi];
-    let mut xs = Vec::new();
+    let cx_cols: Vec<&crate::data::Column> = xs.iter().map(|&idx| &table.columns[idx]).collect();
+    let mut valid_rows = Vec::new();
     let mut ys = Vec::new();
-    for (row, (a, b)) in cx.values.iter().zip(cy.values.iter()).enumerate() {
-        if cx.is_missing(row) || cy.is_missing(row) {
+    let mut x_mat: Vec<Vec<f64>> = Vec::new();
+
+    for row in 0..table.n_rows {
+        if cy.is_missing(row) || cx_cols.iter().any(|c| c.is_missing(row)) {
             continue;
         }
-        if let (Value::Number(x), Value::Number(y)) = (a, b) {
-            xs.push(*x);
-            ys.push(*y);
+        let Value::Number(y) = cy.values[row] else { continue; };
+        let mut x_row = Vec::with_capacity(xs.len());
+        let mut ok = true;
+        for c in &cx_cols {
+            if let Value::Number(x) = c.values[row] {
+                x_row.push(x);
+            } else {
+                ok = false;
+                break;
+            }
+        }
+        if ok {
+            valid_rows.push(row);
+            ys.push(y);
+            x_mat.push(x_row);
         }
     }
-    let n = xs.len();
-    if n < 3 {
+
+    let n = valid_rows.len();
+    let p = xs.len();
+    let k = p + 1;
+    if n <= k {
         return None;
     }
-    let n = n as f64;
-    let sx: f64 = xs.iter().sum();
+    let n_f = n as f64;
     let sy: f64 = ys.iter().sum();
-    let sxx: f64 = xs.iter().map(|x| x * x).sum();
-    let sxy: f64 = xs.iter().zip(ys.iter()).map(|(x, y)| x * y).sum();
-    let denom = n * sxx - sx * sx;
-    if denom == 0.0 {
-        return None;
-    }
-    let slope = (n * sxy - sx * sy) / denom;
-    let intercept = (sy - slope * sx) / n;
-    // r2
-    let my = sy / n;
+    let my = sy / n_f;
     let ss_tot: f64 = ys.iter().map(|y| (y - my).powi(2)).sum();
-    let ss_res: f64 = xs
-        .iter()
-        .zip(ys.iter())
-        .map(|(x, y)| {
-            let pred = intercept + slope * x;
-            (y - pred).powi(2)
-        })
-        .sum();
-    // The total sum of squares of x, needed for the standard error of the
-    // slope.
-    let mx = sx / n;
-    let ss_tot_x: f64 = xs.iter().map(|x| (x - mx).powi(2)).sum();
+    let s_y = if n > 1 { (ss_tot / (n_f - 1.0)).sqrt() } else { 0.0 };
+
+    let mut s_xs = Vec::with_capacity(p);
+    for j in 0..p {
+        let sx_j: f64 = x_mat.iter().map(|r| r[j]).sum();
+        let mx_j = sx_j / n_f;
+        let ss_x_j: f64 = x_mat.iter().map(|r| (r[j] - mx_j).powi(2)).sum();
+        let sd = if n > 1 { (ss_x_j / (n_f - 1.0)).sqrt() } else { 0.0 };
+        s_xs.push(sd);
+    }
+
+    let mut a = vec![vec![0.0f64; k]; k];
+    let mut b = vec![0.0f64; k];
+
+    for i in 0..n {
+        let y = ys[i];
+        let mut x_full = Vec::with_capacity(k);
+        x_full.push(1.0);
+        x_full.extend_from_slice(&x_mat[i]);
+        for r in 0..k {
+            b[r] += x_full[r] * y;
+            for c in 0..k {
+                a[r][c] += x_full[r] * x_full[c];
+            }
+        }
+    }
+
+    let inv_a = crate::glm::invert(&a, k)?;
+    let mut beta = vec![0.0f64; k];
+    for r in 0..k {
+        for c in 0..k {
+            beta[r] += inv_a[r * k + c] * b[c];
+        }
+    }
+
+    let mut pred_y = Vec::with_capacity(n);
+    let mut residuals = Vec::with_capacity(n);
+    for i in 0..n {
+        let mut py = beta[0];
+        for j in 0..p {
+            py += beta[j + 1] * x_mat[i][j];
+        }
+        pred_y.push(py);
+        residuals.push(ys[i] - py);
+    }
+
+    let ss_res: f64 = residuals.iter().map(|e| e * e).sum();
+    let ssr = (ss_tot - ss_res).max(0.0);
     let r2 = if ss_tot == 0.0 {
         0.0
     } else {
-        1.0 - ss_res / ss_tot
+        (1.0 - ss_res / ss_tot).clamp(0.0, 1.0)
     };
-    // The standard error of the estimate, the F statistic and the
-    // significance of the slope.
-    let df_resid = (n - 2.0).max(1.0);
-    let mse = ss_res / df_resid;
-    let std_error_estimate = mse.sqrt();
-    let std_error = if ss_tot > 0.0 {
-        (mse / (ss_tot_x / (n - 1.0)).max(f64::MIN_POSITIVE)).sqrt()
-    } else {
-        f64::NAN
-    };
-    // A perfect fit has no residual variance, so the standard error of
-    // the slope is zero and the t statistic is unbounded. StatsBench reports
-    // the fit as exact, so the p-value is 0 and the t statistic is
-    // reported as infinite.
-    let (t, p) = if std_error > 0.0 {
-        let t = slope / std_error;
-        (t, t_p_value(t, df_resid))
-    } else if ss_tot > 0.0 {
-        // A non-degenerate fit with zero residual error.
-        (f64::INFINITY, 0.0)
-    } else {
-        (f64::NAN, f64::NAN)
-    };
-    let adj_r2 = if n > 3.0 {
-        1.0 - (1.0 - r2) * (n - 1.0) / (n - 2.0)
+
+    let df_resid = (n_f - k as f64).max(1.0);
+    let df_reg = p as f64;
+    let df_tot = (n_f - 1.0).max(1.0);
+
+    let adj_r2 = if n_f > k as f64 {
+        1.0 - (1.0 - r2) * df_tot / df_resid
     } else {
         r2
     };
+
+    let mse = ss_res / df_resid;
+    let std_error_estimate = mse.sqrt();
     let (f, f_p) = if mse > 0.0 {
-        let f = (ss_tot - ss_res) / mse;
-        (f, f_p_value(f, 1.0, df_resid))
+        let f = (ssr / df_reg) / mse;
+        (f, f_p_value(f, df_reg, df_resid))
     } else if ss_tot > 0.0 {
-        // A perfect fit: the model explains everything.
         (f64::INFINITY, 0.0)
     } else {
         (f64::NAN, f64::NAN)
     };
 
+    // Collinearity diagnostics
+    let mut tolerances = vec![1.0f64; p];
+    let mut vifs = vec![1.0f64; p];
+    if p > 1 {
+        for j in 0..p {
+            let p_sub = p - 1;
+            let k_sub = p_sub + 1;
+            let mut a_sub = vec![vec![0.0f64; k_sub]; k_sub];
+            let mut b_sub = vec![0.0f64; k_sub];
+            for i in 0..n {
+                let target = x_mat[i][j];
+                let mut row_sub = Vec::with_capacity(k_sub);
+                row_sub.push(1.0);
+                for m in 0..p {
+                    if m != j {
+                        row_sub.push(x_mat[i][m]);
+                    }
+                }
+                for r in 0..k_sub {
+                    b_sub[r] += row_sub[r] * target;
+                    for c in 0..k_sub {
+                        a_sub[r][c] += row_sub[r] * row_sub[c];
+                    }
+                }
+            }
+            if let Some(inv_sub) = crate::glm::invert(&a_sub, k_sub) {
+                let mut beta_sub = vec![0.0f64; k_sub];
+                for r in 0..k_sub {
+                    for c in 0..k_sub {
+                        beta_sub[r] += inv_sub[r * k_sub + c] * b_sub[c];
+                    }
+                }
+                let mx_j: f64 = x_mat.iter().map(|r| r[j]).sum::<f64>() / n_f;
+                let ss_tot_j: f64 = x_mat.iter().map(|r| (r[j] - mx_j).powi(2)).sum();
+                let mut ss_res_j: f64 = 0.0;
+                for i in 0..n {
+                    let mut pval = beta_sub[0];
+                    let mut col_idx = 1;
+                    for m in 0..p {
+                        if m != j {
+                            pval += beta_sub[col_idx] * x_mat[i][m];
+                            col_idx += 1;
+                        }
+                    }
+                    ss_res_j += (x_mat[i][j] - pval).powi(2);
+                }
+                let r2_j = if ss_tot_j > 0.0 {
+                    (1.0 - ss_res_j / ss_tot_j).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                let tol = (1.0 - r2_j).max(1e-7);
+                tolerances[j] = tol;
+                vifs[j] = 1.0 / tol;
+            }
+        }
+    }
+
+    let t_crit = statrs::distribution::StudentsT::new(0.0, 1.0, df_resid)
+        .ok()
+        .map(|d| d.inverse_cdf(0.975))
+        .unwrap_or(1.96);
+
+    let mut coefficients = Vec::with_capacity(k);
+    // Constant
+    let var_0 = (mse * inv_a[0]).max(0.0);
+    let se_0 = var_0.sqrt();
+    let (t_0, p_0) = if se_0 > 0.0 {
+        let t = beta[0] / se_0;
+        (t, t_p_value(t, df_resid))
+    } else if ss_tot > 0.0 && ss_res == 0.0 {
+        (f64::INFINITY, 0.0)
+    } else {
+        (f64::NAN, f64::NAN)
+    };
+    coefficients.push(RegressionCoefficient {
+        name: "(Constant)".to_string(),
+        b: beta[0],
+        std_error: se_0,
+        beta: 0.0,
+        t: t_0,
+        p: p_0,
+        ci_lower: beta[0] - t_crit * se_0,
+        ci_upper: beta[0] + t_crit * se_0,
+        tolerance: 0.0,
+        vif: 0.0,
+    });
+
+    for j in 0..p {
+        let idx = j + 1;
+        let var_j = (mse * inv_a[idx * k + idx]).max(0.0);
+        let se_j = var_j.sqrt();
+        let (t_j, p_j) = if se_j > 0.0 {
+            let t = beta[idx] / se_j;
+            (t, t_p_value(t, df_resid))
+        } else if ss_tot > 0.0 && ss_res == 0.0 {
+            (f64::INFINITY, 0.0)
+        } else {
+            (f64::NAN, f64::NAN)
+        };
+        let std_beta = if s_y > 0.0 {
+            beta[idx] * (s_xs[j] / s_y)
+        } else {
+            0.0
+        };
+        coefficients.push(RegressionCoefficient {
+            name: cx_cols[j].display_name().to_string(),
+            b: beta[idx],
+            std_error: se_j,
+            beta: std_beta,
+            t: t_j,
+            p: p_j,
+            ci_lower: beta[idx] - t_crit * se_j,
+            ci_upper: beta[idx] + t_crit * se_j,
+            tolerance: tolerances[j],
+            vif: vifs[j],
+        });
+    }
+
+    let durbin_watson = if options.durbin_watson || true {
+        let num: f64 = residuals.windows(2).map(|w| (w[1] - w[0]).powi(2)).sum();
+        let den: f64 = residuals.iter().map(|e| e * e).sum();
+        if den > 0.0 {
+            Some(num / den)
+        } else {
+            Some(0.0)
+        }
+    } else {
+        None
+    };
+
+    let mut leverages = Vec::with_capacity(n);
+    let mut std_pred = Vec::with_capacity(n);
+    let mut std_resid = Vec::with_capacity(n);
+    let mut stud_resid = Vec::with_capacity(n);
+    let mut cooks = Vec::with_capacity(n);
+
+    let m_pred = my;
+    let ss_pred: f64 = pred_y.iter().map(|p| (p - m_pred).powi(2)).sum();
+    let sd_pred = if n > 1 {
+        (ss_pred / (n_f - 1.0)).sqrt()
+    } else {
+        0.0
+    };
+
+    for i in 0..n {
+        let mut x_full = Vec::with_capacity(k);
+        x_full.push(1.0);
+        x_full.extend_from_slice(&x_mat[i]);
+        let mut h_i = 0.0;
+        for r in 0..k {
+            for c in 0..k {
+                h_i += x_full[r] * inv_a[r * k + c] * x_full[c];
+            }
+        }
+        leverages.push(h_i);
+
+        let zp = if sd_pred > 0.0 {
+            (pred_y[i] - m_pred) / sd_pred
+        } else {
+            0.0
+        };
+        std_pred.push(zp);
+
+        let zr = if std_error_estimate > 0.0 {
+            residuals[i] / std_error_estimate
+        } else {
+            0.0
+        };
+        std_resid.push(zr);
+
+        let r_denom = std_error_estimate * (1.0 - h_i).max(1e-12).sqrt();
+        let r_i = if r_denom > 0.0 {
+            residuals[i] / r_denom
+        } else {
+            0.0
+        };
+        stud_resid.push(r_i);
+
+        let cook = (r_i * r_i / (k as f64)) * (h_i / (1.0 - h_i).max(1e-12));
+        cooks.push(cook);
+    }
+
+    let residual_summary = if options.residuals_summary {
+        fn summarize(name: &str, vals: &[f64]) -> SummaryRow {
+            let n = vals.len();
+            if n == 0 {
+                return SummaryRow {
+                    name: name.to_string(),
+                    min: 0.0,
+                    max: 0.0,
+                    mean: 0.0,
+                    std_dev: 0.0,
+                    n: 0,
+                };
+            }
+            let min = vals.iter().copied().fold(f64::INFINITY, f64::min);
+            let max = vals.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            let mean = vals.iter().sum::<f64>() / n as f64;
+            let var = if n > 1 {
+                vals.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n as f64 - 1.0)
+            } else {
+                0.0
+            };
+            SummaryRow {
+                name: name.to_string(),
+                min,
+                max,
+                mean,
+                std_dev: var.sqrt(),
+                n,
+            }
+        }
+
+        let se_pred: Vec<f64> = leverages
+            .iter()
+            .map(|&h| std_error_estimate * h.max(0.0).sqrt())
+            .collect();
+        let cent_lev: Vec<f64> = leverages.iter().map(|&h| h - 1.0 / n_f).collect();
+
+        Some(vec![
+            summarize("Predicted Value", &pred_y),
+            summarize("Std. Predicted Value", &std_pred),
+            summarize("Standard Error of Predicted Value", &se_pred),
+            summarize("Residual", &residuals),
+            summarize("Std. Residual", &std_resid),
+            summarize("Stud. Residual", &stud_resid),
+            summarize("Cook's Distance", &cooks),
+            summarize("Centered Leverage Value", &cent_lev),
+        ])
+    } else {
+        None
+    };
+
+    let pred_names: Vec<String> = cx_cols.iter().map(|c| c.display_name().to_string()).collect();
+    let first_slope = if coefficients.len() > 1 { coefficients[1].b } else { 0.0 };
+    let first_se = if coefficients.len() > 1 { coefficients[1].std_error } else { 0.0 };
+    let first_t = if coefficients.len() > 1 { coefficients[1].t } else { 0.0 };
+    let first_p = if coefficients.len() > 1 { coefficients[1].p } else { 0.0 };
+
     Some(RegressionResult {
-        predictor: cx.display_name().to_string(),
+        predictor: pred_names.join(", "),
         outcome: cy.display_name().to_string(),
-        n: xs.len(),
-        slope,
-        intercept,
+        n,
+        slope: first_slope,
+        intercept: beta[0],
         r2,
-        std_error,
-        t,
-        p,
+        std_error: first_se,
+        t: first_t,
+        p: first_p,
         adj_r2,
         std_error_estimate,
         f,
         f_p,
-        ssr: ss_tot - ss_res,
+        ssr,
         ss_resid: ss_res,
         ss_total: ss_tot,
+        predictors: pred_names,
+        coefficients,
+        durbin_watson,
+        residual_summary,
+        valid_rows,
+        predicted_values: pred_y,
+        residuals,
+        std_predicted_values: std_pred,
+        std_residuals: std_resid,
+        studentized_residuals: stud_resid,
+        cooks_distances: cooks,
+        leverages,
     })
+}
+
+/// Save unstandardized residuals, predicted values, Cook's distance, and/or leverage back to the table.
+pub fn save_regression_variables(
+    table: &mut DataTable,
+    r: &RegressionResult,
+    save_resid: bool,
+    save_pred: bool,
+    save_cook: bool,
+    save_leverage: bool,
+) -> Vec<String> {
+    let mut saved = Vec::new();
+
+    let mut add_col = |prefix: &str, label_suffix: &str, data: &[f64]| -> String {
+        let mut idx = 1;
+        let name = loop {
+            let candidate = format!("{}_{}", prefix, idx);
+            if table.column_index(&candidate).is_none() {
+                break candidate;
+            }
+            idx += 1;
+        };
+
+        let mut values = vec![Value::Missing; table.n_rows];
+        for (k, &row_idx) in r.valid_rows.iter().enumerate() {
+            if row_idx < values.len() && k < data.len() {
+                values[row_idx] = Value::Number(data[k]);
+            }
+        }
+
+        let mut meta = crate::data::VariableMeta::default_for(ColumnKind::Numeric);
+        meta.label = format!("{} [{}]", label_suffix, r.outcome);
+        meta.decimals = 5;
+
+        let col = crate::data::Column {
+            name: name.clone(),
+            kind: ColumnKind::Numeric,
+            values,
+            meta,
+        };
+        table.columns.push(col);
+        name
+    };
+
+    if save_resid {
+        saved.push(add_col("RES", "Unstandardized Residual", &r.residuals));
+    }
+    if save_pred {
+        saved.push(add_col("PRE", "Unstandardized Predicted Value", &r.predicted_values));
+    }
+    if save_cook {
+        saved.push(add_col("COO", "Cook's Distance", &r.cooks_distances));
+    }
+    if save_leverage {
+        saved.push(add_col("LEV", "Leverage Value", &r.leverages));
+    }
+
+    saved
 }
 
 /// The two-tailed p-value of a t statistic.
@@ -2147,6 +2555,48 @@ mod validation_tests {
         let se = (0.25f64 / 10.0).sqrt();
         assert!((r.z - 0.3 / se).abs() < 1e-9, "z={}", r.z);
         assert!(r.p_exact > 0.0 && r.p_exact < 0.2, "exact={}", r.p_exact);
+    }
+
+    #[test]
+    fn multiple_regression_matches_known_two_predictor_model() {
+        // y = 5 + 2*x1 - 3*x2
+        let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let x2 = vec![2.0, 1.0, 4.0, 3.0, 6.0, 5.0];
+        let y = vec![1.0, 6.0, -1.0, 4.0, -3.0, 2.0];
+        let t = table(vec![numeric("x1", x1), numeric("x2", x2), numeric("y", y)], 6);
+        let opts = RegressionOptions {
+            collinearity: true,
+            durbin_watson: true,
+            residuals_summary: true,
+            confidence_intervals: true,
+            ..Default::default()
+        };
+        let r = multiple_regression(&t, 2, &[0, 1], &opts).unwrap();
+        assert_eq!(r.n, 6);
+        assert!((r.intercept - 5.0).abs() < 1e-9, "intercept={}", r.intercept);
+        assert!((r.coefficients[1].b - 2.0).abs() < 1e-9, "b1={}", r.coefficients[1].b);
+        assert!((r.coefficients[2].b - (-3.0)).abs() < 1e-9, "b2={}", r.coefficients[2].b);
+        assert!((r.r2 - 1.0).abs() < 1e-9, "r2={}", r.r2);
+        assert!(r.durbin_watson.is_some());
+        let sum_h: f64 = r.leverages.iter().sum();
+        assert!((sum_h - 3.0).abs() < 1e-9, "sum_h={}", sum_h);
+        assert!(r.coefficients[1].tolerance > 0.0 && r.coefficients[1].tolerance <= 1.0);
+        assert!(r.coefficients[1].vif >= 1.0);
+        assert!(r.residual_summary.is_some());
+    }
+
+    #[test]
+    fn regression_save_variables_adds_residual_columns() {
+        let x1 = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let y = vec![2.0, 3.0, 5.0, 7.0, 11.0];
+        let mut t = table(vec![numeric("x1", x1), numeric("y", y)], 5);
+        let r = multiple_regression(&t, 1, &[0], &RegressionOptions::default()).unwrap();
+        let saved = save_regression_variables(&mut t, &r, true, true, true, true);
+        assert_eq!(saved.len(), 4);
+        assert!(t.column_index("RES_1").is_some());
+        assert!(t.column_index("PRE_1").is_some());
+        assert!(t.column_index("COO_1").is_some());
+        assert!(t.column_index("LEV_1").is_some());
     }
 }
 

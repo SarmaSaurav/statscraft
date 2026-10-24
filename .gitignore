@@ -4,6 +4,7 @@
 *.exe
 *.zip
 *.7z
+*.bat
 
 # Portable dist keeps scripts/docs only; binaries are CI artifacts
 dist/statscraft.exe

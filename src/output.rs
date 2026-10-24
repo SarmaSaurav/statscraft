@@ -331,83 +331,186 @@ impl OutputTable {
     /// The StatsBench regression output: a model summary, an ANOVA table and a
     /// coefficients table.
     pub fn regression_with(r: &crate::stats::RegressionResult) -> Self {
-        // StatsBench puts these in three separate tables; we lay them out in one
-        // grid with section headings, as the earlier tables do.
         let mut headers: Vec<String> = vec!["Model".into(), "R".into(), "R²".into()];
         headers.push("Adjusted R²".into());
         headers.push("Std. Error of Estimate".into());
+        if r.durbin_watson.is_some() {
+            headers.push("Durbin-Watson".into());
+        }
         let mut rows = Vec::new();
-        rows.push(vec![
+        let mut row1 = vec![
             "1".to_string(),
             format!("{:.3}", r.r2.sqrt()),
             format!("{:.3}", r.r2),
             format!("{:.3}", r.adj_r2),
             format!("{:.3}", r.std_error_estimate),
-        ]);
+        ];
+        if let Some(dw) = r.durbin_watson {
+            row1.push(format!("{:.3}", dw));
+        }
+        rows.push(row1);
 
         let mut headers2: Vec<String> = vec!["ANOVA".into(), "Sum of Squares".into()];
         headers2.push("df".into());
         headers2.push("Mean Square".into());
         headers2.push("F".into());
         headers2.push("Sig.".into());
+        let df_reg = r.predictors.len().max(1);
+        let df_res = (r.n as f64 - df_reg as f64 - 1.0).max(0.0) as i64;
+        let df_tot = (r.n as f64 - 1.0).max(0.0) as i64;
         let mut rows2 = Vec::new();
         rows2.push(vec![
             "Regression".to_string(),
             format!("{:.3}", r.ssr),
-            "1".to_string(),
-            format!("{:.3}", r.ssr),
+            format!("{}", df_reg),
+            format!("{:.3}", r.ssr / df_reg as f64),
             format!("{:.3}", r.f),
             format!("{:.4}", r.f_p),
         ]);
         rows2.push(vec![
             "Residual".to_string(),
             format!("{:.3}", r.ss_resid),
-            format!("{}", (r.n as f64 - 2.0).max(0.0) as i64),
-            format!("{:.3}", r.ss_resid / (r.n as f64 - 2.0).max(1.0)),
+            format!("{}", df_res),
+            format!("{:.3}", r.ss_resid / (df_res as f64).max(1.0)),
             String::new(),
             String::new(),
         ]);
         rows2.push(vec![
             "Total".to_string(),
             format!("{:.3}", r.ss_total),
-            format!("{}", (r.n as f64 - 1.0).max(0.0) as i64),
+            format!("{}", df_tot),
             String::new(),
             String::new(),
             String::new(),
         ]);
 
-        let headers3 = vec![
+        let show_collin = r
+            .coefficients
+            .iter()
+            .any(|c| (c.tolerance > 0.0 && c.tolerance < 1.0) || c.vif > 1.0);
+        let show_ci = r
+            .coefficients
+            .iter()
+            .any(|c| c.ci_lower != 0.0 || c.ci_upper != 0.0);
+
+        let mut headers3 = vec![
             "Coefficients".to_string(),
             "B".to_string(),
             "Std. Error".to_string(),
+            "Beta".to_string(),
             "t".to_string(),
             "Sig.".to_string(),
         ];
+        if show_ci {
+            headers3.push("95% CI Lower".to_string());
+            headers3.push("95% CI Upper".to_string());
+        }
+        if show_collin {
+            headers3.push("Tolerance".to_string());
+            headers3.push("VIF".to_string());
+        }
         let mut rows3 = Vec::new();
-        rows3.push(vec![
-            "Constant".to_string(),
-            format!("{:.4}", r.intercept),
-            String::new(),
-            String::new(),
-            String::new(),
-        ]);
-        rows3.push(vec![
-            r.predictor.clone(),
-            format!("{:.4}", r.slope),
-            format!("{:.4}", r.std_error),
-            format!("{:.3}", r.t),
-            format!("{:.4}", r.p),
-        ]);
+        if !r.coefficients.is_empty() {
+            for c in &r.coefficients {
+                let is_const = c.name == "(Constant)";
+                let mut r_row = vec![
+                    c.name.clone(),
+                    format!("{:.4}", c.b),
+                    if is_const && c.std_error == 0.0 {
+                        String::new()
+                    } else {
+                        format!("{:.4}", c.std_error)
+                    },
+                    if is_const {
+                        String::new()
+                    } else {
+                        format!("{:.4}", c.beta)
+                    },
+                    if c.t.is_finite() {
+                        format!("{:.3}", c.t)
+                    } else {
+                        String::new()
+                    },
+                    if c.p.is_finite() {
+                        format!("{:.4}", c.p)
+                    } else {
+                        String::new()
+                    },
+                ];
+                if show_ci {
+                    r_row.push(format!("{:.4}", c.ci_lower));
+                    r_row.push(format!("{:.4}", c.ci_upper));
+                }
+                if show_collin {
+                    if is_const {
+                        r_row.push(String::new());
+                        r_row.push(String::new());
+                    } else {
+                        r_row.push(format!("{:.3}", c.tolerance));
+                        r_row.push(format!("{:.3}", c.vif));
+                    }
+                }
+                rows3.push(r_row);
+            }
+        } else {
+            rows3.push(vec![
+                "Constant".to_string(),
+                format!("{:.4}", r.intercept),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+            ]);
+            rows3.push(vec![
+                r.predictor.clone(),
+                format!("{:.4}", r.slope),
+                format!("{:.4}", r.std_error),
+                String::new(),
+                format!("{:.3}", r.t),
+                format!("{:.4}", r.p),
+            ]);
+        }
 
-        // Merge the three tables into one grid: the union of the columns,
-        // with blanks where a table does not use them.
-        let all_headers = merge_headers(&[headers, headers2, headers3]);
+        let mut headers4 = Vec::new();
+        let mut rows4 = Vec::new();
+        if let Some(res_summary) = &r.residual_summary {
+            headers4 = vec![
+                "Residuals Statistics".into(),
+                "Minimum".into(),
+                "Maximum".into(),
+                "Mean".into(),
+                "Std. Deviation".into(),
+                "N".into(),
+            ];
+            for row in res_summary {
+                rows4.push(vec![
+                    row.name.clone(),
+                    format!("{:.4}", row.min),
+                    format!("{:.4}", row.max),
+                    format!("{:.4}", row.mean),
+                    format!("{:.4}", row.std_dev),
+                    format!("{}", row.n),
+                ]);
+            }
+        }
+
+        let mut table_headers = vec![headers, headers2, headers3];
+        if !headers4.is_empty() {
+            table_headers.push(headers4);
+        }
+        let all_headers = merge_headers(&table_headers);
+
         let mut all_rows = Vec::new();
-        for (label, rws) in [
+        let mut sections = vec![
             ("Model Summary", rows),
             ("ANOVA", rows2),
             ("Coefficients", rows3),
-        ] {
+        ];
+        if !rows4.is_empty() {
+            sections.push(("Residuals Statistics", rows4));
+        }
+
+        for (label, rws) in sections {
             all_rows.push(vec![label.to_string()]);
             for r in rws {
                 all_rows.push(merge_row(&all_headers, &r));
@@ -1571,6 +1674,18 @@ impl OutputTable {
         t
     }
 
+    /// An output item containing only a chart.
+    pub fn from_chart(chart: Chart) -> Self {
+        Self {
+            title: chart.title.clone(),
+            headers: Vec::new(),
+            rows: Vec::new(),
+            pivot: None,
+            note: String::new(),
+            chart: Some(chart),
+        }
+    }
+
     // ---- The procedures added in Phase 4 ----
 
     /// The reliability analysis output: the "Reliability Statistics"
@@ -2027,10 +2142,65 @@ pub fn scatter_chart(s: &crate::stats::Scatter) -> crate::output::Chart {
             quartiles: None,
             x_labels: Vec::new(),
         }],
-            reference_line: None,
-            reference_label: String::new(),
+        reference_line: None,
+        reference_label: String::new(),
+    }
+}
+
+/// A residual scatter plot (ZRESID vs ZPRED).
+pub fn regression_residual_plot(r: &crate::stats::RegressionResult) -> crate::output::Chart {
+    crate::output::Chart {
+        kind: crate::output::ChartKind::Scatter,
+        title: format!("Scatterplot: Dependent Variable {}", r.outcome),
+        x_label: "Regression Standardized Predicted Value".into(),
+        y_label: "Regression Standardized Residual".into(),
+        series: vec![crate::output::ChartSeries {
+            name: format!("{}: ZRESID by ZPRED", r.outcome),
+            x: r.std_predicted_values.clone(),
+            y: r.std_residuals.clone(),
+            quartiles: None,
+            x_labels: Vec::new(),
+        }],
+        reference_line: Some(0.0),
+        reference_label: "0".into(),
+    }
+}
+
+/// A Normal P-P plot of regression standardized residuals.
+pub fn regression_pp_plot(r: &crate::stats::RegressionResult) -> crate::output::Chart {
+    let n = r.std_residuals.len();
+    let mut sorted = r.std_residuals.clone();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let mut p_obs = Vec::with_capacity(n);
+    let mut p_exp = Vec::with_capacity(n);
+    if let Ok(dist) = statrs::distribution::Normal::new(0.0, 1.0) {
+        use statrs::distribution::ContinuousCDF;
+        for (i, &z) in sorted.iter().enumerate() {
+            let obs = (i as f64 + 0.5) / n as f64;
+            let exp = dist.cdf(z);
+            p_obs.push(obs);
+            p_exp.push(exp);
         }
     }
+    crate::output::Chart {
+        kind: crate::output::ChartKind::Scatter,
+        title: format!(
+            "Normal P-P Plot of Regression Standardized Residual: {}",
+            r.outcome
+        ),
+        x_label: "Observed Cum Prob".into(),
+        y_label: "Expected Cum Prob".into(),
+        series: vec![crate::output::ChartSeries {
+            name: format!("{}: Normal P-P", r.outcome),
+            x: p_obs,
+            y: p_exp,
+            quartiles: None,
+            x_labels: Vec::new(),
+        }],
+        reference_line: None,
+        reference_label: String::new(),
+    }
+}
 
 #[cfg(test)]
 mod pivot_tests {

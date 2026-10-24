@@ -588,8 +588,9 @@ fn execute_line_inner(app: &mut StatsCraftApp, line: &str) {
             }
         }
         "REGRESSION" => {
-            // REGRESSION <y> WITH <x1> [x2 ...]
-            let rest: Vec<String> = tokens[1..].to_vec();
+            // REGRESSION <y> WITH <x1> [x2 ...] [/STATISTICS=...] [/PLOTS=...] [/SAVE=...]
+            let cmd = Command::parse(line);
+            let rest = &cmd.args;
             let wi = rest.iter().position(|t| t.eq_ignore_ascii_case("WITH"));
             let (y_args, x_start) = match wi {
                 Some(i) => (rest[..i].to_vec(), i + 1),
@@ -611,27 +612,113 @@ fn execute_line_inner(app: &mut StatsCraftApp, line: &str) {
                 app.status = "REGRESSION: unknown variable name.".to_string();
                 return;
             };
+            if xs.is_empty() {
+                app.status = "REGRESSION: no valid predictor variables specified.".to_string();
+                return;
+            }
+
+            let stat_words = cmd.sub("STATISTICS").or_else(|| cmd.sub("STAT")).unwrap_or(&[]);
+            let plot_words = cmd.sub("PLOTS").or_else(|| cmd.sub("PLOT")).unwrap_or(&[]);
+            let save_words = cmd.sub("SAVE").unwrap_or(&[]);
+
+            let mut opts = stats::RegressionOptions::default();
+            opts.collinearity = stat_words.iter().any(|k| {
+                k.eq_ignore_ascii_case("COLLIN") || k.eq_ignore_ascii_case("COLLINEARITY")
+            });
+            opts.durbin_watson = stat_words
+                .iter()
+                .any(|k| k.eq_ignore_ascii_case("DW") || k.eq_ignore_ascii_case("DURBIN"));
+            opts.confidence_intervals = stat_words
+                .iter()
+                .any(|k| k.eq_ignore_ascii_case("CI") || k.eq_ignore_ascii_case("CONFIDENCE"));
+            opts.residuals_summary = stat_words.iter().any(|k| {
+                k.eq_ignore_ascii_case("RESID")
+                    || k.eq_ignore_ascii_case("RESIDUALS")
+                    || k.eq_ignore_ascii_case("CASEWISE")
+            });
+
+            opts.plot_residuals = plot_words
+                .iter()
+                .any(|k| k.eq_ignore_ascii_case("RESID") || k.eq_ignore_ascii_case("ZRESID"));
+            opts.plot_pp = plot_words
+                .iter()
+                .any(|k| k.eq_ignore_ascii_case("PP") || k.eq_ignore_ascii_case("NORMAL"));
+
+            opts.save_residuals = save_words
+                .iter()
+                .any(|k| k.eq_ignore_ascii_case("RESID") || k.eq_ignore_ascii_case("RESIDUALS"));
+            opts.save_predicted = save_words
+                .iter()
+                .any(|k| k.eq_ignore_ascii_case("PRED") || k.eq_ignore_ascii_case("PREDICTED"));
+            opts.save_cooks = save_words
+                .iter()
+                .any(|k| k.eq_ignore_ascii_case("COOK") || k.eq_ignore_ascii_case("COOKS"));
+            opts.save_leverage = save_words
+                .iter()
+                .any(|k| k.eq_ignore_ascii_case("LEV") || k.eq_ignore_ascii_case("LEVERAGE"));
+
             if let Some(t) = &app.table {
-                let mut ok = false;
-                if let Some(&x) = xs.first() {
-                    if let Some(r) = stats::linear_regression_xy(t, yi, x) {
-                        // A scatter plot with the fitted line, as StatsBench draws
-                        // it in the regression output.
-                        let chart = stats::scatter_points(t, x, yi).map(|s| {
-                            crate::output::scatter_chart(&s)
-                        });
-                        app.outputs.push(OutputTable::regression_with_chart(&r, chart));
-                        app.status = format!(
-                            "REGRESSION executed: {} on {}.",
-                            t.columns[yi].name, t.columns[x].name
-                        );
-                        ok = true;
-                    }
-                }
-                if !ok {
-                    app.status = "REGRESSION failed (need >=3 paired numeric cases).".to_string();
+                let Some(r) = stats::multiple_regression(t, yi, &xs, &opts) else {
+                    app.status =
+                        "REGRESSION failed (need sufficient cases with non-singular predictors)."
+                            .to_string();
                     return;
+                };
+
+                let chart = if xs.len() == 1 && !opts.plot_residuals && !opts.plot_pp {
+                    stats::scatter_points(t, xs[0], yi).map(|s| crate::output::scatter_chart(&s))
+                } else if opts.plot_residuals {
+                    Some(crate::output::regression_residual_plot(&r))
+                } else {
+                    None
+                };
+
+                app.outputs.push(OutputTable::regression_with_chart(&r, chart));
+
+                if opts.plot_pp {
+                    app.outputs
+                        .push(OutputTable::from_chart(crate::output::regression_pp_plot(&r)));
                 }
+
+                if opts.save_residuals
+                    || opts.save_predicted
+                    || opts.save_cooks
+                    || opts.save_leverage
+                {
+                    let before = app.table.clone();
+                    let saved = if let Some(tbl) = &mut app.table {
+                        stats::save_regression_variables(
+                            tbl,
+                            &r,
+                            opts.save_residuals,
+                            opts.save_predicted,
+                            opts.save_cooks,
+                            opts.save_leverage,
+                        )
+                    } else {
+                        Vec::new()
+                    };
+                    let outcome_name = app
+                        .table
+                        .as_ref()
+                        .map(|tbl| tbl.columns[yi].name.clone())
+                        .unwrap_or_default();
+                    app.record_table_change(before);
+                    app.dirty = true;
+                    app.status = format!(
+                        "REGRESSION executed: {} on {}; saved variable(s): {}.",
+                        outcome_name,
+                        r.predictors.join(", "),
+                        saved.join(", ")
+                    );
+                } else {
+                    app.status = format!(
+                        "REGRESSION executed: {} on {}.",
+                        t.columns[yi].name,
+                        r.predictors.join(", ")
+                    );
+                }
+
                 if !app.outputs.is_empty() {
                     app.show_output_window = true;
                 }
@@ -2531,6 +2618,31 @@ NONPARAMETRIC /FRIEDMAN= score age response_time
         let mut app = StatsCraftApp::default();
         run(&mut app, &format!("LOAD \"{}\"\nREGRESSION score WITH age\n", path.display()));
         assert!(app.outputs.last().unwrap().title.contains("Regression"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn regression_diagnostics_and_save_syntax() {
+        let path = std::env::temp_dir().join("sc_syntax_reg_diag.csv");
+        write_demo_csv(&path);
+        let mut app = StatsCraftApp::default();
+        let script = format!(
+            "LOAD \"{}\"\nREGRESSION score WITH age /STATISTICS=COLLIN DW CI RESID /SAVE=RESID PRED /PLOTS=RESID PP\n",
+            path.display()
+        );
+        run(&mut app, &script);
+        assert!(app.status.contains("saved variable(s)"));
+        let t = app.table.as_ref().expect("table");
+        assert!(t.column_index("RES_1").is_some(), "RES_1 created");
+        assert!(t.column_index("PRE_1").is_some(), "PRE_1 created");
+        // Outputs should have Regression table + PP plot
+        assert!(app.outputs.len() >= 2);
+        let reg_out = &app.outputs[0];
+        assert!(reg_out.title.contains("Regression"));
+        // Residual plot attached to reg_out
+        assert!(reg_out.chart.is_some());
+        // Second output is the PP plot
+        assert!(app.outputs[1].title.contains("Normal P-P"));
         let _ = std::fs::remove_file(path);
     }
 

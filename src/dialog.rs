@@ -146,6 +146,8 @@ pub enum SubDialog {
     AnovaOptions,
     CorrelationsOptions,
     RegressionStatistics,
+    RegressionPlots,
+    RegressionSave,
     MeansOptions,
     ExploreOptions,
     FactorOptions,
@@ -180,6 +182,16 @@ pub struct StatOptions {
     pub pairwise_delete: bool,
     /// For the general linear model: the type of the sums of squares.
     pub ss_type: Option<u8>,
+    pub regression_ci: bool,
+    pub regression_durbin_watson: bool,
+    pub regression_collinearity: bool,
+    pub regression_residuals: bool,
+    pub regression_plot_resid: bool,
+    pub regression_plot_pp: bool,
+    pub regression_save_resid: bool,
+    pub regression_save_pred: bool,
+    pub regression_save_cooks: bool,
+    pub regression_save_leverage: bool,
 }
 
 impl Default for StatOptions {
@@ -198,6 +210,16 @@ impl Default for StatOptions {
             pairwise_delete: false,
             // StatsBench uses Type III by default.
             ss_type: Some(3),
+            regression_ci: false,
+            regression_durbin_watson: false,
+            regression_collinearity: false,
+            regression_residuals: false,
+            regression_plot_resid: false,
+            regression_plot_pp: false,
+            regression_save_resid: false,
+            regression_save_pred: false,
+            regression_save_cooks: false,
+            regression_save_leverage: false,
         }
     }
 }
@@ -368,11 +390,54 @@ impl DialogState {
                 if self.targets.len() < 2 {
                     return None;
                 }
-                parts.push(format!(
+                let mut cmd = format!(
                     "REGRESSION {} WITH {}",
                     self.targets[0],
                     self.targets[1..].join(" ")
-                ));
+                );
+                let mut stats = Vec::new();
+                if self.options.regression_collinearity {
+                    stats.push("COLLIN");
+                }
+                if self.options.regression_durbin_watson {
+                    stats.push("DW");
+                }
+                if self.options.regression_ci {
+                    stats.push("CI");
+                }
+                if self.options.regression_residuals {
+                    stats.push("RESID");
+                }
+                if !stats.is_empty() {
+                    cmd.push_str(&format!(" /STATISTICS={}", stats.join(" ")));
+                }
+                let mut plots = Vec::new();
+                if self.options.regression_plot_resid {
+                    plots.push("RESID");
+                }
+                if self.options.regression_plot_pp {
+                    plots.push("PP");
+                }
+                if !plots.is_empty() {
+                    cmd.push_str(&format!(" /PLOTS={}", plots.join(" ")));
+                }
+                let mut save = Vec::new();
+                if self.options.regression_save_resid {
+                    save.push("RESID");
+                }
+                if self.options.regression_save_pred {
+                    save.push("PRED");
+                }
+                if self.options.regression_save_cooks {
+                    save.push("COOK");
+                }
+                if self.options.regression_save_leverage {
+                    save.push("LEV");
+                }
+                if !save.is_empty() {
+                    cmd.push_str(&format!(" /SAVE={}", save.join(" ")));
+                }
+                parts.push(cmd);
             }
             Procedure::Means => {
                 let g = self.group_var.clone()?;
@@ -796,6 +861,8 @@ pub fn render(
                     }
                     Procedure::Regression => {
                         sub_button(ui, d, SubDialog::RegressionStatistics, "Statistics…");
+                        sub_button(ui, d, SubDialog::RegressionPlots, "Plots…");
+                        sub_button(ui, d, SubDialog::RegressionSave, "Save…");
                     }
                     Procedure::Means => {
                         sub_button(ui, d, SubDialog::MeansOptions, "Options…");
@@ -1134,11 +1201,55 @@ fn render_sub_dialog(ui: &mut egui::Ui, d: &mut DialogState) {
                     );
                 }
                 SubDialog::RegressionStatistics => {
-                    ui.label(egui::RichText::new("Statistics").font(theme::semibold(11.0)));
+                    ui.label(egui::RichText::new("Regression: Statistics").font(theme::semibold(11.0)));
                     ui.add_space(3.0);
-                    ui.label(
-                        egui::RichText::new("Coefficients, ANOVA table and R² are reported.")
-                            .size(11.5),
+                    ui.checkbox(
+                        &mut d.options.regression_ci,
+                        egui::RichText::new("95% Confidence intervals for coefficients").size(11.5),
+                    );
+                    ui.checkbox(
+                        &mut d.options.regression_durbin_watson,
+                        egui::RichText::new("Durbin-Watson test for residual autocorrelation").size(11.5),
+                    );
+                    ui.checkbox(
+                        &mut d.options.regression_collinearity,
+                        egui::RichText::new("Collinearity diagnostics (Tolerance and VIF)").size(11.5),
+                    );
+                    ui.checkbox(
+                        &mut d.options.regression_residuals,
+                        egui::RichText::new("Casewise / Residuals summary statistics").size(11.5),
+                    );
+                }
+                SubDialog::RegressionPlots => {
+                    ui.label(egui::RichText::new("Regression: Plots").font(theme::semibold(11.0)));
+                    ui.add_space(3.0);
+                    ui.checkbox(
+                        &mut d.options.regression_plot_resid,
+                        egui::RichText::new("Residual vs. Predicted scatter plot (ZRESID vs ZPRED)").size(11.5),
+                    );
+                    ui.checkbox(
+                        &mut d.options.regression_plot_pp,
+                        egui::RichText::new("Normal P-P plot of regression standardized residuals").size(11.5),
+                    );
+                }
+                SubDialog::RegressionSave => {
+                    ui.label(egui::RichText::new("Regression: Save New Variables").font(theme::semibold(11.0)));
+                    ui.add_space(3.0);
+                    ui.checkbox(
+                        &mut d.options.regression_save_resid,
+                        egui::RichText::new("Unstandardized residuals (RES_n)").size(11.5),
+                    );
+                    ui.checkbox(
+                        &mut d.options.regression_save_pred,
+                        egui::RichText::new("Unstandardized predicted values (PRE_n)").size(11.5),
+                    );
+                    ui.checkbox(
+                        &mut d.options.regression_save_cooks,
+                        egui::RichText::new("Cook's distances (COO_n)").size(11.5),
+                    );
+                    ui.checkbox(
+                        &mut d.options.regression_save_leverage,
+                        egui::RichText::new("Leverage values (LEV_n)").size(11.5),
                     );
                 }
                 SubDialog::FactorOptions => {
@@ -1424,6 +1535,24 @@ mod tests {
         assert_eq!(
             s.build_syntax().expect("syntax"),
             "REGRESSION score WITH age"
+        );
+    }
+
+    #[test]
+    fn regression_options_reach_the_syntax() {
+        let mut s = d(Procedure::Regression);
+        s.targets.push("score".into());
+        s.targets.push("age".into());
+        s.targets.push("hours".into());
+        s.options.regression_collinearity = true;
+        s.options.regression_durbin_watson = true;
+        s.options.regression_ci = true;
+        s.options.regression_residuals = true;
+        s.options.regression_plot_resid = true;
+        s.options.regression_save_resid = true;
+        assert_eq!(
+            s.build_syntax().expect("syntax"),
+            "REGRESSION score WITH age hours /STATISTICS=COLLIN DW CI RESID /PLOTS=RESID /SAVE=RESID"
         );
     }
 

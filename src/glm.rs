@@ -1007,7 +1007,7 @@ fn cholesky_inverse(l: &[f64], n: usize) -> Vec<f64> {
 }
 
 /// The inverse of a small matrix, by Gauss-Jordan elimination.
-fn invert(a: &[Vec<f64>], n: usize) -> Option<Vec<f64>> {
+pub(crate) fn invert(a: &[Vec<f64>], n: usize) -> Option<Vec<f64>> {
     if n == 0 {
         return Some(Vec::new());
     }
