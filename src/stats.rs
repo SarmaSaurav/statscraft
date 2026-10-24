@@ -1851,6 +1851,168 @@ pub fn independent_ttest_vars(
     })
 }
 
+/// One-sample t against a hypothesised mean.
+#[derive(Debug, Clone)]
+pub struct OneSampleTResult {
+    pub variable: String,
+    pub n: usize,
+    pub mean: f64,
+    pub std_dev: f64,
+    pub test_value: f64,
+    pub mean_diff: f64,
+    pub std_error: f64,
+    pub t: f64,
+    pub df: f64,
+    pub p: f64,
+}
+
+/// One-sample t for one numeric column. Missing values are dropped.
+pub fn one_sample_t_var(table: &DataTable, idx: usize, mu0: f64) -> Option<OneSampleTResult> {
+    let col = table.columns.get(idx)?;
+    if col.kind != ColumnKind::Numeric {
+        return None;
+    }
+    let xs: Vec<f64> = col
+        .values
+        .iter()
+        .enumerate()
+        .filter_map(|(row, v)| {
+            if col.is_missing(row) {
+                return None;
+            }
+            match v {
+                Value::Number(n) => Some(*n),
+                _ => None,
+            }
+        })
+        .collect();
+    if xs.len() < 2 {
+        return None;
+    }
+    let n = xs.len() as f64;
+    let mean = xs.iter().sum::<f64>() / n;
+    let var = xs.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1.0);
+    let sd = var.sqrt();
+    let se = sd / n.sqrt();
+    if se == 0.0 {
+        return None;
+    }
+    let t = (mean - mu0) / se;
+    let df = n - 1.0;
+    Some(OneSampleTResult {
+        variable: col.display_name().to_string(),
+        n: xs.len(),
+        mean,
+        std_dev: sd,
+        test_value: mu0,
+        mean_diff: mean - mu0,
+        std_error: se,
+        t,
+        df,
+        p: t_p_value(t, df),
+    })
+}
+
+/// One-sample test of a proportion.
+#[derive(Debug, Clone)]
+pub struct ProportionResult {
+    pub variable: String,
+    pub n: usize,
+    pub successes: usize,
+    pub proportion: f64,
+    pub test_value: f64,
+    pub success_code: f64,
+    pub z: f64,
+    pub p_normal: f64,
+    pub p_exact: f64,
+}
+
+/// Count values equal to `success` and test that proportion against `p0`.
+pub fn one_sample_proportion_var(
+    table: &DataTable,
+    idx: usize,
+    p0: f64,
+    success: f64,
+) -> Option<ProportionResult> {
+    if !(0.0..=1.0).contains(&p0) {
+        return None;
+    }
+    let col = table.columns.get(idx)?;
+    if col.kind != ColumnKind::Numeric {
+        return None;
+    }
+    let mut n = 0usize;
+    let mut k = 0usize;
+    for (row, v) in col.values.iter().enumerate() {
+        if col.is_missing(row) {
+            continue;
+        }
+        if let Value::Number(x) = v {
+            n += 1;
+            if (*x - success).abs() < 1e-9 {
+                k += 1;
+            }
+        }
+    }
+    if n == 0 {
+        return None;
+    }
+    let p_hat = k as f64 / n as f64;
+    let se = (p0 * (1.0 - p0) / n as f64).sqrt();
+    let z = if se > 0.0 {
+        (p_hat - p0) / se
+    } else if (p_hat - p0).abs() < 1e-12 {
+        0.0
+    } else {
+        f64::INFINITY
+    };
+    let p_normal = if z.is_finite() {
+        statrs::distribution::Normal::new(0.0, 1.0)
+            .ok()
+            .map(|dist| 2.0 * (1.0 - dist.cdf(z.abs())))
+            .unwrap_or(f64::NAN)
+    } else {
+        0.0
+    };
+    Some(ProportionResult {
+        variable: col.display_name().to_string(),
+        n,
+        successes: k,
+        proportion: p_hat,
+        test_value: p0,
+        success_code: success,
+        z,
+        p_normal,
+        p_exact: binomial_two_sided(k, n, p0),
+    })
+}
+
+/// Two-sided exact binomial p: sum of point masses no larger than the observed one.
+fn binomial_two_sided(k: usize, n: usize, p0: f64) -> f64 {
+    if n == 0 {
+        return f64::NAN;
+    }
+    if p0 <= 0.0 {
+        return if k == 0 { 1.0 } else { 0.0 };
+    }
+    if p0 >= 1.0 {
+        return if k == n { 1.0 } else { 0.0 };
+    }
+    use statrs::distribution::Discrete;
+    let Ok(dist) = statrs::distribution::Binomial::new(p0, n as u64) else {
+        return f64::NAN;
+    };
+    let obs = dist.pmf(k as u64);
+    let mut p: f64 = 0.0;
+    for i in 0..=n {
+        let pi = dist.pmf(i as u64);
+        if pi <= obs + 1e-12 {
+            p += pi;
+        }
+    }
+    p.clamp(0.0, 1.0)
+}
+
 // ============================================================================
 // Phase 6: validation against closed-form / textbook reference values
 // ============================================================================
@@ -1958,6 +2120,33 @@ mod validation_tests {
         // Welch t: v1=1, v2=4, se = sqrt(1/3 + 4/3) = sqrt(5/3) -> t = -4/1.2910 = -3.0984
         assert!((r.t + 3.0984).abs() < 1e-3, "t={}", r.t);
         assert!(r.p > 0.04 && r.p < 0.07, "p={}", r.p);
+    }
+
+    #[test]
+    fn one_sample_t_matches_closed_form() {
+        // 2, 4, 6 against 0: mean 4, sd 2, se = 2/sqrt(3), t = 2*sqrt(3)
+        let t = table(vec![numeric("score", vec![2.0, 4.0, 6.0])], 3);
+        let r = one_sample_t_var(&t, 0, 0.0).unwrap();
+        assert_eq!(r.n, 3);
+        assert!((r.mean - 4.0).abs() < 1e-12);
+        assert!((r.std_dev - 2.0).abs() < 1e-12);
+        assert!((r.t - 2.0 * 3.0f64.sqrt()).abs() < 1e-9, "t={}", r.t);
+        assert!((r.df - 2.0).abs() < 1e-12);
+        assert!(r.p < 0.08, "p={}", r.p);
+    }
+
+    #[test]
+    fn one_sample_proportion_counts_the_success_code() {
+        // 8 ones and 2 zeros, test p = 0.5
+        let vals = vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0];
+        let t = table(vec![numeric("flag", vals)], 10);
+        let r = one_sample_proportion_var(&t, 0, 0.5, 1.0).unwrap();
+        assert_eq!(r.n, 10);
+        assert_eq!(r.successes, 8);
+        assert!((r.proportion - 0.8).abs() < 1e-12);
+        let se = (0.25f64 / 10.0).sqrt();
+        assert!((r.z - 0.3 / se).abs() < 1e-9, "z={}", r.z);
+        assert!(r.p_exact > 0.0 && r.p_exact < 0.2, "exact={}", r.p_exact);
     }
 }
 

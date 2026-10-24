@@ -176,6 +176,7 @@ const COMMAND_WORDS: &[&str] = &[
     "ANOVA",
     "T-TEST",
     "TTEST",
+    "PROPORTION",
     "MEANS",
     "EXPLORE",
     "NONPARAMETRIC",
@@ -346,6 +347,7 @@ fn is_analysis_command(cmd: &str) -> bool {
             | "ANOVA"
             | "T-TEST"
             | "TTEST"
+            | "PROPORTION"
             | "MEANS"
             | "EXPLORE"
             | "NONPARAMETRIC"
@@ -848,11 +850,96 @@ fn execute_line_inner(app: &mut StatsCraftApp, line: &str) {
                 }
             }
         }
+        "PROPORTION" => {
+            // PROPORTION <var> [/TESTVAL=0.5] [/SUCCESS=1]
+            let cmd = Command::parse(line);
+            let p0 = cmd
+                .sub("TESTVAL")
+                .and_then(|w| w.first())
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(0.5);
+            let success = cmd
+                .sub("SUCCESS")
+                .and_then(|w| w.first())
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(1.0);
+            if cmd.args.is_empty() {
+                app.status = "PROPORTION: expected 'PROPORTION var /TESTVAL=0.5'.".to_string();
+                return;
+            }
+            let Some(t) = app.table.clone() else {
+                app.status = "No data loaded.".to_string();
+                return;
+            };
+            let mut ran = 0usize;
+            for name in &cmd.args {
+                let Some(idx) = t.column_index(name) else {
+                    app.status = format!("PROPORTION: unknown variable '{}'.", name);
+                    return;
+                };
+                match stats::one_sample_proportion_var(&t, idx, p0, success) {
+                    Some(r) => {
+                        app.outputs.push(OutputTable::from_proportion(&r));
+                        ran += 1;
+                    }
+                    None => {
+                        app.status = format!(
+                            "PROPORTION failed for {} (numeric variable, test proportion between 0 and 1).",
+                            name
+                        );
+                        return;
+                    }
+                }
+            }
+            app.status = format!("PROPORTION executed for {} variable(s).", ran);
+            app.show_output_window = true;
+        }
         "T-TEST" | "TTEST" | "T" => {
             // T-TEST <y> BY <group>            (independent samples)
             // T-TEST PAIRED <v1> <v2>          (paired samples)
+            // T-TEST ONESAMPLE <vars> /TESTVAL=0
             let cmd = Command::parse(line);
             let rest: Vec<String> = cmd.args.clone();
+            if rest.first().map(|t| t.eq_ignore_ascii_case("ONESAMPLE")).unwrap_or(false) {
+                let mu = cmd
+                    .sub("TESTVAL")
+                    .and_then(|w| w.first())
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or(0.0);
+                let vars = &rest[1..];
+                if vars.is_empty() {
+                    app.status = "T-TEST ONESAMPLE: expected 'T-TEST ONESAMPLE var /TESTVAL=0'."
+                        .to_string();
+                    return;
+                }
+                let Some(t) = app.table.clone() else {
+                    app.status = "No data loaded.".to_string();
+                    return;
+                };
+                let mut ran = 0usize;
+                for name in vars {
+                    let Some(idx) = t.column_index(name) else {
+                        app.status = format!("T-TEST ONESAMPLE: unknown variable '{}'.", name);
+                        return;
+                    };
+                    match stats::one_sample_t_var(&t, idx, mu) {
+                        Some(r) => {
+                            app.outputs.push(OutputTable::from_one_sample_t(&r));
+                            ran += 1;
+                        }
+                        None => {
+                            app.status = format!(
+                                "One-sample t failed for {} (need 2+ numeric values and a non-zero SD).",
+                                name
+                            );
+                            return;
+                        }
+                    }
+                }
+                app.status = format!("One-sample t executed for {} variable(s).", ran);
+                app.show_output_window = true;
+                return;
+            }
             // /ES=DISPLAY asks for the effect size table.
             let show_effects = cmd
                 .sub("ES")

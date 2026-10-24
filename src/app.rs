@@ -2504,6 +2504,7 @@ impl eframe::App for StatsCraftApp {
                             if crate::icon::menu_item(ui, crate::theme::Icon::Means, "Means…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Means); }
                             if crate::icon::menu_item(ui, crate::theme::Icon::TTest, "Independent-Samples T Test…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::TTest); }
                             if crate::icon::menu_item(ui, crate::theme::Icon::TTest, "Paired-Samples T Test…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::PairedT); }
+                            if crate::icon::menu_item(ui, crate::theme::Icon::TTest, "One-Sample T Test…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::OneSampleT); }
                             if crate::icon::menu_item(ui, crate::theme::Icon::Anova, "One-Way ANOVA…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Anova); }
                             if crate::icon::menu_item(ui, crate::theme::Icon::Glm, "General Linear Model…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Glm); }
                         });
@@ -2527,6 +2528,7 @@ impl eframe::App for StatsCraftApp {
                             if crate::icon::menu_item(ui, crate::theme::Icon::Correlation, "ROC Curve…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Roc); }
                         });
                         ui.menu_button("Nonparametric Tests", |ui| {
+                            if crate::icon::menu_item(ui, crate::theme::Icon::TTest, "One-Sample Proportion…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Proportion); }
                             if crate::icon::menu_item(ui, crate::theme::Icon::TTest, "Mann-Whitney U…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::MannWhitney); }
                             if crate::icon::menu_item(ui, crate::theme::Icon::TTest, "Kruskal-Wallis H…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::KruskalWallis); }
                             if crate::icon::menu_item(ui, crate::theme::Icon::TTest, "Wilcoxon Signed-Rank…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Wilcoxon); }
@@ -3384,6 +3386,7 @@ fn data_grid(
     egui::ScrollArea::both()
         .auto_shrink([false, false])
         .show_rows(ui, theme::ROW_H + theme::GAP, total_rows, |ui, rows| {
+            ui.set_min_width(content_w);
             for row in rows {
                 let (rect, resp) = ui.allocate_exact_size(
                     egui::vec2(content_w, theme::ROW_H),
@@ -5455,7 +5458,7 @@ pub fn run_with(
         "StatsCraft",
         options,
         Box::new(move |cc| {
-            // Install the bundled Inter family and the modern look before the
+            // Install bundled Plex Sans / JetBrains Mono and theme before the
             // first frame, so nothing is ever painted with the old defaults.
             crate::theme::install_fonts(&cc.egui_ctx);
             crate::theme::apply_style(&cc.egui_ctx, dark);

@@ -60,24 +60,24 @@ pub struct Palette {
     pub border_strong: egui::Color32,
 }
 
-/// The light workbench theme.
+/// The light workbench theme — slate surfaces, sky accent (professional SaaS).
 const LIGHT: Palette = Palette {
-    accent: egui::Color32::from_rgb(0x2F, 0x6F, 0xED),
-    accent_soft: egui::Color32::from_rgb(0xE8, 0xEF, 0xFD),
-    teal: egui::Color32::from_rgb(0x0F, 0xA8, 0x7E),
-    amber: egui::Color32::from_rgb(0xE0, 0x8A, 0x0B),
-    surface: egui::Color32::from_rgb(0xFA, 0xFB, 0xFD),
-    surface_alt: egui::Color32::from_rgb(0xF4, 0xF6, 0xFA),
+    accent: egui::Color32::from_rgb(0x03, 0x69, 0xA1),
+    accent_soft: egui::Color32::from_rgb(0xE0, 0xF2, 0xFE),
+    teal: egui::Color32::from_rgb(0x0D, 0x94, 0x88),
+    amber: egui::Color32::from_rgb(0xD9, 0x77, 0x06),
+    surface: egui::Color32::from_rgb(0xF8, 0xFA, 0xFC),
+    surface_alt: egui::Color32::from_rgb(0xF1, 0xF5, 0xF9),
     cell: egui::Color32::from_rgb(0xFF, 0xFF, 0xFF),
-    cell_alt: egui::Color32::from_rgb(0xF7, 0xF9, 0xFC),
-    header: egui::Color32::from_rgb(0xEE, 0xF2, 0xF8),
-    selected: egui::Color32::from_rgb(0xE4, 0xEE, 0xFF),
-    text: egui::Color32::from_rgb(0x1A, 0x1F, 0x2B),
-    text_muted: egui::Color32::from_rgb(0x5B, 0x66, 0x78),
-    text_faint: egui::Color32::from_rgb(0x93, 0x9E, 0xB0),
+    cell_alt: egui::Color32::from_rgb(0xF8, 0xFA, 0xFC),
+    header: egui::Color32::from_rgb(0xEE, 0xF2, 0xF6),
+    selected: egui::Color32::from_rgb(0xDB, 0xEA, 0xFE),
+    text: egui::Color32::from_rgb(0x0F, 0x17, 0x2A),
+    text_muted: egui::Color32::from_rgb(0x47, 0x55, 0x69),
+    text_faint: egui::Color32::from_rgb(0x94, 0xA3, 0xB8),
     text_on_accent: egui::Color32::WHITE,
-    border: egui::Color32::from_rgb(0xDD, 0xE3, 0xED),
-    border_strong: egui::Color32::from_rgb(0xC2, 0xCC, 0xDC),
+    border: egui::Color32::from_rgb(0xE2, 0xE8, 0xF0),
+    border_strong: egui::Color32::from_rgb(0xCB, 0xD5, 0xE1),
 };
 
 /// The dark theme, after the Dracula palette.
@@ -86,8 +86,8 @@ const LIGHT: Palette = Palette {
 /// data grid that is read for hours, so the text is a shade off it and
 /// the surfaces are the background and the panel colour.
 const DARK: Palette = Palette {
-    accent: egui::Color32::from_rgb(0xBD, 0x93, 0xF9),
-    accent_soft: egui::Color32::from_rgb(0x39, 0x33, 0x50),
+    accent: egui::Color32::from_rgb(0x38, 0xBD, 0xF8),
+    accent_soft: egui::Color32::from_rgb(0x1E, 0x29, 0x3B),
     teal: egui::Color32::from_rgb(0x50, 0xFA, 0x7B),
     amber: egui::Color32::from_rgb(0xFF, 0xB8, 0x6C),
     surface: egui::Color32::from_rgb(0x21, 0x23, 0x2D),
@@ -166,8 +166,8 @@ colour_accessors!(
 // Metrics
 // ---------------------------------------------------------------------------
 
-pub const RADIUS: f32 = 6.0;
-pub const RADIUS_SM: f32 = 4.0;
+pub const RADIUS: f32 = 8.0;
+pub const RADIUS_SM: f32 = 5.0;
 /// Height of a ribbon button, including the icon and its label.
 pub const TOOLBAR_H: f32 = 62.0;
 /// Width of one ribbon button.
@@ -192,14 +192,13 @@ pub const MIN_COLS: usize = 20;
 
 /// Font family names registered with egui. Each family is a separate
 /// `FontDefinitions` entry so egui can fall back through them in order.
-pub const FONT_REGULAR: &str = "Inter";
-pub const FONT_MEDIUM: &str = "Inter Medium";
-pub const FONT_SEMIBOLD: &str = "Inter SemiBold";
-pub const FONT_BOLD: &str = "Inter Bold";
-/// Kept as a named family so code blocks stay monospaced.
-pub const FONT_MONO: &str = "Inter Mono";
+pub const FONT_REGULAR: &str = "IBM Plex Sans";
+pub const FONT_MEDIUM: &str = "IBM Plex Sans Medium";
+pub const FONT_SEMIBOLD: &str = "IBM Plex Sans SemiBold";
+pub const FONT_BOLD: &str = "IBM Plex Sans Bold";
+pub const FONT_MONO: &str = "JetBrains Mono";
 
-/// Register the bundled Inter family (and a monospace fallback) with egui.
+/// Register the bundled IBM Plex Sans family and JetBrains Mono with egui.
 ///
 /// The fonts are embedded in the binary with `include_bytes!`, so the app
 /// looks the same on every machine and needs no system font.
@@ -212,19 +211,23 @@ pub fn install_fonts(ctx: &egui::Context) {
 
     fonts.font_data.insert(
         FONT_REGULAR.to_owned(),
-        egui::FontData::from_static(include_bytes!("../assets/fonts/Inter-Regular.ttf")),
+        egui::FontData::from_static(include_bytes!("../assets/fonts/IBMPlexSans-Regular.ttf")),
     );
     fonts.font_data.insert(
         FONT_MEDIUM.to_owned(),
-        egui::FontData::from_static(include_bytes!("../assets/fonts/Inter-Medium.ttf")),
+        egui::FontData::from_static(include_bytes!("../assets/fonts/IBMPlexSans-Medium.ttf")),
     );
     fonts.font_data.insert(
         FONT_SEMIBOLD.to_owned(),
-        egui::FontData::from_static(include_bytes!("../assets/fonts/Inter-SemiBold.ttf")),
+        egui::FontData::from_static(include_bytes!("../assets/fonts/IBMPlexSans-SemiBold.ttf")),
     );
     fonts.font_data.insert(
         FONT_BOLD.to_owned(),
-        egui::FontData::from_static(include_bytes!("../assets/fonts/Inter-Bold.ttf")),
+        egui::FontData::from_static(include_bytes!("../assets/fonts/IBMPlexSans-Bold.ttf")),
+    );
+    fonts.font_data.insert(
+        FONT_MONO.to_owned(),
+        egui::FontData::from_static(include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf")),
     );
 
     // Every named family resolves to its own face, so `font(FONT_BOLD, n)`
@@ -237,13 +240,11 @@ pub fn install_fonts(ctx: &egui::Context) {
             .insert(0, name.to_owned());
     }
 
-    // The named monospace family points at the same face; the syntax editor
-    // uses the fixed-width advance of the regular face.
     fonts
         .families
         .entry(egui::FontFamily::Name(FONT_MONO.into()))
         .or_default()
-        .insert(0, FONT_REGULAR.to_owned());
+        .insert(0, FONT_MONO.to_owned());
 
     // Proportional stack: Regular first (the everyday face), then Medium,
     // SemiBold and Bold, so `RichText::strong` finds a real bold face.
@@ -256,13 +257,11 @@ pub fn install_fonts(ctx: &egui::Context) {
     prop.insert(2, FONT_SEMIBOLD.to_owned());
     prop.insert(3, FONT_BOLD.to_owned());
 
-    // Monospace: the Inter Regular face is close enough and keeps the
-    // syntax editor aligned without shipping a second typeface.
     let mono = fonts
         .families
         .entry(egui::FontFamily::Monospace)
         .or_default();
-    mono.insert(0, FONT_REGULAR.to_owned());
+    mono.insert(0, FONT_MONO.to_owned());
 
     ctx.set_fonts(fonts);
 }
@@ -305,17 +304,20 @@ pub fn apply_style(ctx: &egui::Context, dark: bool) {
     let p = palette();
     let mut style = (*ctx.style()).clone();
 
-    style.spacing.item_spacing = egui::vec2(8.0, 5.0);
-    style.spacing.button_padding = egui::vec2(10.0, 6.0);
-    style.spacing.menu_margin = egui::Margin::same(6.0);
-    style.spacing.window_margin = egui::Margin::same(12.0);
-    style.spacing.interact_size.y = 22.0;
+    style.spacing.item_spacing = egui::vec2(8.0, 6.0);
+    style.spacing.button_padding = egui::vec2(12.0, 7.0);
+    style.spacing.menu_margin = egui::Margin::same(8.0);
+    style.spacing.window_margin = egui::Margin::same(14.0);
+    style.spacing.interact_size.y = 24.0;
+    style.spacing.indent = 18.0;
 
-    style.text_styles.insert(egui::TextStyle::Small, body(11.0));
-    style.text_styles.insert(egui::TextStyle::Body, body(13.0));
+    style.text_styles.insert(egui::TextStyle::Small, body(11.5));
+    style.text_styles.insert(egui::TextStyle::Body, body(13.5));
     style.text_styles.insert(egui::TextStyle::Monospace, font(FONT_MONO, 12.5));
     style.text_styles.insert(egui::TextStyle::Button, medium(13.0));
-    style.text_styles.insert(egui::TextStyle::Heading, semibold(19.0));
+    style.text_styles.insert(egui::TextStyle::Heading, semibold(18.0));
+
+    style.animation_time = 0.12;
 
     let mut v = if dark {
         egui::Visuals::dark()
@@ -344,10 +346,10 @@ pub fn apply_style(ctx: &egui::Context, dark: bool) {
     v.menu_rounding = egui::Rounding::same(RADIUS);
     v.window_stroke = egui::Stroke::new(1.0, p.border);
     v.window_shadow = egui::Shadow {
-        offset: egui::vec2(0.0, 6.0),
-        blur: 18.0,
+        offset: egui::vec2(0.0, 8.0),
+        blur: 24.0,
         spread: 0.0,
-        color: egui::Color32::from_black_alpha(if dark { 90 } else { 28 }),
+        color: egui::Color32::from_black_alpha(if dark { 100 } else { 32 }),
     };
     v.popup_shadow = v.window_shadow;
 
@@ -573,12 +575,12 @@ impl Icon {
 mod tests {
     use super::*;
 
-    /// The app must render in Inter, not egui's default Ubuntu-Light.
+    /// The app must render in IBM Plex Sans, not egui's default Ubuntu-Light.
     ///
     /// A missing font silently falls back, so assert on the *width* of a
-    /// word: Inter and Ubuntu-Light measure the same string differently.
+    /// word: Plex and Ubuntu-Light measure the same string differently.
     #[test]
-    fn inter_font_is_installed_and_used() {
+    fn plex_font_is_installed_and_used() {
         let ctx = egui::Context::default();
         install_fonts(&ctx);
         // egui only builds its font atlas on the first frame.
@@ -592,23 +594,19 @@ mod tests {
             .size()
             .x;
 
-        // Measure the same word with the Inter file directly, and with the
-        // default font, and require the app's width to sit with Inter.
-        //
-        // `body()` is the Regular face, so compare against Inter Regular.
-        let inter_ctx = egui::Context::default();
+        let plex_ctx = egui::Context::default();
         let mut defs = egui::FontDefinitions::default();
         defs.font_data.insert(
-            "Inter".to_owned(),
-            egui::FontData::from_static(include_bytes!("../assets/fonts/Inter-Regular.ttf")),
+            FONT_REGULAR.to_owned(),
+            egui::FontData::from_static(include_bytes!("../assets/fonts/IBMPlexSans-Regular.ttf")),
         );
         defs.families
             .entry(egui::FontFamily::Proportional)
             .or_default()
-            .insert(0, "Inter".to_owned());
-        inter_ctx.set_fonts(defs);
-        let _ = inter_ctx.run(egui::RawInput::default(), |_| {});
-        let inter_width = inter_ctx
+            .insert(0, FONT_REGULAR.to_owned());
+        plex_ctx.set_fonts(defs);
+        let _ = plex_ctx.run(egui::RawInput::default(), |_| {});
+        let plex_width = plex_ctx
             .fonts(|f| {
                 f.layout_no_wrap(
                     word.to_owned(),
@@ -633,8 +631,8 @@ mod tests {
             .x;
 
         assert!(
-            (app_width - inter_width).abs() < 0.5,
-            "app width {app_width} should match Inter {inter_width} (default was {default_width})"
+            (app_width - plex_width).abs() < 0.5,
+            "app width {app_width} should match Plex {plex_width} (default was {default_width})"
         );
         assert!(
             (app_width - default_width).abs() > 0.5,

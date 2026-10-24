@@ -17,15 +17,16 @@ value labels, honest menus, scoped syntax, Log, `.scdoc`).
 
 The UI is a modern desktop workbench:
 
-- **Typography** — the bundled **Inter** family (Regular / Medium / SemiBold /
-  Bold), embedded in the binary so the app looks the same on every machine.
+- **Typography** — bundled **IBM Plex Sans** (Regular / Medium / SemiBold /
+  Bold) for UI copy and **JetBrains Mono** for syntax and log text, embedded
+  in the binary so the app looks the same on every machine.
 - **Icons** — a 39-glyph **SVG line-icon set** embedded in the binary.
   The ribbon uses large monochrome glyphs tinted from the active theme,
   with a readable label under each icon. Menu entries and tabs use the
   same set, so every surface stays consistent in light and dark mode.
   Regenerate with `python tools/build_icons.py`.
-- **Palette** — two themes, defined once in `src/theme.rs`: the light
-  workbench one and a dark one after the **Dracula** palette. The
+- **Palette** — two themes in `src/theme.rs`: a light slate-and-sky workbench
+  and a dark theme with Dracula-inspired surfaces and a sky accent. The
   colours live in a struct rather than in constants, so the widgets and
   the style always agree, and the theme is switched from the **View**
   menu. `statscraft data.csv --dark` starts in the dark one.

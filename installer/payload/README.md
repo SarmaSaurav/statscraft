@@ -6,8 +6,8 @@ Lightweight statistical workbench written in Rust (native desktop app).
 
 The UI is a modern desktop workbench:
 
-- **Typography** — the bundled **Inter** family (Regular / Medium / SemiBold /
-  Bold), embedded in the binary so the app looks the same on every machine.
+- **Typography** — bundled **IBM Plex Sans** and **JetBrains Mono**, embedded
+  in the binary so the app looks the same on every machine.
 - **Icons** — a 38-glyph **SVG line-icon set** embedded in the binary.
   Ribbon buttons use large monochrome glyphs with labels underneath;
   menu entries, tabs and the app icon use the same set. Regenerate with

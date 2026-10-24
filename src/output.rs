@@ -544,6 +544,71 @@ impl OutputTable {
         }
     }
 
+    pub fn from_one_sample_t(r: &crate::stats::OneSampleTResult) -> Self {
+        Self {
+            title: "One-Sample T Test".to_string(),
+            headers: vec![
+                "Variable".into(),
+                "N".into(),
+                "Mean".into(),
+                "Std. Dev.".into(),
+                "Test value".into(),
+                "Mean difference".into(),
+                "Std. Error".into(),
+                "t".into(),
+                "df".into(),
+                "p (2-tail)".into(),
+            ],
+            rows: vec![vec![
+                r.variable.clone(),
+                r.n.to_string(),
+                format!("{:.4}", r.mean),
+                format!("{:.4}", r.std_dev),
+                format!("{:.4}", r.test_value),
+                format!("{:.4}", r.mean_diff),
+                format!("{:.4}", r.std_error),
+                format!("{:.4}", r.t),
+                format!("{:.4}", r.df),
+                format!("{:.4}", r.p),
+            ]],
+            note: String::new(),
+            chart: None,
+            pivot: None,
+        }
+    }
+
+    pub fn from_proportion(r: &crate::stats::ProportionResult) -> Self {
+        Self {
+            title: "One-Sample Proportion".to_string(),
+            headers: vec![
+                "Variable".into(),
+                "N".into(),
+                "Successes".into(),
+                "Success code".into(),
+                "Proportion".into(),
+                "Test proportion".into(),
+                "z".into(),
+                "p (normal)".into(),
+                "p (exact)".into(),
+            ],
+            rows: vec![vec![
+                r.variable.clone(),
+                r.n.to_string(),
+                r.successes.to_string(),
+                format!("{}", r.success_code),
+                format!("{:.4}", r.proportion),
+                format!("{:.4}", r.test_value),
+                format!("{:.4}", r.z),
+                format!("{:.4}", r.p_normal),
+                format!("{:.4}", r.p_exact),
+            ]],
+            note: "Exact p is the two-sided binomial test. Normal p uses the null standard error."
+                .to_string(),
+            chart: None,
+            pivot: None,
+        }
+    }
+
     pub fn from_ttest(r: &crate::stats::TTestResult) -> Self {
         let rows = vec![vec![
             r.outcome.clone(),

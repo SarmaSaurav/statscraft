@@ -23,4 +23,6 @@ packaging/linux/debroot/
 
 # The build artifacts of the packaging scripts.
 *.deb
-target/deb/
+
+# Local knowledge-graph output
+/graphify-out/

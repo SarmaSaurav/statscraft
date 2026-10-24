@@ -49,6 +49,8 @@ pub enum Procedure {
     Factor,
     Roc,
     Glm,
+    OneSampleT,
+    Proportion,
 }
 
 impl Procedure {
@@ -73,6 +75,8 @@ impl Procedure {
             Procedure::Factor => "Factor Analysis",
             Procedure::Roc => "ROC Curve",
             Procedure::Glm => "General Linear Model",
+            Procedure::OneSampleT => "One-Sample T Test",
+            Procedure::Proportion => "One-Sample Proportion",
         }
     }
 
@@ -97,6 +101,8 @@ impl Procedure {
             Procedure::Factor => "FACTOR",
             Procedure::Roc => "ROC",
             Procedure::Glm => "GLM",
+            Procedure::OneSampleT => "T-TEST ONESAMPLE",
+            Procedure::Proportion => "PROPORTION",
         }
     }
 
@@ -224,6 +230,10 @@ pub struct DialogState {
     pub numeric_targets: Vec<String>,
     /// The number of components to keep, for the factor analysis.
     pub n_components: Option<usize>,
+    /// Hypothesised mean, or hypothesised proportion.
+    pub test_value: f64,
+    /// Numeric code counted as a success in a one-sample proportion.
+    pub success_value: f64,
     pub options: StatOptions,
     pub sub: SubDialog,
     /// Set when the user pressed Paste — the generated syntax goes to the
@@ -244,6 +254,12 @@ impl DialogState {
             group_var: None,
             numeric_targets: Vec::new(),
             n_components: None,
+            test_value: if procedure == Procedure::Proportion {
+                0.5
+            } else {
+                0.0
+            },
+            success_value: 1.0,
             options: StatOptions::default(),
             sub: SubDialog::None,
             pasted: None,
@@ -401,6 +417,18 @@ impl DialogState {
                     p.push_str(&format!(" /METHOD=SSTYPE({})", ss));
                 }
                 parts.push(p);
+            }
+            Procedure::OneSampleT => {
+                parts.push(format!(
+                    "T-TEST ONESAMPLE {} /TESTVAL={}",
+                    vars, self.test_value
+                ));
+            }
+            Procedure::Proportion => {
+                parts.push(format!(
+                    "PROPORTION {} /TESTVAL={} /SUCCESS={}",
+                    vars, self.test_value, self.success_value
+                ));
             }
             Procedure::Reliability => {
                 if self.targets.len() < 2 {
@@ -790,7 +818,9 @@ pub fn render(
                     | Procedure::Wilcoxon
                     | Procedure::KruskalWallis
                     | Procedure::Friedman
-                    | Procedure::Reliability => {}
+                    | Procedure::Reliability
+                    | Procedure::OneSampleT
+                    | Procedure::Proportion => {}
                 }
             });
 
@@ -821,6 +851,21 @@ pub fn render(
                         &mut d.options.save_standardised,
                         egui::RichText::new("Save standardized values as variables").size(12.0),
                     );
+                }
+                Procedure::OneSampleT => {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Test value:").size(12.0));
+                        ui.add(egui::DragValue::new(&mut d.test_value).speed(0.1));
+                    });
+                }
+                Procedure::Proportion => {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Test proportion:").size(12.0));
+                        ui.add(egui::DragValue::new(&mut d.test_value).speed(0.01));
+                        d.test_value = d.test_value.clamp(0.0, 1.0);
+                        ui.label(egui::RichText::new("Success code:").size(12.0));
+                        ui.add(egui::DragValue::new(&mut d.success_value).speed(1.0));
+                    });
                 }
                 Procedure::Correlations => {
                     ui.checkbox(
@@ -1263,7 +1308,7 @@ fn variable_row(
         .layout_no_wrap(name.to_string(), theme::medium(12.0), text_col);
     let width = ui.available_width().max(120.0);
     let (rect, resp) = ui.allocate_exact_size(
-        egui::vec2(width, 21.0),
+        egui::vec2(width, 28.0),
         egui::Sense::click_and_drag(),
     );
     let p = ui.painter();

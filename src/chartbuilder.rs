@@ -556,7 +556,7 @@ pub fn render(ui: &mut egui::Ui, app: &mut crate::app::StatsCraftApp, b: &mut Ch
             b.confirmed = true;
             b.cancelled = false;
         }
-        if ui.button("Cancel").clicked() {
+        if ui.button("Cancel").clicked() || ui.button("Close").clicked() {
             b.confirmed = false;
             b.cancelled = true;
         }
