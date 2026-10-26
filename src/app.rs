@@ -3381,6 +3381,8 @@ fn data_grid(
     let font = theme::body(12.5);
     let header_font = theme::medium(12.5);
 
+    let was_editing = editing_cell.is_some();
+
     // Both axes: the data editor keeps its full column width and scrolls
     // sideways, and egui turns Shift+wheel into horizontal scrolling.
     egui::ScrollArea::both()
@@ -3508,10 +3510,24 @@ fn data_grid(
                 if let Some(j) = clicked_col {
                     if row > 0 {
                         if n_real > 0 {
-                            *sel_cell = Some((vis_cols[j], di_of_row(row)));
-                            if *editing_cell != Some((vis_cols[j], di_of_row(row))) {
-                                *editing_cell = None;
+                            let target = (vis_cols[j], di_of_row(row));
+                            if let Some((eci, edi)) = *editing_cell {
+                                if target != (eci, edi) {
+                                    if let Some(t) = table.as_deref_mut() {
+                                        if let Some((before, after)) = commit_edit(t, eci, edi, edit_buf) {
+                                            undo.push(crate::undo::UndoAction::Cell {
+                                                col: eci,
+                                                row: edi,
+                                                before,
+                                                after,
+                                            });
+                                            *dirty = true;
+                                        }
+                                    }
+                                    *editing_cell = None;
+                                }
                             }
+                            *sel_cell = Some(target);
                         }
                     } else {
                         *sel_cell = None;
@@ -3573,10 +3589,11 @@ fn data_grid(
                                 *select_cell_content = false;
                             }
                             let enter = child.input(|i| i.key_pressed(egui::Key::Enter));
+                            let tab = child.input(|i| i.key_pressed(egui::Key::Tab));
                             let esc = child.input(|i| i.key_pressed(egui::Key::Escape));
                             if esc {
                                 *editing_cell = None;
-                            } else if enter || tresp.lost_focus() {
+                            } else if enter || tab || tresp.lost_focus() {
                                 if let Some(t) = table.as_deref_mut() {
                                     if let Some((before, after)) = commit_edit(t, eci, edi, edit_buf)
                                     {
@@ -3592,6 +3609,66 @@ fn data_grid(
                                     }
                                 }
                                 *editing_cell = None;
+                                if enter {
+                                    *sel_cell = Some((eci, edi + 1));
+                                } else if tab {
+                                    if let Some(pos) = vis_cols.iter().position(|&c| c == eci) {
+                                        if pos + 1 < vis_cols.len() {
+                                            *sel_cell = Some((vis_cols[pos + 1], edi));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Keyboard navigation & editing when not in an active in-cell editor
+            if !was_editing && editing_cell.is_none() {
+                if let Some((ci, di)) = *sel_cell {
+                    let enter = ui.input(|i| i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::F2));
+                    if enter {
+                        if let Some(t) = table.as_deref() {
+                            *editing_cell = Some((ci, di));
+                            *edit_buf = t.cell_display_text(ci, di, show_value_labels);
+                            *select_cell_content = true;
+                        }
+                    } else if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+                        *sel_cell = Some((ci, di + 1));
+                    } else if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                        *sel_cell = Some((ci, di.saturating_sub(1)));
+                    } else if ui.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
+                        if let Some(pos) = vis_cols.iter().position(|&c| c == ci) {
+                            if pos > 0 {
+                                *sel_cell = Some((vis_cols[pos - 1], di));
+                            }
+                        }
+                    } else if ui.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
+                        if let Some(pos) = vis_cols.iter().position(|&c| c == ci) {
+                            if pos + 1 < vis_cols.len() {
+                                *sel_cell = Some((vis_cols[pos + 1], di));
+                            }
+                        }
+                    } else {
+                        let typed = ui.input(|i| {
+                            if i.modifiers.ctrl || i.modifiers.command || i.modifiers.alt {
+                                return None;
+                            }
+                            for ev in &i.events {
+                                if let egui::Event::Text(s) = ev {
+                                    if !s.is_empty() && !s.chars().all(|c| c.is_control()) {
+                                        return Some(s.clone());
+                                    }
+                                }
+                            }
+                            None
+                        });
+                        if let Some(s) = typed {
+                            if table.is_some() {
+                                *editing_cell = Some((ci, di));
+                                *edit_buf = s;
+                                *select_cell_content = false;
                             }
                         }
                     }
@@ -3651,14 +3728,24 @@ fn commit_edit(
     di: usize,
     buf: &str,
 ) -> Option<(crate::data::Value, crate::data::Value)> {
-    if ci >= table.columns.len() || di >= table.n_rows {
+    if ci >= table.columns.len() {
         return None;
     }
-    let before = table.columns[ci].values[di].clone();
+    let before = table
+        .columns
+        .get(ci)
+        .and_then(|c| c.values.get(di))
+        .cloned()
+        .unwrap_or(crate::data::Value::Missing);
     if !table.set_cell_display(ci, di, buf) {
         return None;
     }
-    let after = table.columns[ci].values[di].clone();
+    let after = table
+        .columns
+        .get(ci)
+        .and_then(|c| c.values.get(di))
+        .cloned()
+        .unwrap_or(crate::data::Value::Missing);
     if before == after {
         return None;
     }
@@ -4336,6 +4423,37 @@ mod tests {
         // A number is taken as a number.
         assert!(t.set_cell_display(0, 0, "7"));
         assert_eq!(t.columns[0].values[0], crate::data::Value::Number(7.0));
+    }
+
+    #[test]
+    fn manual_data_entry_after_creating_variable_succeeds() {
+        let mut app = StatsCraftApp::default();
+        app.add_variable();
+        assert_eq!(app.table.as_ref().unwrap().n_rows, 0);
+
+        // Edit row 0 (case 1)
+        let res = commit_edit(app.table.as_mut().unwrap(), 0, 0, "15.0");
+        assert_eq!(
+            res,
+            Some((crate::data::Value::Missing, crate::data::Value::Number(15.0)))
+        );
+        assert_eq!(app.table.as_ref().unwrap().n_rows, 1);
+        assert_eq!(
+            app.table.as_ref().unwrap().columns[0].values[0],
+            crate::data::Value::Number(15.0)
+        );
+
+        // Edit row 1 (case 2)
+        let res2 = commit_edit(app.table.as_mut().unwrap(), 0, 1, "25.0");
+        assert_eq!(
+            res2,
+            Some((crate::data::Value::Missing, crate::data::Value::Number(25.0)))
+        );
+        assert_eq!(app.table.as_ref().unwrap().n_rows, 2);
+        assert_eq!(
+            app.table.as_ref().unwrap().columns[0].values[1],
+            crate::data::Value::Number(25.0)
+        );
     }
 
     #[test]

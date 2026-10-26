@@ -508,6 +508,19 @@ impl DataTable {
         true
     }
 
+    /// Ensure the table has at least `required_rows` cases.
+    ///
+    /// If `required_rows > self.n_rows`, empty cases holding
+    /// system-missing values are added to all columns up to `required_rows`.
+    pub fn ensure_rows(&mut self, required_rows: usize) {
+        if required_rows > self.n_rows {
+            for c in self.columns.iter_mut() {
+                c.values.resize(required_rows, Value::Missing);
+            }
+            self.n_rows = required_rows;
+        }
+    }
+
     /// Add a case at the end of the table.
     ///
     /// StatsBench's "Add Cases" adds empty cases at the end; the new case
@@ -551,12 +564,9 @@ impl DataTable {
     /// A numeric column takes a number; an empty entry is the
     /// system-missing value. A string column takes the text as it is.
     pub fn set_cell(&mut self, col: usize, row: usize, text: &str) -> bool {
-        let Some(c) = self.columns.get_mut(col) else {
+        let Some(c) = self.columns.get(col) else {
             return false;
         };
-        if row >= c.values.len() {
-            return false;
-        }
         let t = text.trim();
         let v = match c.kind {
             ColumnKind::Numeric => {
@@ -580,7 +590,15 @@ impl DataTable {
                 }
             }
         };
-        c.values[row] = v;
+
+        if row >= self.n_rows {
+            if v == Value::Missing {
+                return true;
+            }
+            self.ensure_rows(row + 1);
+        }
+
+        self.columns[col].values[row] = v;
         true
     }
 
@@ -774,12 +792,9 @@ impl DataTable {
     /// are on. Either way the cell keeps holding a value, never a
     /// label: the dictionary stays the single source of truth.
     pub fn set_cell_display(&mut self, col: usize, row: usize, text: &str) -> bool {
-        let Some(c) = self.columns.get_mut(col) else {
+        let Some(c) = self.columns.get(col) else {
             return false;
         };
-        if row >= c.values.len() {
-            return false;
-        }
         let t = text.trim();
         let value = match c.kind {
             ColumnKind::Numeric => {
@@ -805,7 +820,15 @@ impl DataTable {
                 }
             }
         };
-        c.values[row] = value;
+
+        if row >= self.n_rows {
+            if value == Value::Missing {
+                return true;
+            }
+            self.ensure_rows(row + 1);
+        }
+
+        self.columns[col].values[row] = value;
         true
     }
 
@@ -1241,6 +1264,30 @@ mod tests {
         assert_eq!(t.cell_text(1, 0), "hello");
         // A value that is not a number is rejected in a numeric column.
         assert!(!t.set_cell(0, 0, "abc"));
+    }
+
+    #[test]
+    fn data_entry_after_creating_variable_grows_table() {
+        let mut t = DataTable::default();
+        let idx = t.add_variable(ColumnKind::Numeric);
+        assert_eq!(t.n_rows, 0);
+        assert_eq!(t.columns[idx].values.len(), 0);
+
+        // Entering data into row 0 creates the first case
+        assert!(t.set_cell_display(idx, 0, "42.5"));
+        assert_eq!(t.n_rows, 1);
+        assert_eq!(t.columns[idx].values[0], Value::Number(42.5));
+
+        // Entering data into row 3 expands the table with missing values
+        assert!(t.set_cell_display(idx, 3, "100"));
+        assert_eq!(t.n_rows, 4);
+        assert_eq!(t.columns[idx].values[1], Value::Missing);
+        assert_eq!(t.columns[idx].values[2], Value::Missing);
+        assert_eq!(t.columns[idx].values[3], Value::Number(100.0));
+
+        // Invalid entry beyond n_rows is rejected without growing table
+        assert!(!t.set_cell_display(idx, 10, "not_a_number"));
+        assert_eq!(t.n_rows, 4);
     }
 
     #[test]
