@@ -2,7 +2,9 @@
 
 Lightweight statistical workbench written in Rust (native desktop app).
 
-**Version 0.4.0** adds data preparation and output polish: Transform dialogs
+**Version 0.5.0** adds one-sample tests, binary logistic regression, K-means
+and hierarchical clustering, and Kaplan–Meier. **Version 0.4.0** added data
+preparation and output polish: Transform dialogs
 (compute, recode, count, rank, automatic recode), Data prep (select, weight,
 split, aggregate, add/match files, restructure), weighted and split analyses,
 print output, session restore, and the 0.3 trustworthy editing layer (undo,

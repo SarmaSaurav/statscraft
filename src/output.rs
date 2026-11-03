@@ -712,6 +712,127 @@ impl OutputTable {
         }
     }
 
+    pub fn from_logistic(r: &crate::stats::LogisticResult) -> Self {
+        let mut rows: Vec<Vec<String>> = r
+            .coefficients
+            .iter()
+            .map(|c| {
+                vec![
+                    c.name.clone(),
+                    format!("{:.4}", c.b),
+                    format!("{:.4}", c.std_error),
+                    format!("{:.4}", c.wald),
+                    format!("{:.4}", c.p),
+                    format!("{:.4}", c.odds_ratio),
+                ]
+            })
+            .collect();
+        rows.push(vec![String::new()]);
+        rows.push(vec![
+            "Model".into(),
+            format!("N={}", r.n),
+            format!("events={}", r.events),
+            format!("-2LL={:.3}", r.minus2ll),
+            format!("LR chi2={:.3} df={:.0} p={:.4}", r.lr_chi2, r.lr_df, r.lr_p),
+            format!("Nagelkerke={:.3}", r.nagelkerke),
+        ]);
+        Self {
+            title: format!("Binary Logistic Regression: {}", r.outcome),
+            headers: vec![
+                "Term".into(),
+                "B".into(),
+                "Std. Error".into(),
+                "Wald".into(),
+                "p".into(),
+                "Exp(B)".into(),
+            ],
+            rows,
+            note: if r.converged {
+                "The higher outcome code is the event. Wald tests use one degree of freedom."
+                    .to_string()
+            } else {
+                "The fit did not converge. Treat the coefficients as provisional.".to_string()
+            },
+            chart: None,
+            pivot: None,
+        }
+    }
+
+    pub fn from_clusters(r: &crate::stats::ClusterResult) -> Self {
+        let mut headers = vec!["Cluster".into(), "N".into()];
+        headers.extend(r.variables.iter().cloned());
+        let rows = (0..r.k)
+            .map(|c| {
+                let mut row = vec![(c + 1).to_string(), r.sizes[c].to_string()];
+                for value in &r.centers[c] {
+                    row.push(format!("{value:.4}"));
+                }
+                row
+            })
+            .collect();
+        Self {
+            title: format!("{} (k={})", r.method, r.k),
+            headers,
+            rows,
+            note: format!(
+                "N={}. Variables were standardised before clustering. Centers are on the original scale.",
+                r.n
+            ),
+            chart: None,
+            pivot: None,
+        }
+    }
+
+    pub fn from_km(r: &crate::stats::KmResult) -> Self {
+        let mut rows = Vec::new();
+        for stratum in &r.strata {
+            for p in &stratum.points {
+                rows.push(vec![
+                    stratum.name.clone(),
+                    format!("{:.4}", p.time),
+                    p.at_risk.to_string(),
+                    p.events.to_string(),
+                    format!("{:.4}", p.survival),
+                    format!("{:.4}", p.std_error),
+                    stratum
+                        .median
+                        .map(|m| format!("{m:.4}"))
+                        .unwrap_or_else(|| "—".into()),
+                ]);
+            }
+        }
+        let note = match r.logrank_chi2 {
+            Some(chi) => format!(
+                "Log-rank chi-square={:.3}, df={:.0}, p={:.4}.",
+                chi,
+                r.logrank_df,
+                r.logrank_p.unwrap_or(f64::NAN)
+            ),
+            None if r.strata.len() > 2 => {
+                "Curves are split by group. The log-rank test is reported for two groups."
+                    .to_string()
+            }
+            None => "Greenwood standard errors. Median is the first time survival is at most 0.5."
+                .to_string(),
+        };
+        Self {
+            title: format!("Kaplan–Meier: {} by {}", r.time_var, r.status_var),
+            headers: vec![
+                "Group".into(),
+                "Time".into(),
+                "At risk".into(),
+                "Events".into(),
+                "Survival".into(),
+                "Std. Error".into(),
+                "Median".into(),
+            ],
+            rows,
+            note,
+            chart: None,
+            pivot: None,
+        }
+    }
+
     pub fn from_ttest(r: &crate::stats::TTestResult) -> Self {
         let rows = vec![vec![
             r.outcome.clone(),

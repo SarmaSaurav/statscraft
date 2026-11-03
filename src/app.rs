@@ -2513,6 +2513,7 @@ impl eframe::App for StatsCraftApp {
                         });
                         ui.menu_button("Regression", |ui| {
                             if crate::icon::menu_item(ui, crate::theme::Icon::Regression, "Linear…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Regression); }
+                            if crate::icon::menu_item(ui, crate::theme::Icon::Regression, "Binary Logistic…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Logistic); }
                             crate::icon::menu_item_disabled(
                                 ui,
                                 crate::theme::Icon::Regression,
@@ -2526,6 +2527,8 @@ impl eframe::App for StatsCraftApp {
                         });
                         ui.menu_button("Classify", |ui| {
                             if crate::icon::menu_item(ui, crate::theme::Icon::Correlation, "ROC Curve…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Roc); }
+                            if crate::icon::menu_item(ui, crate::theme::Icon::Correlation, "K-Means…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::KMeans); }
+                            if crate::icon::menu_item(ui, crate::theme::Icon::Correlation, "Hierarchical…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Hierarchical); }
                         });
                         ui.menu_button("Nonparametric Tests", |ui| {
                             if crate::icon::menu_item(ui, crate::theme::Icon::TTest, "One-Sample Proportion…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Proportion); }
@@ -2533,6 +2536,9 @@ impl eframe::App for StatsCraftApp {
                             if crate::icon::menu_item(ui, crate::theme::Icon::TTest, "Kruskal-Wallis H…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::KruskalWallis); }
                             if crate::icon::menu_item(ui, crate::theme::Icon::TTest, "Wilcoxon Signed-Rank…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Wilcoxon); }
                             if crate::icon::menu_item(ui, crate::theme::Icon::TTest, "Friedman…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::Friedman); }
+                        });
+                        ui.menu_button("Survival", |ui| {
+                            if crate::icon::menu_item(ui, crate::theme::Icon::Explore, "Kaplan-Meier…").clicked() { ui.close_menu(); self.open_dialog(crate::dialog::Procedure::KaplanMeier); }
                         });
                         ui.separator();
                         crate::icon::menu_item_disabled(

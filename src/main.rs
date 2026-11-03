@@ -87,6 +87,10 @@ fn parse_procedure(name: &str) -> Option<Procedure> {
         "factor" => Some(Procedure::Factor),
         "roc" => Some(Procedure::Roc),
         "glm" => Some(Procedure::Glm),
+        "logistic" | "logit" => Some(Procedure::Logistic),
+        "kmeans" | "k_means" => Some(Procedure::KMeans),
+        "cluster" | "hierarchical" => Some(Procedure::Hierarchical),
+        "km" | "kaplan" | "kaplan_meier" => Some(Procedure::KaplanMeier),
         _ => None,
     }
 }
@@ -113,5 +117,9 @@ fn known_procedures() -> Vec<&'static str> {
         "factor",
         "roc",
         "glm",
+        "logistic",
+        "kmeans",
+        "cluster",
+        "km",
     ]
 }

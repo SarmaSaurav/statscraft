@@ -5,6 +5,28 @@ All the notable changes to StatsCraft.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.5.0 - 2026-11-03
+
+Analytical breadth. The procedures that were still missing from a normal
+Analyse menu: a test against a constant, a binary model, two cluster
+methods, and a survival curve. Regression diagnostics were already in 0.4.
+
+### Added
+
+- **One-sample t** and **one-sample proportion** (normal z and exact binomial).
+- **Binary logistic regression** (`LOGISTIC y WITH x...`): coefficients, Wald
+  tests, odds ratios, likelihood-ratio chi-square, and Nagelkerke R².
+- **K-means** and **hierarchical clustering** (average linkage). Variables are
+  standardised first. Centers are reported on the original scale. `/SAVE`
+  writes `CLU_n`.
+- **Kaplan–Meier** (`KM time BY status /EVENT=1`), with Greenwood standard
+  errors, a median, and a two-group log-rank test when `/GROUP=` is set.
+
+### Not in this release
+
+- Multiple imputation. It waits on a missing-data design.
+- Curve Estimation and Reports stay greyed out.
+
 ## 0.4.0 - 2026-10-23
 
 The "preparation and output" release. Transform and Data menus now cover the

@@ -51,6 +51,10 @@ pub enum Procedure {
     Glm,
     OneSampleT,
     Proportion,
+    Logistic,
+    KMeans,
+    Hierarchical,
+    KaplanMeier,
 }
 
 impl Procedure {
@@ -77,6 +81,10 @@ impl Procedure {
             Procedure::Glm => "General Linear Model",
             Procedure::OneSampleT => "One-Sample T Test",
             Procedure::Proportion => "One-Sample Proportion",
+            Procedure::Logistic => "Binary Logistic Regression",
+            Procedure::KMeans => "K-Means Cluster Analysis",
+            Procedure::Hierarchical => "Hierarchical Cluster Analysis",
+            Procedure::KaplanMeier => "Kaplan-Meier",
         }
     }
 
@@ -103,6 +111,10 @@ impl Procedure {
             Procedure::Glm => "GLM",
             Procedure::OneSampleT => "T-TEST ONESAMPLE",
             Procedure::Proportion => "PROPORTION",
+            Procedure::Logistic => "LOGISTIC",
+            Procedure::KMeans => "KMEANS",
+            Procedure::Hierarchical => "CLUSTER",
+            Procedure::KaplanMeier => "KM",
         }
     }
 
@@ -254,8 +266,13 @@ pub struct DialogState {
     pub n_components: Option<usize>,
     /// Hypothesised mean, or hypothesised proportion.
     pub test_value: f64,
-    /// Numeric code counted as a success in a one-sample proportion.
+    /// Numeric code counted as a success in a one-sample proportion,
+    /// or as the event in a Kaplan–Meier status variable.
     pub success_value: f64,
+    /// Number of clusters requested by K-means or hierarchical clustering.
+    pub cluster_k: usize,
+    /// Write cluster membership back to the data.
+    pub save_clusters: bool,
     pub options: StatOptions,
     pub sub: SubDialog,
     /// Set when the user pressed Paste — the generated syntax goes to the
@@ -282,6 +299,8 @@ impl DialogState {
                 0.0
             },
             success_value: 1.0,
+            cluster_k: 2,
+            save_clusters: false,
             options: StatOptions::default(),
             sub: SubDialog::None,
             pasted: None,
@@ -296,6 +315,10 @@ impl DialogState {
             // The paired and Friedman tests compare several variables.
             Procedure::Wilcoxon => self.targets.len() >= 2,
             Procedure::Friedman => self.targets.len() >= 3,
+            Procedure::Logistic | Procedure::KaplanMeier => self.targets.len() >= 2,
+            Procedure::KMeans | Procedure::Hierarchical => {
+                self.targets.len() >= 1 && self.cluster_k >= 2
+            }
             _ if self.procedure.needs_group() => {
                 self.targets.len() >= 1 && self.group_var.is_some()
             }
@@ -482,6 +505,44 @@ impl DialogState {
                     p.push_str(&format!(" /METHOD=SSTYPE({})", ss));
                 }
                 parts.push(p);
+            }
+            Procedure::Logistic => {
+                if self.targets.len() < 2 {
+                    return None;
+                }
+                parts.push(format!(
+                    "LOGISTIC {} WITH {}",
+                    self.targets[0],
+                    self.targets[1..].join(" ")
+                ));
+            }
+            Procedure::KMeans | Procedure::Hierarchical => {
+                if self.targets.is_empty() || self.cluster_k < 2 {
+                    return None;
+                }
+                let mut line = format!(
+                    "{} {} /K={}",
+                    self.procedure.command(),
+                    vars,
+                    self.cluster_k
+                );
+                if self.save_clusters {
+                    line.push_str(" /SAVE");
+                }
+                parts.push(line);
+            }
+            Procedure::KaplanMeier => {
+                if self.targets.len() < 2 {
+                    return None;
+                }
+                let mut line = format!(
+                    "KM {} BY {} /EVENT={}",
+                    self.targets[0], self.targets[1], self.success_value
+                );
+                if let Some(g) = &self.group_var {
+                    line.push_str(&format!(" /GROUP={g}"));
+                }
+                parts.push(line);
             }
             Procedure::OneSampleT => {
                 parts.push(format!(
@@ -887,7 +948,11 @@ pub fn render(
                     | Procedure::Friedman
                     | Procedure::Reliability
                     | Procedure::OneSampleT
-                    | Procedure::Proportion => {}
+                    | Procedure::Proportion
+                    | Procedure::Logistic
+                    | Procedure::KMeans
+                    | Procedure::Hierarchical
+                    | Procedure::KaplanMeier => {}
                 }
             });
 
@@ -918,6 +983,38 @@ pub fn render(
                         &mut d.options.save_standardised,
                         egui::RichText::new("Save standardized values as variables").size(12.0),
                     );
+                }
+                Procedure::KMeans | Procedure::Hierarchical => {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Clusters:").size(12.0));
+                        let mut k = d.cluster_k as i64;
+                        ui.add(egui::DragValue::new(&mut k).range(2..=20).speed(0.2));
+                        d.cluster_k = k.clamp(2, 20) as usize;
+                        ui.checkbox(&mut d.save_clusters, egui::RichText::new("Save cluster membership").size(12.0));
+                    });
+                }
+                Procedure::KaplanMeier => {
+                    ui.label(egui::RichText::new("First variable is time. Second is status.").size(12.0).color(theme::text_muted()));
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Event code:").size(12.0));
+                        ui.add(egui::DragValue::new(&mut d.success_value).speed(1.0));
+                        ui.label(egui::RichText::new("Factor:").size(12.0));
+                        let mut choice = d.group_var.clone().unwrap_or_default();
+                        egui::ComboBox::from_id_salt("km_group")
+                            .selected_text(if choice.is_empty() {
+                                "(none)".to_string()
+                            } else {
+                                choice.clone()
+                            })
+                            .width(120.0)
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut choice, String::new(), "(none)");
+                                for (name, _) in &vars {
+                                    ui.selectable_value(&mut choice, name.clone(), name.as_str());
+                                }
+                            });
+                        d.group_var = if choice.is_empty() { None } else { Some(choice) };
+                    });
                 }
                 Procedure::OneSampleT => {
                     ui.horizontal(|ui| {

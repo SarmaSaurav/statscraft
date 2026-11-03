@@ -169,6 +169,10 @@ const COMMAND_WORDS: &[&str] = &[
     "CORRELATIONS",
     "CORR",
     "REGRESSION",
+    "LOGISTIC",
+    "KMEANS",
+    "CLUSTER",
+    "KM",
     "CROSSTABS",
     "CROSSTAB",
     "GLM",
@@ -367,6 +371,10 @@ fn is_analysis_command(cmd: &str) -> bool {
             | "CORR"
             | "CORRELATIONS"
             | "REGRESSION"
+            | "LOGISTIC"
+            | "KMEANS"
+            | "CLUSTER"
+            | "KM"
     )
 }
 
@@ -584,6 +592,134 @@ fn execute_line_inner(app: &mut StatsCraftApp, line: &str) {
                     if !app.outputs.is_empty() {
                         app.show_output_window = true;
                     }
+                }
+            }
+        }
+        "LOGISTIC" => {
+            let cmd = Command::parse(line);
+            let rest = &cmd.args;
+            let wi = rest.iter().position(|t| t.eq_ignore_ascii_case("WITH"));
+            let (y_args, x_start) = match wi {
+                Some(i) => (rest[..i].to_vec(), i + 1),
+                None => (rest.clone(), rest.len()),
+            };
+            if y_args.len() != 1 || x_start >= rest.len() {
+                app.status = "LOGISTIC: expected 'LOGISTIC y WITH x...'.".to_string();
+                return;
+            }
+            let Some(t) = app.table.clone() else {
+                app.status = "No data loaded.".to_string();
+                return;
+            };
+            let Some(yi) = t.column_index(&y_args[0]) else {
+                app.status = "LOGISTIC: unknown outcome.".to_string();
+                return;
+            };
+            let xs: Vec<usize> = rest[x_start..]
+                .iter()
+                .filter_map(|n| t.column_index(n))
+                .collect();
+            if xs.is_empty() {
+                app.status = "LOGISTIC: no predictors.".to_string();
+                return;
+            }
+            match stats::logistic_regression(&t, yi, &xs) {
+                Some(r) => {
+                    app.outputs.push(OutputTable::from_logistic(&r));
+                    app.status = format!("LOGISTIC executed: {} on {}.", r.outcome, r.predictors.join(", "));
+                    app.show_output_window = true;
+                }
+                None => {
+                    app.status = "LOGISTIC failed (binary numeric outcome, 2+ complete cases, both outcome codes present).".to_string();
+                }
+            }
+        }
+        "KMEANS" | "CLUSTER" => {
+            let cmd = Command::parse(line);
+            let k = cmd
+                .sub("K")
+                .and_then(|w| w.first())
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(2);
+            let save = cmd.sub("SAVE").is_some();
+            if cmd.args.is_empty() {
+                app.status = "Expected variable names and /K=.".to_string();
+                return;
+            }
+            let Some(t) = app.table.clone() else {
+                app.status = "No data loaded.".to_string();
+                return;
+            };
+            let idxs: Vec<usize> = cmd.args.iter().filter_map(|n| t.column_index(n)).collect();
+            if idxs.is_empty() {
+                app.status = "Unknown clustering variable.".to_string();
+                return;
+            }
+            let result = if cmd.name == "CLUSTER" {
+                stats::hierarchical_average(&t, &idxs, k)
+            } else {
+                stats::kmeans(&t, &idxs, k)
+            };
+            let Some(result) = result else {
+                app.status = "Clustering failed (need k between 2 and the number of complete cases; hierarchical clustering stops above 800 cases).".to_string();
+                return;
+            };
+            app.outputs.push(OutputTable::from_clusters(&result));
+            if save {
+                let before = app.table.clone();
+                let saved = app
+                    .table
+                    .as_mut()
+                    .map(|tbl| stats::save_cluster_ids(tbl, &result))
+                    .unwrap_or_default();
+                app.record_table_change(before);
+                app.dirty = true;
+                app.status = format!("{} saved cluster ids in {}.", result.method, saved);
+            } else {
+                app.status = format!("{} finished, k={}, N={}.", result.method, result.k, result.n);
+            }
+            app.show_output_window = true;
+        }
+        "KM" => {
+            let cmd = Command::parse(line);
+            let event = cmd
+                .sub("EVENT")
+                .and_then(|w| w.first())
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(1.0);
+            let rest = &cmd.args;
+            let bi = rest.iter().position(|t| t.eq_ignore_ascii_case("BY"));
+            let Some(bi) = bi else {
+                app.status = "KM: expected 'KM time BY status /EVENT=1'.".to_string();
+                return;
+            };
+            if bi == 0 || bi + 1 >= rest.len() {
+                app.status = "KM: expected 'KM time BY status'.".to_string();
+                return;
+            }
+            let Some(t) = app.table.clone() else {
+                app.status = "No data loaded.".to_string();
+                return;
+            };
+            let (Some(time_i), Some(status_i)) = (
+                t.column_index(&rest[0]),
+                t.column_index(&rest[bi + 1]),
+            ) else {
+                app.status = "KM: unknown variable.".to_string();
+                return;
+            };
+            let group = cmd
+                .sub("GROUP")
+                .and_then(|w| w.first())
+                .and_then(|name| t.column_index(name));
+            match stats::kaplan_meier(&t, time_i, status_i, group, event) {
+                Some(r) => {
+                    app.outputs.push(OutputTable::from_km(&r));
+                    app.status = format!("Kaplan–Meier executed: {} groups.", r.strata.len());
+                    app.show_output_window = true;
+                }
+                None => {
+                    app.status = "KM failed (numeric time and status, at least two usable cases).".to_string();
                 }
             }
         }

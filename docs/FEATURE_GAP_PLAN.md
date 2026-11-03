@@ -262,14 +262,14 @@ saved to a `.scdoc` document and opened again.
    Word/Excel-compatible HTML (not native OOXML).
 6. Restore points (`.sav` snapshot after unclean exit).
 
-### 0.5 — Analytical breadth
+### 0.5 — Analytical breadth — **Done (0.5.0)**, except imputation
 
-1. One-sample t and proportions.
-2. Regression diagnostics: residuals, collinearity, plots.
-3. Binary logistic regression.
-4. K-means and hierarchical clustering.
-5. Kaplan-Meier survival.
-6. Multiple imputation only after the missing-data model is designed.
+1. One-sample t and proportions. **Done.**
+2. Regression diagnostics: residuals, collinearity, plots. **Done** (shipped with the regression engine; Statistics, Plots, and Save dialogs).
+3. Binary logistic regression. **Done.**
+4. K-means and hierarchical clustering. **Done.**
+5. Kaplan-Meier survival. **Done.** Two-group log-rank only.
+6. Multiple imputation only after the missing-data model is designed. **Not in 0.5.**
 
 Anything beyond that is a separate product decision, not a backlog item.
 

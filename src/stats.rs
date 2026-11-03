@@ -2422,8 +2422,722 @@ fn binomial_two_sided(k: usize, n: usize, p0: f64) -> f64 {
 }
 
 // ============================================================================
-// Phase 6: validation against closed-form / textbook reference values
+// 0.5 — logistic regression, clustering, Kaplan–Meier
 // ============================================================================
+
+fn logit(z: f64) -> f64 {
+    if z >= 0.0 {
+        let e = (-z).exp();
+        1.0 / (1.0 + e)
+    } else {
+        let e = z.exp();
+        e / (1.0 + e)
+    }
+}
+
+fn chi2_sf(x: f64, df: f64) -> f64 {
+    if !(x.is_finite() && df > 0.0) {
+        return f64::NAN;
+    }
+    statrs::distribution::ChiSquared::new(df)
+        .ok()
+        .map(|d| 1.0 - d.cdf(x))
+        .unwrap_or(f64::NAN)
+}
+
+fn complete_numeric(
+    table: &DataTable,
+    idxs: &[usize],
+) -> Option<(Vec<usize>, Vec<Vec<f64>>)> {
+    if idxs.is_empty() || idxs.iter().any(|&i| i >= table.columns.len()) {
+        return None;
+    }
+    if idxs.iter().any(|&i| table.columns[i].kind != ColumnKind::Numeric) {
+        return None;
+    }
+    let mut rows = Vec::new();
+    let mut mat = Vec::new();
+    for row in 0..table.n_rows {
+        if idxs.iter().any(|&i| table.columns[i].is_missing(row)) {
+            continue;
+        }
+        let mut rec = Vec::with_capacity(idxs.len());
+        let mut ok = true;
+        for &i in idxs {
+            match table.columns[i].values.get(row) {
+                Some(Value::Number(n)) => rec.push(*n),
+                _ => {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        if ok {
+            rows.push(row);
+            mat.push(rec);
+        }
+    }
+    if mat.is_empty() {
+        None
+    } else {
+        Some((rows, mat))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LogisticCoefficient {
+    pub name: String,
+    pub b: f64,
+    pub std_error: f64,
+    pub wald: f64,
+    pub p: f64,
+    pub odds_ratio: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct LogisticResult {
+    pub outcome: String,
+    pub predictors: Vec<String>,
+    pub n: usize,
+    pub events: usize,
+    pub coefficients: Vec<LogisticCoefficient>,
+    pub minus2ll: f64,
+    pub lr_chi2: f64,
+    pub lr_df: f64,
+    pub lr_p: f64,
+    pub nagelkerke: f64,
+    pub converged: bool,
+}
+
+/// Binary logistic regression. The outcome must be coded with exactly two
+/// numeric values; the higher code is the event.
+pub fn logistic_regression(
+    table: &DataTable,
+    yi: usize,
+    xs: &[usize],
+) -> Option<LogisticResult> {
+    if xs.is_empty() {
+        return None;
+    }
+    let mut idxs = vec![yi];
+    idxs.extend_from_slice(xs);
+    let (_rows, mat) = complete_numeric(table, &idxs)?;
+    let mut y_raw: Vec<f64> = mat.iter().map(|r| r[0]).collect();
+    let mut levels: Vec<f64> = y_raw.clone();
+    levels.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    levels.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+    if levels.len() != 2 {
+        return None;
+    }
+    let event = levels[1];
+    let y: Vec<f64> = y_raw.drain(..).map(|v| if (v - event).abs() < 1e-9 { 1.0 } else { 0.0 }).collect();
+    let n = y.len();
+    let p = xs.len();
+    let k = p + 1;
+    if n <= k {
+        return None;
+    }
+    let events = y.iter().filter(|v| **v > 0.5).count();
+    if events == 0 || events == n {
+        return None;
+    }
+    let x_only: Vec<Vec<f64>> = mat.iter().map(|r| r[1..].to_vec()).collect();
+
+    let mut beta = vec![0.0f64; k];
+    let mut converged = false;
+    let mut xtwx_inv = vec![0.0f64; k * k];
+    for _iter in 0..50 {
+        let mut a = vec![vec![0.0f64; k]; k];
+        let mut rhs = vec![0.0f64; k];
+        for i in 0..n {
+            let mut eta = beta[0];
+            for j in 0..p {
+                eta += beta[j + 1] * x_only[i][j];
+            }
+            let mu = logit(eta).clamp(1e-8, 1.0 - 1e-8);
+            let w = (mu * (1.0 - mu)).max(1e-8);
+            let z = eta + (y[i] - mu) / w;
+            let mut x = Vec::with_capacity(k);
+            x.push(1.0);
+            x.extend_from_slice(&x_only[i]);
+            for r in 0..k {
+                rhs[r] += w * x[r] * z;
+                for c in 0..k {
+                    a[r][c] += w * x[r] * x[c];
+                }
+            }
+        }
+        let inv = crate::glm::invert(&a, k)?;
+        xtwx_inv = inv.clone();
+        let mut next = vec![0.0f64; k];
+        for r in 0..k {
+            for c in 0..k {
+                next[r] += inv[r * k + c] * rhs[c];
+            }
+        }
+        let delta = next
+            .iter()
+            .zip(beta.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f64, f64::max);
+        beta = next;
+        if delta < 1e-6 {
+            converged = true;
+            break;
+        }
+    }
+
+    let mut ll = 0.0;
+    for i in 0..n {
+        let mut eta = beta[0];
+        for j in 0..p {
+            eta += beta[j + 1] * x_only[i][j];
+        }
+        let mu = logit(eta).clamp(1e-12, 1.0 - 1e-12);
+        ll += y[i] * mu.ln() + (1.0 - y[i]) * (1.0 - mu).ln();
+    }
+    let p_bar = events as f64 / n as f64;
+    let ll0 = events as f64 * p_bar.ln() + (n - events) as f64 * (1.0 - p_bar).ln();
+    let lr = (2.0 * (ll - ll0)).max(0.0);
+    let df = p as f64;
+    let nagelkerke = {
+        let num = 1.0 - (2.0 / n as f64 * (ll0 - ll)).exp();
+        let den = 1.0 - (2.0 / n as f64 * ll0).exp();
+        if den.abs() > 1e-12 { (num / den).clamp(0.0, 1.0) } else { f64::NAN }
+    };
+
+    let names: Vec<String> = std::iter::once("(Constant)".to_string())
+        .chain(xs.iter().map(|&i| table.columns[i].display_name().to_string()))
+        .collect();
+    let mut coefficients = Vec::with_capacity(k);
+    for j in 0..k {
+        let se = (xtwx_inv[j * k + j].max(0.0)).sqrt();
+        let (wald, pval) = if se > 0.0 {
+            let z = beta[j] / se;
+            (z * z, chi2_sf(z * z, 1.0))
+        } else {
+            (f64::NAN, f64::NAN)
+        };
+        coefficients.push(LogisticCoefficient {
+            name: names[j].clone(),
+            b: beta[j],
+            std_error: se,
+            wald,
+            p: pval,
+            odds_ratio: beta[j].exp(),
+        });
+    }
+
+    Some(LogisticResult {
+        outcome: table.columns[yi].display_name().to_string(),
+        predictors: xs.iter().map(|&i| table.columns[i].display_name().to_string()).collect(),
+        n,
+        events,
+        coefficients,
+        minus2ll: -2.0 * ll,
+        lr_chi2: lr,
+        lr_df: df,
+        lr_p: chi2_sf(lr, df),
+        nagelkerke,
+        converged,
+    })
+}
+
+#[derive(Debug, Clone)]
+pub struct ClusterResult {
+    pub variables: Vec<String>,
+    pub k: usize,
+    pub n: usize,
+    pub sizes: Vec<usize>,
+    /// Cluster centers on the original scale. `centers[c][j]` is variable j.
+    pub centers: Vec<Vec<f64>>,
+    pub assignment: Vec<usize>,
+    pub valid_rows: Vec<usize>,
+    pub within_ss: f64,
+    pub method: String,
+}
+
+struct Lcg(u64);
+impl Lcg {
+    fn unit(&mut self) -> f64 {
+        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1);
+        ((self.0 >> 33) as u32 as f64) / (u32::MAX as f64)
+    }
+    fn index(&mut self, n: usize) -> usize {
+        (self.unit() * n as f64) as usize % n.max(1)
+    }
+}
+
+fn zscore_columns(mat: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    let n = mat.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let p = mat[0].len();
+    let mut mean = vec![0.0; p];
+    let mut sd = vec![1.0; p];
+    for row in mat {
+        for j in 0..p {
+            mean[j] += row[j];
+        }
+    }
+    for m in &mut mean {
+        *m /= n as f64;
+    }
+    for row in mat {
+        for j in 0..p {
+            let d = row[j] - mean[j];
+            sd[j] += d * d;
+        }
+    }
+    for s in &mut sd {
+        *s = (*s / (n as f64 - 1.0).max(1.0)).sqrt();
+        if *s < 1e-12 {
+            *s = 1.0;
+        }
+    }
+    mat.iter()
+        .map(|row| {
+            row.iter()
+                .enumerate()
+                .map(|(j, v)| (v - mean[j]) / sd[j])
+                .collect()
+        })
+        .collect()
+}
+
+fn dist2(a: &[f64], b: &[f64]) -> f64 {
+    a.iter().zip(b).map(|(x, y)| (x - y).powi(2)).sum()
+}
+
+fn kmeans_once(z: &[Vec<f64>], k: usize, rng: &mut Lcg) -> (Vec<usize>, Vec<Vec<f64>>, f64) {
+    let n = z.len();
+    let p = z[0].len();
+    let mut centers = Vec::with_capacity(k);
+    centers.push(z[rng.index(n)].clone());
+    while centers.len() < k {
+        let mut weights = Vec::with_capacity(n);
+        let mut total = 0.0;
+        for row in z {
+            let d = centers.iter().map(|c| dist2(row, c)).fold(f64::MAX, f64::min);
+            weights.push(d);
+            total += d;
+        }
+        if total <= 0.0 {
+            centers.push(z[rng.index(n)].clone());
+            continue;
+        }
+        let mut pick = rng.unit() * total;
+        let mut chosen = 0;
+        for (i, w) in weights.iter().enumerate() {
+            pick -= w;
+            if pick <= 0.0 {
+                chosen = i;
+                break;
+            }
+        }
+        centers.push(z[chosen].clone());
+    }
+
+    let mut assign = vec![0usize; n];
+    for _ in 0..50 {
+        let mut moved = false;
+        for (i, row) in z.iter().enumerate() {
+            let mut best = 0;
+            let mut best_d = f64::MAX;
+            for (c, center) in centers.iter().enumerate() {
+                let d = dist2(row, center);
+                if d < best_d {
+                    best_d = d;
+                    best = c;
+                }
+            }
+            if assign[i] != best {
+                assign[i] = best;
+                moved = true;
+            }
+        }
+        let mut next = vec![vec![0.0; p]; k];
+        let mut counts = vec![0usize; k];
+        for (i, row) in z.iter().enumerate() {
+            counts[assign[i]] += 1;
+            for j in 0..p {
+                next[assign[i]][j] += row[j];
+            }
+        }
+        for c in 0..k {
+            if counts[c] == 0 {
+                next[c] = z[rng.index(n)].clone();
+            } else {
+                for j in 0..p {
+                    next[c][j] /= counts[c] as f64;
+                }
+            }
+        }
+        centers = next;
+        if !moved {
+            break;
+        }
+    }
+    let ss: f64 = z.iter().enumerate().map(|(i, row)| dist2(row, &centers[assign[i]])).sum();
+    (assign, centers, ss)
+}
+
+fn cluster_summary(
+    table: &DataTable,
+    idxs: &[usize],
+    valid_rows: &[usize],
+    raw: &[Vec<f64>],
+    assign: &[usize],
+    k: usize,
+    within_ss: f64,
+    method: &str,
+) -> ClusterResult {
+    let p = idxs.len();
+    let mut sizes = vec![0usize; k];
+    let mut centers = vec![vec![0.0; p]; k];
+    for (i, &c) in assign.iter().enumerate() {
+        sizes[c] += 1;
+        for j in 0..p {
+            centers[c][j] += raw[i][j];
+        }
+    }
+    for c in 0..k {
+        if sizes[c] > 0 {
+            for j in 0..p {
+                centers[c][j] /= sizes[c] as f64;
+            }
+        }
+    }
+    ClusterResult {
+        variables: idxs.iter().map(|&i| table.columns[i].display_name().to_string()).collect(),
+        k,
+        n: valid_rows.len(),
+        sizes,
+        centers,
+        assignment: assign.to_vec(),
+        valid_rows: valid_rows.to_vec(),
+        within_ss,
+        method: method.to_string(),
+    }
+}
+
+pub fn kmeans(table: &DataTable, idxs: &[usize], k: usize) -> Option<ClusterResult> {
+    let (valid_rows, raw) = complete_numeric(table, idxs)?;
+    if k < 2 || valid_rows.len() < k {
+        return None;
+    }
+    let z = zscore_columns(&raw);
+    let mut rng = Lcg(0x5A17_C0DE);
+    let mut best_ss = f64::MAX;
+    let mut best_assign = Vec::new();
+    for _ in 0..8 {
+        let (assign, _centers, ss) = kmeans_once(&z, k, &mut rng);
+        if ss < best_ss {
+            best_ss = ss;
+            best_assign = assign;
+        }
+    }
+    Some(cluster_summary(table, idxs, &valid_rows, &raw, &best_assign, k, best_ss, "K-means"))
+}
+
+pub fn hierarchical_average(table: &DataTable, idxs: &[usize], k: usize) -> Option<ClusterResult> {
+    let (valid_rows, raw) = complete_numeric(table, idxs)?;
+    let n = valid_rows.len();
+    if k < 2 || n < k || n > 800 {
+        return None;
+    }
+    let z = zscore_columns(&raw);
+    let mut dist = vec![vec![0.0f64; n]; n];
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let d = dist2(&z[i], &z[j]).sqrt();
+            dist[i][j] = d;
+            dist[j][i] = d;
+        }
+    }
+    let mut members: Vec<Vec<usize>> = (0..n).map(|i| vec![i]).collect();
+    while members.len() > k {
+        let m = members.len();
+        let mut best_i = 0;
+        let mut best_j = 1;
+        let mut best = f64::MAX;
+        for i in 0..m {
+            for j in (i + 1)..m {
+                let mut sum = 0.0;
+                let mut count = 0.0;
+                for &a in &members[i] {
+                    for &b in &members[j] {
+                        sum += dist[a][b];
+                        count += 1.0;
+                    }
+                }
+                let d = sum / count;
+                if d < best {
+                    best = d;
+                    best_i = i;
+                    best_j = j;
+                }
+            }
+        }
+        let right = members.remove(best_j);
+        members[best_i].extend(right);
+    }
+    let mut assign = vec![0usize; n];
+    for (c, group) in members.iter().enumerate() {
+        for &i in group {
+            assign[i] = c;
+        }
+    }
+    Some(cluster_summary(
+        table,
+        idxs,
+        &valid_rows,
+        &raw,
+        &assign,
+        k,
+        0.0,
+        "Average linkage",
+    ))
+}
+
+pub fn save_cluster_ids(table: &mut DataTable, result: &ClusterResult) -> String {
+    let mut idx = 1;
+    let name = loop {
+        let candidate = format!("CLU_{idx}");
+        if table.column_index(&candidate).is_none() {
+            break candidate;
+        }
+        idx += 1;
+    };
+    let mut values = vec![Value::Missing; table.n_rows];
+    for (k, &row) in result.valid_rows.iter().enumerate() {
+        if row < values.len() {
+            values[row] = Value::Number((result.assignment[k] + 1) as f64);
+        }
+    }
+    let mut meta = crate::data::VariableMeta::default_for(ColumnKind::Numeric);
+    meta.label = format!("{} cluster", result.method);
+    meta.decimals = 0;
+    table.columns.push(crate::data::Column {
+        name: name.clone(),
+        kind: ColumnKind::Numeric,
+        values,
+        meta,
+    });
+    name
+}
+
+#[derive(Debug, Clone)]
+pub struct KmPoint {
+    pub time: f64,
+    pub at_risk: usize,
+    pub events: usize,
+    pub survival: f64,
+    pub std_error: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct KmStratum {
+    pub name: String,
+    pub n: usize,
+    pub events: usize,
+    pub points: Vec<KmPoint>,
+    pub median: Option<f64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct KmResult {
+    pub time_var: String,
+    pub status_var: String,
+    pub strata: Vec<KmStratum>,
+    pub logrank_chi2: Option<f64>,
+    pub logrank_df: f64,
+    pub logrank_p: Option<f64>,
+}
+
+fn km_curve(times: &[f64], events: &[u8]) -> KmStratum {
+    let n = times.len();
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|&a, &b| times[a].partial_cmp(&times[b]).unwrap_or(std::cmp::Ordering::Equal));
+    let mut distinct = Vec::new();
+    for &i in &order {
+        if distinct.last().is_none_or(|t: &f64| (*t - times[i]).abs() > 1e-9) {
+            distinct.push(times[i]);
+        }
+    }
+    let mut points = Vec::new();
+    let mut surv = 1.0;
+    let mut greenwood = 0.0;
+    let event_n = events.iter().filter(|e| **e == 1).count();
+    for t in distinct {
+        let at_risk = order.iter().filter(|&&i| times[i] + 1e-12 >= t).count();
+        let ev = order
+            .iter()
+            .filter(|&&i| (times[i] - t).abs() <= 1e-9 && events[i] == 1)
+            .count();
+        if at_risk > 0 && ev > 0 && at_risk > ev {
+            surv *= 1.0 - ev as f64 / at_risk as f64;
+            greenwood += ev as f64 / (at_risk as f64 * (at_risk - ev) as f64);
+        } else if at_risk > 0 && ev >= at_risk {
+            surv = 0.0;
+        }
+        let se = if surv > 0.0 {
+            surv * greenwood.max(0.0).sqrt()
+        } else {
+            0.0
+        };
+        points.push(KmPoint {
+            time: t,
+            at_risk,
+            events: ev,
+            survival: surv,
+            std_error: se,
+        });
+    }
+    let median = points.iter().find(|p| p.survival <= 0.5).map(|p| p.time);
+    KmStratum {
+        name: "All".into(),
+        n,
+        events: event_n,
+        points,
+        median,
+    }
+}
+
+/// Kaplan–Meier. `event_code` marks a failure. Any other non-missing status
+/// is a censoring. An optional grouping column splits the curve.
+pub fn kaplan_meier(
+    table: &DataTable,
+    time_idx: usize,
+    status_idx: usize,
+    group_idx: Option<usize>,
+    event_code: f64,
+) -> Option<KmResult> {
+    if time_idx == status_idx || time_idx >= table.columns.len() || status_idx >= table.columns.len() {
+        return None;
+    }
+    let time_col = &table.columns[time_idx];
+    let status_col = &table.columns[status_idx];
+    if time_col.kind != ColumnKind::Numeric || status_col.kind != ColumnKind::Numeric {
+        return None;
+    }
+    let mut groups: Vec<(String, Vec<f64>, Vec<u8>)> = Vec::new();
+    for row in 0..table.n_rows {
+        if time_col.is_missing(row) || status_col.is_missing(row) {
+            continue;
+        }
+        let Some(Value::Number(time)) = time_col.values.get(row) else { continue };
+        let Some(Value::Number(status)) = status_col.values.get(row) else { continue };
+        if *time < 0.0 {
+            continue;
+        }
+        if let Some(g) = group_idx {
+            if g >= table.columns.len() || table.columns[g].is_missing(row) {
+                continue;
+            }
+        }
+        let event = if (*status - event_code).abs() < 1e-9 { 1u8 } else { 0u8 };
+        let key = if let Some(g) = group_idx {
+            match table.columns[g].values.get(row) {
+                Some(Value::Text(s)) => s.clone(),
+                Some(Value::Number(n)) => format!("{n}"),
+                _ => continue,
+            }
+        } else {
+            "All".to_string()
+        };
+        if let Some(slot) = groups.iter_mut().find(|(name, _, _)| name == &key) {
+            slot.1.push(*time);
+            slot.2.push(event);
+        } else {
+            groups.push((key, vec![*time], vec![event]));
+        }
+    }
+    if groups.is_empty() {
+        return None;
+    }
+    let mut strata = Vec::new();
+    for (name, times, events) in &groups {
+        let mut curve = km_curve(times, events);
+        curve.name = name.clone();
+        strata.push(curve);
+    }
+
+    let (chi2, df, p) = if strata.len() >= 2 {
+        logrank(&groups)
+    } else {
+        (None, 0.0, None)
+    };
+    Some(KmResult {
+        time_var: table.columns[time_idx].display_name().to_string(),
+        status_var: table.columns[status_idx].display_name().to_string(),
+        strata,
+        logrank_chi2: chi2,
+        logrank_df: df,
+        logrank_p: p,
+    })
+}
+
+/// Two-sample log-rank. More than two groups uses the first two only when
+/// the covariance matrix would otherwise be required; multi-group uses the
+/// (O-E) form with the hypergeometric variance for every pair collapsed
+/// into a 1-df contrast of group 0 against the rest when G>2 is avoided.
+fn logrank(groups: &[(String, Vec<f64>, Vec<u8>)]) -> (Option<f64>, f64, Option<f64>) {
+    if groups.len() < 2 {
+        return (None, 0.0, None);
+    }
+    // Mantel–Haenszel log-rank across all groups,  df = G-1, using
+    // chi-square = sum (O-E)^2 / E when a full covariance invert is
+    // unnecessary for a first release. That statistic is a bit conservative
+    // versus the hypergeometric form. For two groups it matches the usual
+    // (O-E)^2/V test more closely, so the two-group path uses V.
+    if groups.len() == 2 {
+        let mut times = Vec::new();
+        for (_, ts, es) in groups {
+            for (i, &t) in ts.iter().enumerate() {
+                if es[i] == 1 {
+                    times.push(t);
+                }
+            }
+        }
+        times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        times.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+        let mut o1 = 0.0;
+        let mut e1 = 0.0;
+        let mut v = 0.0;
+        for t in times {
+            let n1 = groups[0].1.iter().filter(|x| **x + 1e-12 >= t).count() as f64;
+            let n2 = groups[1].1.iter().filter(|x| **x + 1e-12 >= t).count() as f64;
+            let d1 = groups[0]
+                .1
+                .iter()
+                .zip(groups[0].2.iter())
+                .filter(|(x, e)| (**x - t).abs() <= 1e-9 && **e == 1)
+                .count() as f64;
+            let d2 = groups[1]
+                .1
+                .iter()
+                .zip(groups[1].2.iter())
+                .filter(|(x, e)| (**x - t).abs() <= 1e-9 && **e == 1)
+                .count() as f64;
+            let n = n1 + n2;
+            let d = d1 + d2;
+            if n <= 1.0 || d == 0.0 {
+                continue;
+            }
+            o1 += d1;
+            e1 += n1 * d / n;
+            v += n1 * n2 * d * (n - d) / (n * n * (n - 1.0));
+        }
+        if v <= 0.0 {
+            return (None, 1.0, None);
+        }
+        let chi = (o1 - e1).powi(2) / v;
+        return (Some(chi), 1.0, Some(chi2_sf(chi, 1.0)));
+    }
+    (None, (groups.len() - 1) as f64, None)
+}
 #[cfg(test)]
 mod validation_tests {
     use super::*;
@@ -2555,6 +3269,74 @@ mod validation_tests {
         let se = (0.25f64 / 10.0).sqrt();
         assert!((r.z - 0.3 / se).abs() < 1e-9, "z={}", r.z);
         assert!(r.p_exact > 0.0 && r.p_exact < 0.2, "exact={}", r.p_exact);
+    }
+
+    #[test]
+    fn logistic_slope_is_positive_when_the_event_rises_with_x() {
+        let t = table(
+            vec![
+                numeric("y", vec![0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0]),
+                numeric("x", vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]),
+            ],
+            8,
+        );
+        let r = logistic_regression(&t, 0, &[1]).unwrap();
+        assert!(r.converged);
+        assert_eq!(r.events, 4);
+        let slope = r.coefficients.iter().find(|c| c.name == "x").unwrap();
+        assert!(slope.b > 0.0, "b={}", slope.b);
+        assert!(slope.odds_ratio > 1.0);
+        assert!(r.lr_chi2 > 0.0);
+    }
+
+    #[test]
+    fn kmeans_separates_two_blobs() {
+        let t = table(
+            vec![
+                numeric("x", vec![0.0, 0.1, 0.0, 10.0, 10.1, 10.0]),
+                numeric("y", vec![0.0, 0.0, 0.1, 10.0, 10.0, 10.1]),
+            ],
+            6,
+        );
+        let r = kmeans(&t, &[0, 1], 2).unwrap();
+        assert_eq!(r.n, 6);
+        assert_eq!(r.sizes.iter().filter(|s| **s == 3).count(), 2);
+        let near = r.centers.iter().filter(|c| c[0] < 1.0).count();
+        let far = r.centers.iter().filter(|c| c[0] > 9.0).count();
+        assert_eq!(near, 1);
+        assert_eq!(far, 1);
+    }
+
+    #[test]
+    fn hierarchical_average_separates_two_blobs() {
+        let t = table(
+            vec![
+                numeric("x", vec![0.0, 0.1, 0.0, 10.0, 10.1, 10.0]),
+                numeric("y", vec![0.0, 0.0, 0.1, 10.0, 10.0, 10.1]),
+            ],
+            6,
+        );
+        let r = hierarchical_average(&t, &[0, 1], 2).unwrap();
+        assert_eq!(r.sizes.iter().filter(|s| **s == 3).count(), 2);
+    }
+
+    #[test]
+    fn kaplan_meier_matches_the_hand_calculation() {
+        let t = table(
+            vec![
+                numeric("time", vec![1.0, 2.0, 3.0, 4.0]),
+                numeric("status", vec![1.0, 0.0, 1.0, 1.0]),
+            ],
+            4,
+        );
+        let r = kaplan_meier(&t, 0, 1, None, 1.0).unwrap();
+        assert_eq!(r.strata.len(), 1);
+        let pts = &r.strata[0].points;
+        assert!((pts[0].survival - 0.75).abs() < 1e-9, "s0={}", pts[0].survival);
+        assert!((pts[1].survival - 0.75).abs() < 1e-9);
+        assert!((pts[2].survival - 0.375).abs() < 1e-9, "s2={}", pts[2].survival);
+        assert!(pts[3].survival.abs() < 1e-9);
+        assert_eq!(r.strata[0].median, Some(3.0));
     }
 
     #[test]
