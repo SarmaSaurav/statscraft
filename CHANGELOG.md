@@ -5,6 +5,20 @@ All the notable changes to StatsCraft.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.5.1 - 2026-11-03
+
+Article tables. A result is drawn the way a journal table is drawn, and it can be written into Word as a native table.
+
+### Added
+
+- **Article tables in the Output Viewer.** Rules only at the top, under the header, and at the bottom. Columns share one width, and the numbers in a column sit on the same decimal point, including values such as `< .001` and significance stars.
+- **Word document (.docx).** **File > Export to Microsoft Office > Word document (.docx)…** writes a real Word file. Each result is a native table with those rules and a decimal tab in each numeric column. A pivot with several measures becomes one table per measure.
+- **Copy Table** puts the same rules on the clipboard, so pasting into Word inserts a native table.
+
+### Changed
+
+- HTML export and **Print Output** use the article rules instead of a box around every cell.
+
 ## 0.5.0 - 2026-11-03
 
 Analytical breadth. The procedures that were still missing from a normal

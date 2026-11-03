@@ -7,6 +7,7 @@ mod app;
 mod chartbuilder;
 mod data;
 mod dialog;
+mod docx;
 mod glm;
 mod icon;
 mod outdoc;

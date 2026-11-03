@@ -2,8 +2,10 @@
 
 Lightweight statistical workbench written in Rust (native desktop app).
 
-**Version 0.5.0** adds one-sample tests, binary logistic regression, K-means
-and hierarchical clustering, and Kaplan–Meier. **Version 0.4.0** added data
+**Version 0.5.1** draws results as article tables — rules at the top, under
+the header, and at the bottom, with numbers on a shared decimal — and writes
+them to a real Word document. **Version 0.5.0** added one-sample tests, binary
+logistic regression, K-means and hierarchical clustering, and Kaplan–Meier. **Version 0.4.0** added data
 preparation and output polish: Transform dialogs
 (compute, recode, count, rank, automatic recode), Data prep (select, weight,
 split, aggregate, add/match files, restructure), weighted and split analyses,

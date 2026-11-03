@@ -2323,9 +2323,92 @@ pub fn regression_pp_plot(r: &crate::stats::RegressionResult) -> crate::output::
     }
 }
 
+/// Split a statistical number into the part before the decimal point and
+/// the part from the point onward, including a trailing significance mark.
+///
+/// `None` means the cell is a label, not a number. An inequality such as
+/// `< .001` keeps the sign on the left of the point, so a column of
+/// p-values still shares one decimal position.
+pub(crate) fn stat_number_parts(raw: &str) -> Option<(String, String)> {
+    let s = raw.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let mut chars = s.chars().peekable();
+    let mut ineq = String::new();
+    if matches!(chars.peek(), Some('<' | '>')) {
+        ineq.push(chars.next().unwrap());
+        if chars.peek() == Some(&' ') {
+            chars.next();
+        }
+    }
+    let rest: String = chars.collect();
+    let rest = rest.trim();
+    let star_at = rest
+        .char_indices()
+        .rev()
+        .take_while(|(_, c)| matches!(c, '*' | '†' | '‡'))
+        .last()
+        .map(|(i, _)| i)
+        .unwrap_or(rest.len());
+    let core = rest[..star_at].trim();
+    let stars = &rest[star_at..];
+    if core.is_empty() || core.parse::<f64>().is_err() {
+        return None;
+    }
+    match core.find('.') {
+        Some(dot) => Some((
+            format!("{ineq}{}", &core[..dot]),
+            format!(".{}{stars}", &core[dot + 1..]),
+        )),
+        None => Some((format!("{ineq}{core}"), stars.to_string())),
+    }
+}
+
+/// A column of numbers, allowing blank cells. The first column of a
+/// result is the stub and is not asked.
+pub(crate) fn column_is_numeric(cells: &[String]) -> bool {
+    let mut any = false;
+    for cell in cells {
+        if cell.trim().is_empty() {
+            continue;
+        }
+        if stat_number_parts(cell).is_none() {
+            return false;
+        }
+        any = true;
+    }
+    any
+}
+
 #[cfg(test)]
 mod pivot_tests {
     use super::*;
+
+    #[test]
+    fn statistical_numbers_split_on_the_decimal_point() {
+        assert_eq!(
+            stat_number_parts("1.50"),
+            Some(("1".into(), ".50".into()))
+        );
+        assert_eq!(stat_number_parts("12"), Some(("12".into(), String::new())));
+        assert_eq!(
+            stat_number_parts("-1.2"),
+            Some(("-1".into(), ".2".into()))
+        );
+        assert_eq!(
+            stat_number_parts("< .001"),
+            Some(("<".into(), ".001".into()))
+        );
+        assert_eq!(
+            stat_number_parts("0.032*"),
+            Some(("0".into(), ".032*".into()))
+        );
+        assert_eq!(stat_number_parts("Mean"), None);
+        assert_eq!(stat_number_parts(""), None);
+        assert!(column_is_numeric(&["1.2".into(), "".into(), "3".into()]));
+        assert!(!column_is_numeric(&["1.2".into(), "East".into()]));
+    }
 
     /// The cell counts: every kind of them.
     fn all_cells() -> crate::stats::CellCounts {

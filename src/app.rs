@@ -991,6 +991,24 @@ impl StatsCraftApp {
         self.export_output_document(path, true);
     }
 
+    /// Write the output as a real Word document.
+    ///
+    /// Each result is a native table: heavy rules at the top and bottom,
+    /// a light rule under the header, no vertical rules, and a decimal
+    /// tab in every numeric column.
+    pub fn export_output_docx_to(&mut self, path: &std::path::Path) {
+        if self.outputs.is_empty() {
+            self.status = "No output to export.".to_string();
+            return;
+        }
+        match crate::docx::write(path, &self.outputs) {
+            Ok(()) => {
+                self.status = format!("Wrote a Word document to {}.", path.display());
+            }
+            Err(e) => self.status = format!("Export failed: {}", e),
+        }
+    }
+
     fn export_output_document(&mut self, path: &std::path::Path, office: bool) {
         if self.outputs.is_empty() {
             self.status = "No output to export.".to_string();
@@ -1033,7 +1051,8 @@ impl StatsCraftApp {
             return;
         };
         let html = format!(
-            "<html><head><meta charset=\"utf-8\"></head><body>{}</body></html>",
+            "<html><head><meta charset=\"utf-8\"><style>{}</style></head><body>{}</body></html>",
+            BOOK_CSS,
             output_table_html(t, false)
         );
         let alt = output_table_text(t);
@@ -1505,7 +1524,7 @@ impl eframe::App for StatsCraftApp {
                                                             .color(crate::theme::text()),
                                                     )
                                                     .on_hover_text(
-                                                        "Copy the table as an editable Office table.",
+                                                        "Copy the table. Pasting into Word inserts a native table with article rules.",
                                                     )
                                                     .clicked()
                                                 {
@@ -2152,6 +2171,22 @@ impl eframe::App for StatsCraftApp {
                             self.print_output();
                         }
                         ui.menu_button("Export to Microsoft Office", |ui| {
+                            if ui
+                                .button("Word document (.docx)…")
+                                .on_hover_text(
+                                    "A real Word file. Each result is a native table with article rules and decimal-aligned numbers.",
+                                )
+                                .clicked()
+                            {
+                                ui.close_menu();
+                                if let Some(p) = rfd::FileDialog::new()
+                                    .add_filter("Word Document", &["docx"])
+                                    .set_file_name("StatsCraft Output.docx")
+                                    .save_file()
+                                {
+                                    self.export_output_docx_to(&p);
+                                }
+                            }
                             if ui.button("Word-compatible HTML (.doc)…").clicked() {
                                 ui.close_menu();
                                 if let Some(p) = rfd::FileDialog::new()
@@ -3087,7 +3122,7 @@ impl eframe::App for StatsCraftApp {
                                                     .color(crate::theme::text()),
                                             )
                                             .on_hover_text(
-                                                "Copy the table as an editable Office table.",
+                                                "Copy the table. Pasting into Word inserts a native table with article rules.",
                                             )
                                             .clicked()
                                         {
@@ -3758,34 +3793,43 @@ fn commit_edit(
     Some((before, after))
 }
 
-/// One output object as an Office-friendly HTML table.
+/// Styles for an article table. Inline styles travel with a clipboard
+/// paste; Word turns that HTML into a native table and keeps the rules.
+const BOOK_CSS: &str = "\
+table{border-collapse:collapse;border-top:1.5pt solid #000000;border-bottom:1.5pt solid #000000;\
+border-left:none;border-right:none;font-family:Cambria,'Times New Roman',serif;font-size:10.5pt;\
+margin:0 0 12px 0;}\
+th{border:none;border-bottom:0.75pt solid #000000;padding:3pt 8pt;font-weight:600;text-align:center;\
+vertical-align:bottom;}\
+td{border:none;padding:2pt 8pt;text-align:left;}\
+td.num{text-align:right;font-variant-numeric:tabular-nums;}\
+td.stub{text-align:left;}\
+th.corner{text-align:left;font-weight:600;}\
+h2{font-family:Cambria,'Times New Roman',serif;font-size:12pt;font-weight:600;margin:16px 0 4px 0;}\
+.note{font-family:Cambria,'Times New Roman',serif;font-size:9pt;font-style:italic;color:#222;\
+margin:3px 0 12px 0;}\
+.measures{font-family:Cambria,'Times New Roman',serif;font-size:10.5pt;font-weight:600;\
+margin:8px 0 2px 0;}\
+svg{display:block;margin:8px 0;}\
+";
+
+const BOOK_TABLE: &str = "border-collapse:collapse;border-top:1.5pt solid #000000;\
+border-bottom:1.5pt solid #000000;border-left:none;border-right:none;";
+const BOOK_TH: &str = "border:none;border-bottom:0.75pt solid #000000;padding:3pt 8pt;\
+font-weight:600;text-align:center;vertical-align:bottom;";
+const BOOK_TD: &str = "border:none;padding:2pt 8pt;text-align:left;";
+const BOOK_NUM: &str = "border:none;padding:2pt 8pt;text-align:right;font-variant-numeric:tabular-nums;";
+
+/// One output object as an article table.
 fn output_table_html(t: &OutputTable, include_chart: bool) -> String {
     let mut h = String::new();
-    h.push_str(&format!("<h2>{}</h2>\n", html_escape(&t.title)));
+    h.push_str(&format!(
+        "<h2 style=\"font-family:Cambria,'Times New Roman',serif;font-size:12pt;font-weight:600;margin:16px 0 4px 0;\">{}</h2>\n",
+        html_escape(&t.title)
+    ));
     match &t.pivot {
         Some(p) => h.push_str(&pivot_to_html(p)),
-        None => {
-            h.push_str("<table>\n<tr>");
-            for hdr in &t.headers {
-                h.push_str(&format!("<th>{}</th>", html_escape(hdr)));
-            }
-            h.push_str("</tr>\n");
-            for row in &t.rows {
-                h.push_str("<tr>");
-                for (k, cell) in row.iter().enumerate() {
-                    let esc = html_escape(cell);
-                    if k > 0 && cell.trim().parse::<f64>().is_ok() {
-                        h.push_str(&format!("<td class=\"num\">{}</td>", esc));
-                    } else if k == 0 {
-                        h.push_str(&format!("<td class=\"stub\">{}</td>", esc));
-                    } else {
-                        h.push_str(&format!("<td>{}</td>", esc));
-                    }
-                }
-                h.push_str("</tr>\n");
-            }
-            h.push_str("</table>\n");
-        }
+        None => h.push_str(&flat_table_html(&t.headers, &t.rows)),
     }
     if include_chart {
         if let Some(chart) = &t.chart {
@@ -3840,21 +3884,9 @@ fn output_document_html(outputs: &[OutputTable], office: bool, prog_id: &str) ->
         h.push_str("<meta name=\"Generator\" content=\"StatsCraft\">\n");
     }
     h.push_str("<title>StatsCraft Output</title>\n<style>\n");
-    h.push_str(
-        "@page{size:8.5in 11in;margin:0.6in;}\n\
-         body{font-family:'Segoe UI',Calibri,Arial,sans-serif;margin:24px;color:#1a1f2b;}\n\
-         h2{font-size:14pt;margin:18px 0 6px 0;color:#1a1f2b;}\n\
-         table{border-collapse:collapse;font-size:10.5pt;margin:0 0 10px 0;}\n\
-         th{background:#e8eef7;border:1px solid #8a8a8a;padding:3px 10px;text-align:left;}\n\
-         td{border:1px solid #b5b5b5;padding:2px 10px;}\n\
-         td.num{text-align:right;font-variant-numeric:tabular-nums;}\n\
-         td.stub{font-weight:600;background:#f6f8fb;}\n\
-         .note{color:#555;font-size:9.5pt;}\n\
-         th.corner{text-align:right;}\n\
-         .measures{color:#555;font-size:9.5pt;margin:0 0 4px 0;}\n\
-         .measures span{color:#888;}\n\
-         svg{display:block;margin:8px 0;}\n",
-    );
+    h.push_str("@page{size:8.5in 11in;margin:0.6in;}\n");
+    h.push_str("body{font-family:Cambria,'Times New Roman',serif;margin:24px;color:#111;}\n");
+    h.push_str(BOOK_CSS);
     h.push_str("</style>\n</head>\n<body>\n");
     for t in outputs {
         h.push_str(&output_table_html(t, true));
@@ -4027,85 +4059,105 @@ fn xml_escape(text: &str) -> String {
         .replace('"', "&quot;")
 }
 
-/// A pivot table as HTML, with the spanning header and the measures.
-///
-/// The header is one band per column dimension, and the cells of the
-/// outer dimension span the inner ones, so the exported table reads
-/// the same way the table on the screen does.
-fn pivot_to_html(pivot: &crate::pivot::PivotTable) -> String {
-    use crate::pivot::label;
-
+fn flat_table_html(headers: &[String], rows: &[Vec<String>]) -> String {
     let mut h = String::new();
-    let row_keys = pivot.row_keys();
-    let col_keys = pivot.col_keys();
-    let measure = pivot.measure_index.min(pivot.measures.len().saturating_sub(1));
-
-    // The measures are tabs, as they are in StatsBench's output tree.
-    if pivot.measures.len() > 1 {
-        h.push_str("<p class=\"measures\">");
-        for (i, m) in pivot.measures.iter().enumerate() {
-            if i == measure {
-                h.push_str(&format!("<strong>{}</strong>", html_escape(m)));
-            } else {
-                h.push_str(&format!("<span>{}</span>", html_escape(m)));
-            }
-            if i + 1 < pivot.measures.len() {
-                h.push_str(" &middot; ");
-            }
-        }
-        h.push_str("</p>\n");
-    }
-
-    h.push_str("<table>\n");
-    // The header: one row per column dimension.
-    for (d, dim) in pivot.col_dims.iter().enumerate() {
-        h.push_str("<tr>");
-        // The corner cell, over the stub.
-        if d == 0 {
-            h.push_str(&format!(
-                "<th rowspan=\"{}\" class=\"corner\">{}</th>",
-                pivot.col_dims.len(),
-                html_escape(&dim.name)
-            ));
-        }
-        // The cells of this dimension, each spanning the columns below.
-        let below: usize = pivot.col_dims[d + 1..]
-            .iter()
-            .map(|x| x.levels.len().max(1))
-            .product::<usize>()
-            .max(1);
-        let mut j = 0;
-        while j < col_keys.len() {
-            let level = dim.levels.get(col_keys[j].get(d).copied().unwrap_or(0));
-            let span = below.min(col_keys.len() - j);
-            h.push_str(&format!(
-                "<th colspan=\"{}\">{}</th>",
-                span,
-                html_escape(&level.cloned().unwrap_or_default())
-            ));
-            j += span;
-        }
-        h.push_str("</tr>\n");
-    }
-    // The body.
-    for rk in &row_keys {
-        h.push_str("<tr>");
+    h.push_str(&format!("<table style=\"{BOOK_TABLE}\">\n<tr>"));
+    for hdr in headers {
         h.push_str(&format!(
-            "<td class=\"stub\">{}</td>",
-            html_escape(&label(&pivot.row_dims, rk))
+            "<th style=\"{BOOK_TH}\">{}</th>",
+            html_escape(hdr)
         ));
-        for ck in &col_keys {
-            let v = pivot.measure_at(rk, ck, measure);
-            let esc = html_escape(v);
-            if v.trim().parse::<f64>().is_ok() {
-                h.push_str(&format!("<td class=\"num\">{}</td>", esc));
+    }
+    h.push_str("</tr>\n");
+    for row in rows {
+        h.push_str("<tr>");
+        for (k, cell) in row.iter().enumerate() {
+            let esc = html_escape(cell);
+            if k > 0 && crate::output::stat_number_parts(cell).is_some() {
+                h.push_str(&format!(
+                    "<td class=\"num\" style=\"{BOOK_NUM}\">{esc}</td>"
+                ));
+            } else if k == 0 {
+                h.push_str(&format!(
+                    "<td class=\"stub\" style=\"{BOOK_TD}\">{esc}</td>"
+                ));
             } else {
-                h.push_str(&format!("<td>{}</td>", esc));
+                h.push_str(&format!("<td style=\"{BOOK_TD}\">{esc}</td>"));
             }
         }
         h.push_str("</tr>\n");
     }
     h.push_str("</table>\n");
+    h
+}
+
+/// A pivot table as HTML, with the spanning header and the measures.
+///
+/// Each measure is its own table. The header is one band per column
+/// dimension, and the cells of the outer dimension span the inner ones.
+fn pivot_to_html(pivot: &crate::pivot::PivotTable) -> String {
+    use crate::pivot::label;
+
+    let row_keys = pivot.row_keys();
+    let col_keys = pivot.col_keys();
+    let measures = pivot.measures.len().max(1);
+    let mut h = String::new();
+    for measure in 0..measures {
+        if pivot.measures.len() > 1 {
+            let name = pivot.measures.get(measure).map(String::as_str).unwrap_or("");
+            h.push_str(&format!(
+                "<p class=\"measures\">{}</p>\n",
+                html_escape(name)
+            ));
+        }
+        h.push_str(&format!("<table style=\"{BOOK_TABLE}\">\n"));
+        for (d, dim) in pivot.col_dims.iter().enumerate() {
+            h.push_str("<tr>");
+            if d == 0 {
+                h.push_str(&format!(
+                    "<th rowspan=\"{}\" class=\"corner\" style=\"{BOOK_TH}text-align:left;\">{}</th>",
+                    pivot.col_dims.len().max(1),
+                    html_escape(&dim.name)
+                ));
+            }
+            let below: usize = pivot.col_dims[d + 1..]
+                .iter()
+                .map(|x| x.levels.len().max(1))
+                .product::<usize>()
+                .max(1);
+            let mut j = 0;
+            while j < col_keys.len() {
+                let level = dim.levels.get(col_keys[j].get(d).copied().unwrap_or(0));
+                let span = below.min(col_keys.len() - j);
+                h.push_str(&format!(
+                    "<th colspan=\"{span}\" style=\"{BOOK_TH}\">{}</th>",
+                    html_escape(&level.cloned().unwrap_or_default())
+                ));
+                j += span;
+            }
+            h.push_str("</tr>\n");
+        }
+        for rk in &row_keys {
+            h.push_str("<tr>");
+            h.push_str(&format!(
+                "<td class=\"stub\" style=\"{BOOK_TD}\">{}</td>",
+                html_escape(&label(&pivot.row_dims, rk))
+            ));
+            for ck in &col_keys {
+                let v = pivot.measure_at(rk, ck, measure);
+                let esc = html_escape(v);
+                if crate::output::stat_number_parts(v).is_some() {
+                    h.push_str(&format!(
+                        "<td class=\"num\" style=\"{BOOK_NUM}\">{esc}</td>"
+                    ));
+                } else {
+                    h.push_str(&format!("<td style=\"{BOOK_TD}\">{esc}</td>"));
+                }
+            }
+            h.push_str("</tr>\n");
+        }
+        h.push_str("</table>\n");
+    }
     h
 }
 
@@ -4135,7 +4187,14 @@ mod tests {
         app.export_output_html_to(&path);
         let s = std::fs::read_to_string(&path).unwrap();
         assert!(s.contains("T&lt;1&gt;"), "title escaped");
-        assert!(s.contains("<td class=\"num\">1.5</td>"), "numeric right-aligned");
+        assert!(s.contains("class=\"num\""), "numeric cell marked");
+        assert!(s.contains(">1.5</td>"), "the number is in the cell");
+        assert!(s.contains("text-align:right"), "numeric right-aligned");
+        assert!(s.contains("border-top:1.5pt solid #000000"), "booktabs top rule");
+        assert!(
+            !s.contains("border:1px solid"),
+            "the full grid is gone"
+        );
         assert!(s.contains("<p class=\"note\">n</p>"), "note rendered");
         let _ = std::fs::remove_file(path);
     }
@@ -4513,8 +4572,7 @@ mod tests {
     }
 }
 
-/// StatsBench pivot-table look: bordered cells, shaded header band, right-aligned
-/// numerics, footnote note beneath the table.
+/// Article tables: rules at the top, under the header and at the bottom.
 
 /// Draw a chart in the Output Viewer, under the pivot table.
 ///
@@ -4789,246 +4847,428 @@ fn series_color(i: usize) -> egui::Color32 {
 /// The table is drawn with a fixed column layout rather than with the
 /// `Grid` widget, because a spanning cell needs to know the width of
 /// the columns it covers.
+/// One column of an article table. A numeric column remembers how wide
+/// the integer and the fraction are, so every point in the column sits
+/// on the same x.
+struct LeafCol {
+    width: f32,
+    int_w: f32,
+    frac_w: f32,
+    numeric: bool,
+}
+
+impl LeafCol {
+    fn decimal_x(&self) -> Option<f32> {
+        if !self.numeric {
+            return None;
+        }
+        let num_w = self.int_w + self.frac_w;
+        let slack = (self.width - 20.0 - num_w).max(0.0);
+        Some(10.0 + slack / 2.0 + self.int_w)
+    }
+}
+
+struct BandCell {
+    start: usize,
+    span: usize,
+    text: String,
+}
+
+fn text_width(ui: &egui::Ui, text: &str, font: egui::FontId) -> f32 {
+    ui.ctx().fonts(|f| {
+        f.layout_no_wrap(text.to_string(), font, egui::Color32::PLACEHOLDER)
+            .size()
+            .x
+    })
+}
+
+fn leaf_from_cells(ui: &egui::Ui, header: &str, cells: &[String], numeric: bool) -> LeafCol {
+    let body = crate::theme::body(12.5);
+    let head_w = text_width(ui, header, crate::theme::semibold(12.0));
+    if numeric {
+        let mut int_w = 0.0f32;
+        let mut frac_w = 0.0f32;
+        for cell in cells {
+            if let Some((a, b)) = crate::output::stat_number_parts(cell) {
+                int_w = int_w.max(text_width(ui, &a, body.clone()));
+                frac_w = frac_w.max(text_width(ui, &b, body.clone()));
+            }
+        }
+        let num_w = int_w + frac_w;
+        LeafCol {
+            width: (num_w + 20.0).max(head_w + 20.0).max(56.0),
+            int_w,
+            frac_w,
+            numeric: true,
+        }
+    } else {
+        let mut w = head_w;
+        for cell in cells {
+            w = w.max(text_width(ui, cell, body.clone()));
+        }
+        LeafCol {
+            width: (w + 20.0).max(56.0),
+            int_w: 0.0,
+            frac_w: 0.0,
+            numeric: false,
+        }
+    }
+}
+
+fn grow_leaf_span(cols: &mut [LeafCol], start: usize, span: usize, label_w: f32) {
+    if span == 0 || start + span > cols.len() {
+        return;
+    }
+    let need = label_w + 20.0;
+    let have: f32 = cols[start..start + span].iter().map(|c| c.width).sum();
+    if need > have {
+        let add = (need - have) / span as f32;
+        for col in &mut cols[start..start + span] {
+            col.width += add;
+        }
+    }
+}
+
+fn book_hline(painter: &egui::Painter, x0: f32, x1: f32, y: f32, width: f32) {
+    if x1 - x0 < 2.0 {
+        return;
+    }
+    painter.line_segment(
+        [egui::pos2(x0, y), egui::pos2(x1, y)],
+        egui::Stroke::new(width, crate::theme::text()),
+    );
+}
+
+fn paint_book_value(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    text: &str,
+    col: &LeafCol,
+    font: egui::FontId,
+    color: egui::Color32,
+) {
+    let y = rect.center().y;
+    if let Some(dx) = col.decimal_x() {
+        if text.trim().is_empty() {
+            return;
+        }
+        if let Some((a, b)) = crate::output::stat_number_parts(text) {
+            let x = rect.left() + dx;
+            painter.text(
+                egui::pos2(x, y),
+                egui::Align2::RIGHT_CENTER,
+                a,
+                font.clone(),
+                color,
+            );
+            painter.text(
+                egui::pos2(x, y),
+                egui::Align2::LEFT_CENTER,
+                b,
+                font,
+                color,
+            );
+            return;
+        }
+    }
+    painter.text(
+        egui::pos2(rect.left() + 10.0, y),
+        egui::Align2::LEFT_CENTER,
+        text,
+        font,
+        color,
+    );
+}
+
+fn paint_book_label(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    text: &str,
+    font: egui::FontId,
+    color: egui::Color32,
+    center: bool,
+) {
+    if text.is_empty() {
+        return;
+    }
+    if center {
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            text,
+            font,
+            color,
+        );
+    } else {
+        painter.text(
+            egui::pos2(rect.left() + 10.0, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            text,
+            font,
+            color,
+        );
+    }
+}
+
+/// Draw an article table: a heavy rule, the header, a light rule, the
+/// body, and a heavy rule. Numeric columns share a decimal position.
+fn paint_book_table(
+    ui: &mut egui::Ui,
+    id: impl std::hash::Hash,
+    stub_width: f32,
+    stub_header: &str,
+    leaves: &[LeafCol],
+    bands: &[Vec<BandCell>],
+    stubs: &[String],
+    body: &[Vec<String>],
+) {
+    let n_rows = body.len().max(stubs.len());
+    if n_rows == 0 {
+        return;
+    }
+    let header_h = 24.0;
+    let cell_h = 22.0;
+    let header_rows = bands.len().max(1);
+    let pad = 3.0;
+    let total_width = stub_width + leaves.iter().map(|c| c.width).sum::<f32>();
+    let height = pad + header_rows as f32 * header_h + pad + n_rows as f32 * cell_h + pad;
+    egui::ScrollArea::horizontal()
+        .id_salt(id)
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            let (rect, _) =
+                ui.allocate_exact_size(egui::vec2(total_width, height), egui::Sense::hover());
+            let painter = ui.painter();
+            let mut xs = vec![rect.left() + stub_width];
+            for leaf in leaves {
+                xs.push(*xs.last().unwrap() + leaf.width);
+            }
+            let color = crate::theme::text();
+            let head_font = crate::theme::semibold(12.0);
+            let body_font = crate::theme::body(12.5);
+            let stub_font = crate::theme::medium(12.5);
+
+            book_hline(&painter, rect.left(), rect.right(), rect.top() + 1.0, 1.6);
+            let header_top = rect.top() + pad;
+            paint_book_label(
+                &painter,
+                egui::Rect::from_min_max(
+                    egui::pos2(rect.left(), header_top),
+                    egui::pos2(
+                        rect.left() + stub_width,
+                        header_top + header_rows as f32 * header_h,
+                    ),
+                ),
+                stub_header,
+                head_font.clone(),
+                color,
+                false,
+            );
+            for (d, band) in bands.iter().enumerate() {
+                let y = header_top + d as f32 * header_h;
+                let last = d + 1 == bands.len();
+                for cell in band {
+                    if cell.start + cell.span >= xs.len() {
+                        continue;
+                    }
+                    let x0 = xs[cell.start];
+                    let x1 = xs[cell.start + cell.span];
+                    let head = egui::Rect::from_min_max(
+                        egui::pos2(x0, y),
+                        egui::pos2(x1, y + header_h),
+                    );
+                    paint_book_label(&painter, head, &cell.text, head_font.clone(), color, true);
+                    if !last {
+                        book_hline(&painter, x0 + 6.0, x1 - 6.0, y + header_h, 0.7);
+                    }
+                }
+            }
+            let mid = header_top + header_rows as f32 * header_h;
+            book_hline(&painter, rect.left(), rect.right(), mid, 0.75);
+            let body_top = mid + pad;
+            for i in 0..n_rows {
+                let y = body_top + i as f32 * cell_h;
+                paint_book_label(
+                    &painter,
+                    egui::Rect::from_min_max(
+                        egui::pos2(rect.left(), y),
+                        egui::pos2(rect.left() + stub_width, y + cell_h),
+                    ),
+                    stubs.get(i).map(String::as_str).unwrap_or(""),
+                    stub_font.clone(),
+                    color,
+                    false,
+                );
+                let row = body.get(i);
+                for (j, leaf) in leaves.iter().enumerate() {
+                    let cell = egui::Rect::from_min_max(
+                        egui::pos2(xs[j], y),
+                        egui::pos2(xs[j + 1], y + cell_h),
+                    );
+                    let text = row.and_then(|r| r.get(j)).map(String::as_str).unwrap_or("");
+                    paint_book_value(&painter, cell, text, leaf, body_font.clone(), color);
+                }
+            }
+            book_hline(
+                &painter,
+                rect.left(),
+                rect.right(),
+                rect.bottom() - 1.0,
+                1.6,
+            );
+        });
+}
+
+/// Draw a pivot table as an article table.
+///
+/// The header bands span the columns they cover. Numbers in a column
+/// share one decimal position. The measure switcher is remembered for
+/// this table, so choosing another measure stays on the next frame.
 fn render_pivot_table(ui: &mut egui::Ui, pivot: &crate::pivot::PivotTable) {
-    use crate::theme;
     use crate::pivot::label;
 
     let row_keys = pivot.row_keys();
     let col_keys = pivot.col_keys();
-    let n_rows = row_keys.len();
-    let n_cols = col_keys.len();
-    if n_rows == 0 || n_cols == 0 {
+    if row_keys.is_empty() || col_keys.is_empty() {
         return;
     }
 
-    // ---- The measures, and which one is shown ----
-    // A pivot holds several measures of the same cells - the counts,
-    // the expected counts, the percentages. StatsBench shows them as
-    // separate tables under the crosstabulation, so the reader picks
-    // which one to look at.
-    let mut measure = pivot.measure_index.min(pivot.measures.len().saturating_sub(1));
+    let measure_id = egui::Id::new((
+        "pivot_measure",
+        &pivot.title,
+        pivot.measures.len(),
+        row_keys.len(),
+        col_keys.len(),
+    ));
+    let mut measure = ui
+        .data(|d| d.get_temp::<usize>(measure_id))
+        .unwrap_or(pivot.measure_index)
+        .min(pivot.measures.len().saturating_sub(1));
     if pivot.measures.len() > 1 {
         ui.horizontal_wrapped(|ui| {
-            ui.label(egui::RichText::new("Show:").size(11.5).color(theme::text_muted()));
-            for (i, m) in pivot.measures.iter().enumerate() {
-                let selected = i == measure;
+            ui.label(
+                egui::RichText::new("Show:")
+                    .size(11.5)
+                    .color(crate::theme::text_muted()),
+            );
+            for (i, name) in pivot.measures.iter().enumerate() {
                 if ui
-                    .selectable_label(selected, egui::RichText::new(m).size(11.5))
+                    .selectable_label(
+                        i == measure,
+                        egui::RichText::new(name).size(11.5),
+                    )
                     .clicked()
                 {
                     measure = i;
+                    ui.data_mut(|d| d.insert_temp(measure_id, i));
                 }
             }
         });
         ui.add_space(4.0);
     }
 
-    // ---- The column widths ----
-    // The stub holds the row dimension's label; the columns hold the
-    // values. A header label is centred over the columns it spans, so
-    // it needs a share of their width rather than all of it.
-    let stub_text: Vec<String> = row_keys
-        .iter()
-        .map(|k| label(&pivot.row_dims, k))
-        .collect();
-    // The text is measured through the font atlas, which is how egui
-    // sizes a label.
-    let measure_text = |s: &str, font: egui::FontId| -> f32 {
-        ui.ctx().fonts(|f| {
-            f.layout_no_wrap(s.to_string(), font, egui::Color32::PLACEHOLDER)
-                .size()
-                .x
-        })
-    };
-    let mut col_widths: Vec<f32> = vec![0.0; n_cols];
-    for (j, ck) in col_keys.iter().enumerate() {
-        let mut w = 0.0f32;
-        for rk in &row_keys {
-            let v = pivot.measure_at(rk, ck, measure);
-            w = w.max(measure_text(v, theme::body(12.5)));
-        }
-        col_widths[j] = w;
+    let stubs: Vec<String> = row_keys.iter().map(|k| label(&pivot.row_dims, k)).collect();
+    let corner = pivot
+        .col_dims
+        .first()
+        .map(|d| d.name.clone())
+        .unwrap_or_default();
+    let mut leaves = Vec::with_capacity(col_keys.len());
+    let mut body = Vec::with_capacity(row_keys.len());
+    for _ in &row_keys {
+        body.push(Vec::with_capacity(col_keys.len()));
     }
-    // The header: for each dimension, the widest label sets the width
-    // of the columns it covers, divided by how many it covers.
+    for ck in &col_keys {
+        let cells: Vec<String> = row_keys
+            .iter()
+            .map(|rk| pivot.measure_at(rk, ck, measure).to_string())
+            .collect();
+        let leaf_header = pivot
+            .col_dims
+            .last()
+            .and_then(|d| ck.last().and_then(|level| d.levels.get(*level)))
+            .cloned()
+            .unwrap_or_default();
+        let numeric = crate::output::column_is_numeric(&cells);
+        leaves.push(leaf_from_cells(ui, &leaf_header, &cells, numeric));
+        for (i, cell) in cells.into_iter().enumerate() {
+            body[i].push(cell);
+        }
+    }
     for (d, dim) in pivot.col_dims.iter().enumerate() {
-        // The number of leaf columns one level of this dimension
-        // covers.
+        if d + 1 == pivot.col_dims.len() {
+            continue;
+        }
         let below: usize = pivot.col_dims[d + 1..]
             .iter()
             .map(|x| x.levels.len().max(1))
             .product::<usize>()
             .max(1);
-        for (li, level) in dim.levels.iter().enumerate() {
-            let w = measure_text(level, theme::semibold(12.0));
-            let share = w / below as f32;
-            // The first column of the group carries the whole label;
-            // the rest are the same group and need no more.
-            for j in 0..n_cols {
-                if col_keys[j].get(d) == Some(&li) {
-                    let first = col_keys[..j]
-                        .iter()
-                        .filter(|ck| ck.get(d) == Some(&li))
-                        .count();
-                    if first == 0 {
-                        col_widths[j] = col_widths[j].max(share);
-                    }
-                }
-            }
+        let mut j = 0;
+        while j < col_keys.len() {
+            let level = dim
+                .levels
+                .get(col_keys[j].get(d).copied().unwrap_or(0))
+                .map(String::as_str)
+                .unwrap_or("");
+            let span = below.min(col_keys.len() - j);
+            let label_w = text_width(ui, level, crate::theme::semibold(12.0));
+            grow_leaf_span(&mut leaves, j, span, label_w);
+            j += span;
         }
     }
-    let stub_width = stub_text
-        .iter()
-        .map(|t| measure_text(t, theme::medium(12.5)))
-        .fold(0.0f32, f32::max)
-        .max(90.0)
-        + 20.0;
-    for w in col_widths.iter_mut() {
-        *w += 20.0;
+
+    let mut bands = Vec::with_capacity(pivot.col_dims.len().max(1));
+    for (d, dim) in pivot.col_dims.iter().enumerate() {
+        let below: usize = pivot.col_dims[d + 1..]
+            .iter()
+            .map(|x| x.levels.len().max(1))
+            .product::<usize>()
+            .max(1);
+        let mut band = Vec::new();
+        let mut j = 0;
+        while j < col_keys.len() {
+            let text = dim
+                .levels
+                .get(col_keys[j].get(d).copied().unwrap_or(0))
+                .cloned()
+                .unwrap_or_default();
+            let span = below.min(col_keys.len() - j);
+            band.push(BandCell {
+                start: j,
+                span,
+                text,
+            });
+            j += span;
+        }
+        bands.push(band);
     }
-    let total_width: f32 = stub_width + col_widths.iter().sum::<f32>();
 
-    egui::ScrollArea::horizontal()
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            let header_h = 24.0;
-            let cell_h = 22.0;
-            let header_rows = pivot.col_dims.len().max(1);
-            let body_h = n_rows as f32 * cell_h;
-            let height = header_rows as f32 * header_h + body_h;
-            let (rect, _) =
-                ui.allocate_exact_size(egui::vec2(total_width, height), egui::Sense::hover());
-            let painter = ui.painter();
+    let stub_font = crate::theme::medium(12.5);
+    let stub_width = stubs
+        .iter()
+        .map(|t| text_width(ui, t, stub_font.clone()))
+        .chain(std::iter::once(text_width(
+            ui,
+            &corner,
+            crate::theme::semibold(12.0),
+        )))
+        .fold(0.0f32, f32::max)
+        + 20.0;
 
-            let edge = theme::border();
-            let header_fill = theme::header();
-            let stub_fill = theme::surface_alt();
-
-            // The x of each column, and the x of the stub.
-            let mut xs = vec![rect.left() + stub_width];
-            for w in &col_widths {
-                xs.push(xs.last().unwrap() + w);
-            }
-
-            // ---- The header ----
-            // The outer dimension's cells span the inner ones, so the
-            // header is drawn as one band per dimension.
-            for d in 0..header_rows {
-                let y = rect.top() + d as f32 * header_h;
-                // The stub's corner cell.
-                painter.rect_filled(
-                    egui::Rect::from_min_max(
-                        egui::pos2(rect.left(), y),
-                        egui::pos2(rect.left() + stub_width, y + header_h),
-                    ),
-                    0.0,
-                    header_fill,
-                );
-                painter.rect_stroke(
-                    egui::Rect::from_min_max(
-                        egui::pos2(rect.left(), y),
-                        egui::pos2(rect.left() + stub_width, y + header_h),
-                    ),
-                    0.0,
-                    egui::Stroke::new(0.5, edge),
-                );
-                if d == 0 {
-                    if let Some(dim) = pivot.col_dims.first() {
-                        painter.text(
-                            egui::pos2(rect.left() + stub_width - 8.0, y + header_h / 2.0),
-                            egui::Align2::RIGHT_CENTER,
-                            &dim.name,
-                            theme::semibold(12.0),
-                            theme::text(),
-                        );
-                    }
-                }
-                // The cells of this dimension.
-                let mut j = 0;
-                while j < n_cols {
-                    let level = match pivot.col_dims.get(d) {
-                        Some(dim) => dim.levels.get(col_keys[j].get(d).copied().unwrap_or(0)),
-                        None => None,
-                    };
-                    let label_text = level.cloned().unwrap_or_default();
-                    // How many columns this cell spans: the ones below
-                    // it in the dimension stack.
-                    let below: usize = pivot.col_dims[d + 1..]
-                        .iter()
-                        .map(|x| x.levels.len().max(1))
-                        .product::<usize>()
-                        .max(1);
-                    let span = below.min(n_cols - j);
-                    // The band is centred over the columns it covers.
-                    let x0 = xs[j];
-                    let x1 = xs[j + span];
-                    let cell = egui::Rect::from_min_max(
-                        egui::pos2(x0, y),
-                        egui::pos2(x1, y + header_h),
-                    );
-                    painter.rect_filled(cell, 0.0, header_fill);
-                    painter.rect_stroke(cell, 0.0, egui::Stroke::new(0.5, edge));
-                    painter.text(
-                        egui::pos2((x0 + x1) / 2.0, y + header_h / 2.0),
-                        egui::Align2::CENTER_CENTER,
-                        &label_text,
-                        theme::semibold(12.0),
-                        theme::text(),
-                    );
-                    j += span;
-                }
-            }
-
-            // ---- The body ----
-            let body_top = rect.top() + header_rows as f32 * header_h;
-            for (i, rk) in row_keys.iter().enumerate() {
-                let y = body_top + i as f32 * cell_h;
-                // The stub.
-                let stub = egui::Rect::from_min_max(
-                    egui::pos2(rect.left(), y),
-                    egui::pos2(rect.left() + stub_width, y + cell_h),
-                );
-                painter.rect_filled(stub, 0.0, stub_fill);
-                painter.rect_stroke(stub, 0.0, egui::Stroke::new(0.5, edge));
-                painter.text(
-                    egui::pos2(rect.left() + 8.0, y + cell_h / 2.0),
-                    egui::Align2::LEFT_CENTER,
-                    &stub_text[i],
-                    theme::medium(12.5),
-                    theme::text(),
-                );
-                // The cells.
-                for (j, ck) in col_keys.iter().enumerate() {
-                    let v = pivot.measure_at(rk, ck, measure);
-                    let cell = egui::Rect::from_min_max(
-                        egui::pos2(xs[j], y),
-                        egui::pos2(xs[j + 1], y + cell_h),
-                    );
-                    painter.rect_filled(cell, 0.0, theme::cell());
-                    painter.rect_stroke(cell, 0.0, egui::Stroke::new(0.5, edge));
-                    // A number is right-aligned; a label is centred.
-                    let is_num = v.parse::<f64>().is_ok();
-                    let align = if is_num {
-                        egui::Align2::RIGHT_CENTER
-                    } else {
-                        egui::Align2::CENTER_CENTER
-                    };
-                    painter.text(
-                        egui::pos2(cell.right() - 8.0, cell.center().y),
-                        align,
-                        v,
-                        theme::body(12.5),
-                        theme::text(),
-                    );
-                }
-            }
-        });
+    paint_book_table(
+        ui,
+        ("pivot_book", &pivot.title, measure),
+        stub_width.max(72.0),
+        &corner,
+        &leaves,
+        &bands,
+        &stubs,
+        &body,
+    );
 }
 
 fn render_output_table(ui: &mut egui::Ui, t: &OutputTable) {
-    use crate::theme;
-    // A table with a pivot behind it is drawn as one, with the
-    // multi-level header.
     if let Some(p) = &t.pivot {
         render_pivot_table(ui, p);
         if !t.note.is_empty() {
@@ -5037,65 +5277,66 @@ fn render_output_table(ui: &mut egui::Ui, t: &OutputTable) {
         }
         return;
     }
-    let header_fill = theme::header();
-    let edge = theme::border();
-    let stub_fill = theme::surface_alt();
-    // A wide table gets a horizontal scrollbar, so that a table with
-    // many columns stays readable instead of running off the panel.
-    egui::ScrollArea::horizontal()
-        .id_salt(("output_table_scroll", &t.title))
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-    egui::Grid::new(("output_table", &t.title))
-        .striped(false)
-        .spacing([0.0, 0.0])
-        .show(ui, |ui| {
-            for h in &t.headers {
-                egui::Frame::none()
-                    .fill(header_fill)
-                    .stroke(egui::Stroke::new(0.5, edge))
-                    .inner_margin(egui::Margin::symmetric(10.0, 5.0))
-                    .show(ui, |ui| {
-                        ui.set_min_width(ui.available_width().min(96.0));
-                        ui.label(
-                            egui::RichText::new(h)
-                                .font(crate::theme::semibold(12.0))
-                                .color(theme::text()),
-                        );
-                    });
-            }
-            ui.end_row();
-            for row in &t.rows {
-                for (k, cell) in row.iter().enumerate() {
-                    let is_num = k > 0 && cell.parse::<f64>().is_ok();
-                    egui::Frame::none()
-                        .fill(if k == 0 { stub_fill } else { theme::cell() })
-                        .stroke(egui::Stroke::new(0.5, edge))
-                        .inner_margin(egui::Margin::symmetric(10.0, 4.0))
-                        .show(ui, |ui| {
-                            ui.set_min_width(ui.available_width().min(96.0));
-                            ui.with_layout(
-                                if is_num {
-                                    egui::Layout::right_to_left(egui::Align::Center)
-                                } else {
-                                    egui::Layout::left_to_right(egui::Align::Center)
-                                },
-                                |ui| {
-                                    let rt = egui::RichText::new(cell).size(12.5);
-                                    let rt = if k == 0 {
-                                        rt.font(crate::theme::medium(12.5)).color(theme::text())
-                                    } else {
-                                        rt.color(theme::text())
-                                    };
-                                    ui.label(rt);
-                                },
-                            );
-                        });
-                }
-                ui.end_row();
-            }
-        });
-        });
+    let n = t
+        .headers
+        .len()
+        .max(t.rows.iter().map(Vec::len).max().unwrap_or(0));
+    if n == 0 || t.rows.is_empty() {
+        if !t.note.is_empty() {
+            ui.label(egui::RichText::new(&t.note).size(10.5).weak());
+        }
+        return;
+    }
+    let mut columns: Vec<Vec<String>> = vec![Vec::new(); n];
+    for row in &t.rows {
+        for i in 0..n {
+            columns[i].push(row.get(i).cloned().unwrap_or_default());
+        }
+    }
+    let stub_header = t.headers.first().cloned().unwrap_or_default();
+    let stubs = columns.first().cloned().unwrap_or_default();
+    let mut leaves = Vec::new();
+    let mut body: Vec<Vec<String>> = t.rows.iter().map(|_| Vec::new()).collect();
+    for i in 1..n {
+        let header = t.headers.get(i).cloned().unwrap_or_default();
+        let numeric = crate::output::column_is_numeric(&columns[i]);
+        leaves.push(leaf_from_cells(ui, &header, &columns[i], numeric));
+        for (r, cell) in columns[i].iter().enumerate() {
+            body[r].push(cell.clone());
+        }
+    }
+    let band = if n > 1 {
+        vec![(1..n)
+            .enumerate()
+            .map(|(j, i)| BandCell {
+                start: j,
+                span: 1,
+                text: t.headers.get(i).cloned().unwrap_or_default(),
+            })
+            .collect()]
+    } else {
+        Vec::new()
+    };
+    let stub_width = stubs
+        .iter()
+        .map(|s| text_width(ui, s, crate::theme::medium(12.5)))
+        .chain(std::iter::once(text_width(
+            ui,
+            &stub_header,
+            crate::theme::semibold(12.0),
+        )))
+        .fold(0.0f32, f32::max)
+        + 20.0;
+    paint_book_table(
+        ui,
+        ("output_book", &t.title),
+        stub_width.max(72.0),
+        &stub_header,
+        &leaves,
+        &band,
+        &stubs,
+        &body,
+    );
     if !t.note.is_empty() {
         ui.add_space(3.0);
         ui.label(egui::RichText::new(&t.note).size(10.5).weak());
