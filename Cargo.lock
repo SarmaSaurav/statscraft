@@ -5129,7 +5129,7 @@ dependencies = [
 
 [[package]]
 name = "statscraft"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "arboard",
  "csv",

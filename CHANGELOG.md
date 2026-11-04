@@ -5,6 +5,20 @@ All the notable changes to StatsCraft.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.5.2 - 2026-11-04
+
+Publication charts. A chart is drawn for a journal, can be pasted into Word as a native chart, and can be changed after it is created.
+
+### Added
+
+- **APA figures.** Charts in the Output Viewer, the SVG, and the PNG use a white ground, black axes, outward ticks, and no grid. Series use a gray ramp so the figure still reads in print.
+- **Copy Chart.** Word and PowerPoint paste a native Office chart. Other programs paste a PNG. A box plot stays a PNG, because Office has no matching chart type.
+- **Edit chart.** Under a chart in the Output Viewer: title, axis titles, caption, theme (APA or Color), and legend (Automatic, Hidden, or Bottom). Copy Chart uses the edited chart. The caption is drawn on the figure and included in the PNG. The Office chart has no caption slot.
+
+### Fixed
+
+- Chart Builder axis titles and the chart title follow the variable, the chart type, and the summary. A title you have typed is left alone.
+
 ## 0.5.1 - 2026-11-03
 
 Article tables. A result is drawn the way a journal table is drawn, and it can be written into Word as a native table.

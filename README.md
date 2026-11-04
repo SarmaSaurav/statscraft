@@ -2,9 +2,11 @@
 
 Lightweight statistical workbench written in Rust (native desktop app).
 
-**Version 0.5.1** draws results as article tables — rules at the top, under
-the header, and at the bottom, with numbers on a shared decimal — and writes
-them to a real Word document. **Version 0.5.0** added one-sample tests, binary
+**Version 0.5.2** draws charts in APA style, copies them into Word as native
+charts, and lets you edit the title, caption, theme, and legend after the
+chart is created. **Version 0.5.1** draws results as article tables — rules at
+the top, under the header, and at the bottom, with numbers on a shared decimal
+— and writes them to a real Word document. **Version 0.5.0** added one-sample tests, binary
 logistic regression, K-means and hierarchical clustering, and Kaplan–Meier. **Version 0.4.0** added data
 preparation and output polish: Transform dialogs
 (compute, recode, count, rank, automatic recode), Data prep (select, weight,
