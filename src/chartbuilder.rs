@@ -105,6 +105,11 @@ pub struct ChartBuilder {
     pub reference_line: Option<f64>,
     /// The label of the reference line.
     pub reference_label: String,
+    /// The last axis title the builder wrote. A hand-typed title that
+    /// differs from this is left alone when the variable changes.
+    auto_title: String,
+    auto_x: String,
+    auto_y: String,
     /// Set when the user pressed OK.
     pub confirmed: bool,
     /// Set when the user pressed Cancel or closed the window, so the
@@ -159,15 +164,70 @@ impl ChartBuilder {
         b.y_var = cat.or_else(|| num.clone());
         b.x_var = num;
         b.summary = Some(BarSummary::Count);
-        let shown = b
-            .y_var
-            .as_deref()
-            .map(|name| table.display_name_for(name))
-            .unwrap_or_default();
-        b.title = format!("Bar Chart: {}", shown);
-        b.x_label = shown;
-        b.y_label = "Count".to_string();
+        b.follow_variables(table);
         b
+    }
+
+    /// Rewrite the title and the axis titles from the current variables.
+    ///
+    /// A title the reader has typed is kept. A title that still matches
+    /// the previous automatic text follows the new variable.
+    pub fn follow_variables(&mut self, table: &DataTable) {
+        let (title, x, y) = self.suggested(table);
+        if self.auto_title.is_empty() || self.title == self.auto_title {
+            self.title = title.clone();
+        }
+        if self.auto_x.is_empty() || self.x_label == self.auto_x {
+            self.x_label = x.clone();
+        }
+        if self.auto_y.is_empty() || self.y_label == self.auto_y {
+            self.y_label = y.clone();
+        }
+        self.auto_title = title;
+        self.auto_x = x;
+        self.auto_y = y;
+    }
+
+    /// The title and axis titles the current choices imply.
+    fn suggested(&self, table: &DataTable) -> (String, String, String) {
+        let shown = |name: &Option<String>| {
+            name.as_deref()
+                .map(|n| table.display_name_for(n))
+                .unwrap_or_default()
+        };
+        match self.chart_type.unwrap_or(ChartType::Bar) {
+            ChartType::Bar => {
+                let summary = self.summary.unwrap_or(BarSummary::Count);
+                if summary == BarSummary::Count {
+                    let x = shown(&self.y_var);
+                    (format!("Bar Chart: {x}"), x, "Count".to_string())
+                } else {
+                    let x = shown(&self.group_var);
+                    let outcome = shown(&self.x_var);
+                    let y = if outcome.is_empty() {
+                        summary.title().to_string()
+                    } else {
+                        format!("{outcome} ({})", summary.title())
+                    };
+                    (format!("Bar Chart: {y}"), x, y)
+                }
+            }
+            ChartType::Histogram => {
+                let x = shown(&self.y_var);
+                (format!("Histogram: {x}"), x, "Count".to_string())
+            }
+            ChartType::Scatter => {
+                let x = shown(&self.x_var);
+                let y = shown(&self.y_var);
+                (format!("Scatter: {y} by {x}"), x, y)
+            }
+            ChartType::BoxPlot => {
+                let x = shown(&self.group_var);
+                let y = shown(&self.y_var);
+                let x = if x.is_empty() { "Case".to_string() } else { x };
+                (format!("Box Plot: {y}"), x, y)
+            }
+        }
     }
 
     /// The chart the choices describe.
@@ -204,7 +264,7 @@ impl ChartBuilder {
                     kind: ChartKind::Bar,
                     title: self.title.clone(),
                     x_label: self.x_label.clone(),
-                    y_label: "Count".to_string(),
+                    y_label: self.y_label.clone(),
                     series: vec![ChartSeries {
                         name: "Count".to_string(),
                         x: (0..labels.len()).map(|i| i as f64).collect(),
@@ -214,6 +274,7 @@ impl ChartBuilder {
                     }],
                     reference_line: self.reference_line,
                     reference_label: self.reference_label.clone(),
+                    ..Chart::default()
                 })
             }
             _ => {
@@ -255,6 +316,7 @@ impl ChartBuilder {
                     }],
                     reference_line: self.reference_line,
                     reference_label: self.reference_label.clone(),
+                    ..Chart::default()
                 })
             }
         }
@@ -268,7 +330,7 @@ impl ChartBuilder {
             kind: ChartKind::Histogram,
             title: self.title.clone(),
             x_label: self.x_label.clone(),
-            y_label: "Count".to_string(),
+            y_label: self.y_label.clone(),
             series: vec![ChartSeries {
                 name: h.variable.clone(),
                 x: h.centres.clone(),
@@ -278,6 +340,7 @@ impl ChartBuilder {
             }],
             reference_line: self.reference_line,
             reference_label: self.reference_label.clone(),
+            ..Chart::default()
         })
     }
 
@@ -299,6 +362,7 @@ impl ChartBuilder {
             }],
             reference_line: self.reference_line,
             reference_label: self.reference_label.clone(),
+            ..Chart::default()
         })
     }
 
@@ -312,8 +376,9 @@ impl ChartBuilder {
                 let vals: Vec<f64> = col
                     .values
                     .iter()
-                    .filter_map(|v| match v {
-                        Value::Number(n) if !col.is_missing(0) => Some(*n),
+                    .enumerate()
+                    .filter_map(|(i, v)| match v {
+                        Value::Number(n) if !col.is_missing(i) => Some(*n),
                         _ => None,
                     })
                     .collect();
@@ -333,7 +398,7 @@ impl ChartBuilder {
             series.push(ChartSeries {
                 name: name.clone(),
                 x: vec![series.len() as f64],
-                y: Vec::new(),
+                y: vec![*sorted.last().unwrap()],
                 quartiles: Some((sorted[0], q1, median, q3)),
                 x_labels: vec![name.clone()],
             });
@@ -349,6 +414,7 @@ impl ChartBuilder {
             series,
             reference_line: self.reference_line,
             reference_label: self.reference_label.clone(),
+            ..Chart::default()
         })
     }
 }
@@ -402,6 +468,7 @@ pub fn render(ui: &mut egui::Ui, app: &mut crate::app::StatsCraftApp, b: &mut Ch
         .collect();
 
     // ---- The chart type ----
+    let mut refresh_labels = false;
     ui.label(egui::RichText::new("Chart type:").strong());
     ui.horizontal_wrapped(|ui| {
         for t in ChartType::all() {
@@ -411,23 +478,7 @@ pub fn render(ui: &mut egui::Ui, app: &mut crate::app::StatsCraftApp, b: &mut Ch
                 .clicked()
             {
                 b.chart_type = Some(t);
-                // The defaults follow the type, and use the variable
-                // labels when the variables have them.
-                b.title = format!("{} Chart", t.title());
-                b.x_label = b
-                    .y_var
-                    .as_deref()
-                    .map(|name| table.display_name_for(name))
-                    .unwrap_or_default();
-                b.y_label = match t {
-                    ChartType::Bar => "Count".to_string(),
-                    ChartType::Histogram => "Count".to_string(),
-                    ChartType::Scatter | ChartType::BoxPlot => b
-                        .y_var
-                        .as_deref()
-                        .map(|name| table.display_name_for(name))
-                        .unwrap_or_default(),
-                };
+                refresh_labels = true;
             }
         }
     });
@@ -440,11 +491,11 @@ pub fn render(ui: &mut egui::Ui, app: &mut crate::app::StatsCraftApp, b: &mut Ch
     if kind == ChartType::Scatter {
         ui.horizontal(|ui| {
             ui.label("X:");
-            pick(ui, &mut b.x_var, &numeric, "cb_x", table);
+            refresh_labels |= pick(ui, &mut b.x_var, &numeric, "cb_x", table);
         });
         ui.horizontal(|ui| {
             ui.label("Y:");
-            pick(ui, &mut b.y_var, &numeric, "cb_y", table);
+            refresh_labels |= pick(ui, &mut b.y_var, &numeric, "cb_y", table);
         });
     } else {
         ui.horizontal(|ui| {
@@ -461,7 +512,7 @@ pub fn render(ui: &mut egui::Ui, app: &mut crate::app::StatsCraftApp, b: &mut Ch
             } else {
                 &numeric
             };
-            pick(ui, &mut b.y_var, list, "cb_y", table);
+            refresh_labels |= pick(ui, &mut b.y_var, list, "cb_y", table);
         });
     }
 
@@ -469,7 +520,7 @@ pub fn render(ui: &mut egui::Ui, app: &mut crate::app::StatsCraftApp, b: &mut Ch
     if kind == ChartType::Bar && b.summary != Some(BarSummary::Count) {
         ui.horizontal(|ui| {
             ui.label("Summarise by:");
-            pick(ui, &mut b.group_var, &categorical, "cb_g", table);
+            refresh_labels |= pick(ui, &mut b.group_var, &categorical, "cb_g", table);
             ui.label("Summary:");
             for s in BarSummary::all() {
                 let selected = b.summary == Some(s);
@@ -478,6 +529,7 @@ pub fn render(ui: &mut egui::Ui, app: &mut crate::app::StatsCraftApp, b: &mut Ch
                     .clicked()
                 {
                     b.summary = Some(s);
+                    refresh_labels = true;
                 }
             }
         });
@@ -485,7 +537,7 @@ pub fn render(ui: &mut egui::Ui, app: &mut crate::app::StatsCraftApp, b: &mut Ch
     if kind == ChartType::BoxPlot {
         ui.horizontal(|ui| {
             ui.label("Group by:");
-            pick(ui, &mut b.group_var, &categorical, "cb_g", table);
+            refresh_labels |= pick(ui, &mut b.group_var, &categorical, "cb_g", table);
         });
     }
     if kind == ChartType::Histogram {
@@ -496,6 +548,9 @@ pub fn render(ui: &mut egui::Ui, app: &mut crate::app::StatsCraftApp, b: &mut Ch
                 b.bins = bins as usize;
             }
         });
+    }
+    if refresh_labels {
+        b.follow_variables(table);
     }
     ui.add_space(8.0);
 
@@ -600,13 +655,15 @@ fn pick(
     names: &[String],
     id: &str,
     table: &DataTable,
-) {
+) -> bool {
     if names.is_empty() {
         ui.label(egui::RichText::new("(none)").weak());
-        return;
+        return false;
     }
+    let mut changed = false;
     if slot.as_ref().map(|s| !names.contains(s)).unwrap_or(true) {
         *slot = Some(names[0].clone());
+        changed = true;
     }
     let current = slot
         .as_deref()
@@ -620,9 +677,11 @@ fn pick(
                 let shown = table.display_name_for(name);
                 if ui.selectable_label(selected, shown).clicked() {
                     *slot = Some(name.clone());
+                    changed = true;
                 }
             }
         });
+    changed
 }
 
 #[cfg(test)]
@@ -672,6 +731,23 @@ mod tests {
         };
         t.n_rows = 4;
         t
+    }
+
+    #[test]
+    fn changing_the_variable_updates_the_axis_title() {
+        let t = table();
+        let mut b = ChartBuilder::for_table(&t);
+        assert_eq!(b.x_label, "group");
+        assert_eq!(b.y_label, "Count");
+        b.y_var = Some("score".into());
+        b.follow_variables(&t);
+        assert_eq!(b.x_label, "score");
+        assert_eq!(b.title, "Bar Chart: score");
+        b.x_label = "Hand written".into();
+        b.y_var = Some("age".into());
+        b.follow_variables(&t);
+        assert_eq!(b.x_label, "Hand written");
+        assert_eq!(b.title, "Bar Chart: age");
     }
 
     #[test]

@@ -28,6 +28,11 @@ arboard = "3.7"
 # Word opens it as a native document, tables included.
 zip = { version = "2", default-features = false }
 
+# The publication PNG on the clipboard. The font is the one the app
+# already embeds; fontdue turns it into coverage bitmaps.
+png = "0.17"
+fontdue = "0.9"
+
 # Parsing / scripting
 # pest = "2.7"
 # pest_derive = "2.7"

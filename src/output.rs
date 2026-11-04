@@ -36,6 +36,51 @@ pub struct Chart {
     pub reference_line: Option<f64>,
     /// The label of the reference line.
     pub reference_label: String,
+    /// The note under the figure.
+    pub caption: String,
+    /// APA is black and gray. Color uses a colorblind-safe palette.
+    pub theme: FigureTheme,
+    /// Where the legend is drawn.
+    pub legend: LegendPlace,
+}
+
+/// The ink of a chart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FigureTheme {
+    /// Black ink, gray series, white ground.
+    #[default]
+    Apa,
+    /// Colorblind-safe series colors. The axes stay black.
+    Color,
+}
+
+/// Where a chart draws its legend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LegendPlace {
+    /// Under the axes when the chart has more than one series.
+    #[default]
+    Auto,
+    /// No legend.
+    None,
+    /// Under the axes, including a chart with one series.
+    Bottom,
+}
+
+impl Default for Chart {
+    fn default() -> Self {
+        Self {
+            kind: ChartKind::Bar,
+            title: String::new(),
+            x_label: String::new(),
+            y_label: String::new(),
+            series: Vec::new(),
+            reference_line: None,
+            reference_label: String::new(),
+            caption: String::new(),
+            theme: FigureTheme::Apa,
+            legend: LegendPlace::Auto,
+        }
+    }
 }
 
 /// The kind of chart.
@@ -2072,6 +2117,7 @@ impl OutputTable {
             ],
             reference_line: None,
             reference_label: String::new(),
+            ..Chart::default()
         });
 
         Self {
@@ -2227,6 +2273,7 @@ pub fn bar_chart_from_frequencies(
         }],
             reference_line: None,
             reference_label: String::new(),
+            ..Chart::default()
         }
     }
 
@@ -2246,6 +2293,7 @@ pub fn histogram_chart(h: &crate::stats::Histogram) -> crate::output::Chart {
         }],
             reference_line: None,
             reference_label: String::new(),
+            ..Chart::default()
         }
     }
 
@@ -2265,6 +2313,7 @@ pub fn scatter_chart(s: &crate::stats::Scatter) -> crate::output::Chart {
         }],
         reference_line: None,
         reference_label: String::new(),
+        ..Chart::default()
     }
 }
 
@@ -2284,6 +2333,7 @@ pub fn regression_residual_plot(r: &crate::stats::RegressionResult) -> crate::ou
         }],
         reference_line: Some(0.0),
         reference_label: "0".into(),
+        ..Chart::default()
     }
 }
 
@@ -2320,6 +2370,7 @@ pub fn regression_pp_plot(r: &crate::stats::RegressionResult) -> crate::output::
         }],
         reference_line: None,
         reference_label: String::new(),
+        ..Chart::default()
     }
 }
 

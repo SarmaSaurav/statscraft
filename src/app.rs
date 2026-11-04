@@ -1064,28 +1064,30 @@ impl StatsCraftApp {
         }
     }
 
-    /// Copy the selected chart as a PNG image.
+    /// Copy the selected chart.
     ///
-    /// The chart is painted by egui, so the reliable way to copy exactly
-    /// what the reader sees is a viewport screenshot cropped to the chart
-    /// rectangle. The screenshot arrives as an event on the next frame.
-    pub fn copy_selected_chart(&mut self, ctx: &egui::Context) {
-        let Some(t) = self.outputs.get(self.selected_output) else {
-            self.status = "No output to copy.".to_string();
-            return;
-        };
-        if t.chart.is_none() {
+    /// Word and PowerPoint receive an Office chart (`Art::GVML ClipFormat`)
+    /// and paste it as a native chart. Every other program receives the
+    /// PNG of the same APA figure. A box plot has no Office chart type,
+    /// so it is the PNG only.
+    pub fn copy_selected_chart(&mut self, _ctx: &egui::Context) {
+        let Some(chart) = self
+            .outputs
+            .get(self.selected_output)
+            .and_then(|t| t.chart.clone())
+        else {
             self.status = "The selected output has no chart.".to_string();
             return;
-        }
-        let Some(rect) = self.last_chart_rect else {
-            self.status = "The chart has not been drawn yet; try again.".to_string();
-            return;
         };
-        self.pending_screenshot_rect = Some(rect);
-        let viewport = self.last_chart_viewport.unwrap_or_else(|| ctx.viewport_id());
-        ctx.send_viewport_cmd_to(viewport, egui::ViewportCommand::Screenshot);
-        self.status = "Copying the chart…".to_string();
+        match crate::clipchart::copy(&chart) {
+            Ok(crate::clipchart::Copied::OfficeAndPng) => {
+                self.status = "Copied the chart. Word pastes an editable chart; other programs paste a PNG.".to_string();
+            }
+            Ok(crate::clipchart::Copied::Png) => {
+                self.status = "Copied the chart as a PNG.".to_string();
+            }
+            Err(e) => self.status = format!("Could not copy the chart: {}", e),
+        }
     }
 
     /// Handle the reply to a screenshot request: crop the chart rectangle
@@ -1501,14 +1503,17 @@ impl eframe::App for StatsCraftApp {
                                             });
                                         return;
                                     }
-                                    let t = &self.outputs[self.selected_output.min(self.outputs.len() - 1)];
+                                    let idx = self.selected_output.min(self.outputs.len() - 1);
                                     egui::ScrollArea::vertical()
                                         .id_salt("output_result")
                                         .auto_shrink([false, false])
                                         .show(ui, |ui| {
+                                            let title = self.outputs[idx].title.clone();
+                                            let has_chart = self.outputs[idx].chart.is_some();
+                                            let has_pivot = self.outputs[idx].pivot.is_some();
                                             ui.add_space(2.0);
                                             ui.add(egui::Label::new(
-                                                egui::RichText::new(&t.title)
+                                                egui::RichText::new(title)
                                                     .font(crate::theme::semibold(16.0)),
                                             ));
                                             ui.add_space(6.0);
@@ -1530,7 +1535,7 @@ impl eframe::App for StatsCraftApp {
                                                 {
                                                     copy_table = true;
                                                 }
-                                                if t.chart.is_some()
+                                                if has_chart
                                                     && ui
                                                         .button(
                                                             egui::RichText::new("Copy Chart")
@@ -1538,7 +1543,7 @@ impl eframe::App for StatsCraftApp {
                                                                 .color(crate::theme::text()),
                                                         )
                                                         .on_hover_text(
-                                                            "Copy the chart as a PNG image.",
+                                                            "Copy the chart. Word pastes an editable Office chart; other programs paste a PNG.",
                                                         )
                                                         .clicked()
                                                 {
@@ -1550,7 +1555,7 @@ impl eframe::App for StatsCraftApp {
                                                 // exchanged, the way StatsBench
                                                 // lets the reader drag one
                                                 // across.
-                                                if t.pivot.is_some()
+                                                if has_pivot
                                                     && ui
                                                         .button(
                                                             egui::RichText::new("Pivot")
@@ -1566,9 +1571,13 @@ impl eframe::App for StatsCraftApp {
                                                 }
                                             });
                                             ui.add_space(6.0);
-                                            render_output_table(ui, t);
-                                            if let Some(chart) = &t.chart {
-                                                chart_rect = Some(render_output_chart(ui, chart));
+                                            render_output_table(ui, &self.outputs[idx]);
+                                            if has_chart {
+                                                edit_chart(ui, self.outputs[idx].chart.as_mut().unwrap());
+                                                chart_rect = Some(render_output_chart(
+                                                    ui,
+                                                    self.outputs[idx].chart.as_ref().unwrap(),
+                                                ));
                                             }
                                         });
                                 });
@@ -3136,7 +3145,7 @@ impl eframe::App for StatsCraftApp {
                                                         .color(crate::theme::text()),
                                                 )
                                                 .on_hover_text(
-                                                    "Copy the chart as a PNG image.",
+                                                    "Copy the chart. Word pastes an editable Office chart; other programs paste a PNG.",
                                                 )
                                                 .clicked()
                                         {
@@ -3159,8 +3168,13 @@ impl eframe::App for StatsCraftApp {
                                     });
                                     ui.add_space(4.0);
                                     render_output_table(ui, &self.outputs[self.selected_output]);
-                                    if let Some(chart) = &self.outputs[self.selected_output].chart {
-                                        chart_rect = Some(render_output_chart(ui, chart));
+                                    if self.outputs[self.selected_output].chart.is_some() {
+                                        let i = self.selected_output;
+                                        edit_chart(ui, self.outputs[i].chart.as_mut().unwrap());
+                                        chart_rect = Some(render_output_chart(
+                                            ui,
+                                            self.outputs[i].chart.as_ref().unwrap(),
+                                        ));
                                     }
                                 });
                         });
@@ -3918,145 +3932,9 @@ fn output_table_text(t: &OutputTable) -> String {
 
 /// The chart as a self-contained SVG, so an Office export keeps the
 /// picture rather than dropping it.
+/// The chart as an APA figure in SVG, for the HTML export.
 fn chart_to_svg(chart: &crate::output::Chart, width: f32, height: f32) -> String {
-    use crate::output::ChartKind;
-    let (w, h) = (width.max(320.0), height.max(200.0));
-    let left = 56.0;
-    let right = w - 16.0;
-    let top = 26.0;
-    let bottom = h - 42.0;
-    let plot_w = (right - left).max(1.0);
-    let plot_h = (bottom - top).max(1.0);
-
-    let mut max_y = 0.0f64;
-    let mut min_y = 0.0f64;
-    let mut max_x = 0.0f64;
-    for s in &chart.series {
-        for y in &s.y {
-            max_y = max_y.max(*y);
-            min_y = min_y.min(*y);
-        }
-        for x in &s.x {
-            max_x = max_x.max(*x);
-        }
-    }
-    if max_y <= min_y {
-        max_y = min_y + 1.0;
-    }
-    if max_x <= 0.0 {
-        max_x = 1.0;
-    }
-    let y_max = max_y * 1.1;
-    let px = |x: f64| left + (x / max_x) as f32 * plot_w;
-    let py = |y: f64| bottom - ((y - min_y) / (y_max - min_y)) as f32 * plot_h;
-
-    let mut s = String::new();
-    s.push_str(&format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{:.0}\" height=\"{:.0}\" viewBox=\"0 0 {:.0} {:.0}\">",
-        w, h, w, h
-    ));
-    s.push_str("<rect width=\"100%\" height=\"100%\" fill=\"#ffffff\"/>");
-    s.push_str(&format!(
-        "<text x=\"{:.1}\" y=\"16\" font-family=\"Segoe UI,Arial\" font-size=\"13\" font-weight=\"600\" fill=\"#1a1f2b\">{}</text>",
-        left / 2.0,
-        xml_escape(&chart.title)
-    ));
-    // Grid and y axis labels.
-    for i in 0..=5 {
-        let t = i as f64 / 5.0;
-        let y = bottom - t as f32 * plot_h;
-        s.push_str(&format!(
-            "<line x1=\"{:.1}\" y1=\"{:.1}\" x2=\"{:.1}\" y2=\"{:.1}\" stroke=\"#dde3ed\" stroke-width=\"0.7\"/>",
-            left, y, right, y
-        ));
-        let v = min_y + t * (y_max - min_y);
-        s.push_str(&format!(
-            "<text x=\"{:.1}\" y=\"{:.1}\" font-family=\"Segoe UI,Arial\" font-size=\"9\" text-anchor=\"end\" fill=\"#939eb0\">{:.2}</text>",
-            left - 6.0,
-            y + 3.0,
-            v
-        ));
-    }
-    s.push_str(&format!(
-        "<line x1=\"{:.1}\" y1=\"{:.1}\" x2=\"{:.1}\" y2=\"{:.1}\" stroke=\"#c2ccdc\" stroke-width=\"1\"/>",
-        left, bottom, right, bottom
-    ));
-
-    let palette = ["#2f6fed", "#0fa87e", "#e08a0b", "#bd93f9"];
-    if chart.kind == ChartKind::Line || chart.kind == ChartKind::Scatter {
-        for (si, series) in chart.series.iter().enumerate() {
-            let color = palette[si % palette.len()];
-            if chart.kind == ChartKind::Line {
-                let points: Vec<String> = series
-                    .x
-                    .iter()
-                    .zip(series.y.iter())
-                    .map(|(x, y)| format!("{:.1},{:.1}", px(*x), py(*y)))
-                    .collect();
-                s.push_str(&format!(
-                    "<polyline points=\"{}\" fill=\"none\" stroke=\"{}\" stroke-width=\"2\"/>",
-                    points.join(" "),
-                    color
-                ));
-            }
-            for (x, y) in series.x.iter().zip(series.y.iter()) {
-                s.push_str(&format!(
-                    "<circle cx=\"{:.1}\" cy=\"{:.1}\" r=\"2.4\" fill=\"{}\"/>",
-                    px(*x),
-                    py(*y),
-                    color
-                ));
-            }
-        }
-    } else {
-        // Bars: one bar per x value, using the category labels when the
-        // chart has them.
-        for (si, series) in chart.series.iter().enumerate() {
-            let color = palette[si % palette.len()];
-            let n = series.y.len().max(1);
-            let bw = (plot_w / n as f32 * 0.72).max(3.0);
-            for (i, y) in series.y.iter().enumerate() {
-                let x_center = left + (i as f32 + 0.5) / n as f32 * plot_w;
-                let y0 = py(*y);
-                s.push_str(&format!(
-                    "<rect x=\"{:.1}\" y=\"{:.1}\" width=\"{:.1}\" height=\"{:.1}\" fill=\"{}\"/>",
-                    x_center - bw / 2.0,
-                    y0,
-                    bw,
-                    (bottom - y0).max(0.0),
-                    color
-                ));
-                if let Some(label) = series.x_labels.get(i) {
-                    s.push_str(&format!(
-                        "<text x=\"{:.1}\" y=\"{:.1}\" font-family=\"Segoe UI,Arial\" font-size=\"8\" text-anchor=\"middle\" fill=\"#5b6678\">{}</text>",
-                        x_center,
-                        bottom + 12.0,
-                        xml_escape(label)
-                    ));
-                }
-            }
-        }
-    }
-    s.push_str(&format!(
-        "<text x=\"{:.1}\" y=\"{:.1}\" font-family=\"Segoe UI,Arial\" font-size=\"9\" text-anchor=\"middle\" fill=\"#5b6678\">{}</text>",
-        (left + right) / 2.0,
-        h - 8.0,
-        xml_escape(&chart.x_label)
-    ));
-    s.push_str(&format!(
-        "<text transform=\"translate(10,{:.1}) rotate(-90)\" font-family=\"Segoe UI,Arial\" font-size=\"9\" text-anchor=\"middle\" fill=\"#5b6678\">{}</text>",
-        (top + bottom) / 2.0,
-        xml_escape(&chart.y_label)
-    ));
-    s.push_str("</svg>");
-    s
-}
-
-fn xml_escape(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
+    crate::figure::to_svg(chart, width, height)
 }
 
 fn flat_table_html(headers: &[String], rows: &[Vec<String>]) -> String {
@@ -4574,6 +4452,59 @@ mod tests {
 
 /// Article tables: rules at the top, under the header and at the bottom.
 
+/// Edit the chart that is already in the Output Viewer.
+fn edit_chart(ui: &mut egui::Ui, chart: &mut crate::output::Chart) {
+    use crate::output::{FigureTheme, LegendPlace};
+    ui.collapsing("Edit chart", |ui| {
+        ui.horizontal(|ui| {
+            ui.label("Title:");
+            ui.add(egui::TextEdit::singleline(&mut chart.title).desired_width(280.0));
+        });
+        ui.horizontal(|ui| {
+            ui.label("X axis:");
+            ui.add(egui::TextEdit::singleline(&mut chart.x_label).desired_width(280.0));
+        });
+        ui.horizontal(|ui| {
+            ui.label("Y axis:");
+            ui.add(egui::TextEdit::singleline(&mut chart.y_label).desired_width(280.0));
+        });
+        ui.horizontal(|ui| {
+            ui.label("Caption:");
+            ui.add(egui::TextEdit::singleline(&mut chart.caption).desired_width(280.0));
+        });
+        ui.horizontal(|ui| {
+            ui.label("Theme:");
+            if ui.selectable_label(chart.theme == FigureTheme::Apa, "APA").clicked() {
+                chart.theme = FigureTheme::Apa;
+            }
+            if ui.selectable_label(chart.theme == FigureTheme::Color, "Color").clicked() {
+                chart.theme = FigureTheme::Color;
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("Legend:");
+            if ui
+                .selectable_label(chart.legend == LegendPlace::Auto, "Automatic")
+                .clicked()
+            {
+                chart.legend = LegendPlace::Auto;
+            }
+            if ui
+                .selectable_label(chart.legend == LegendPlace::None, "Hidden")
+                .clicked()
+            {
+                chart.legend = LegendPlace::None;
+            }
+            if ui
+                .selectable_label(chart.legend == LegendPlace::Bottom, "Bottom")
+                .clicked()
+            {
+                chart.legend = LegendPlace::Bottom;
+            }
+        });
+    });
+}
+
 /// Draw a chart in the Output Viewer, under the pivot table.
 ///
 /// The chart is painted directly rather than through a plotting library,
@@ -4586,267 +4517,96 @@ pub fn render_chart_preview(ui: &mut egui::Ui, chart: &crate::output::Chart) {
 }
 
 fn render_output_chart(ui: &mut egui::Ui, chart: &crate::output::Chart) -> egui::Rect {
-    use crate::theme;
-    use crate::output::ChartKind;
-
     ui.add_space(6.0);
-    ui.label(
-        egui::RichText::new(&chart.title)
-            .font(theme::semibold(13.0))
-            .color(theme::text()),
-    );
-    ui.add_space(4.0);
-
-    let width = ui.available_width().min(720.0).max(320.0);
-    let height = 240.0;
+    let width = ui.available_width().min(720.0).max(360.0);
+    let height = 300.0;
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    let fig = crate::figure::layout(chart, width, height);
     let painter = ui.painter();
-
-    // A light card behind the plot.
-    painter.rect_filled(rect, theme::RADIUS, theme::surface());
-    painter.rect_stroke(rect, theme::RADIUS, egui::Stroke::new(1.0, theme::border()));
-
-    // The plot area inside the card, leaving room for the axis labels.
-    let left = rect.left() + 52.0;
-    let right = rect.right() - 12.0;
-    let top = rect.top() + 12.0;
-    let bottom = rect.bottom() - 34.0;
-    let plot_rect = egui::Rect::from_min_max(
-        egui::pos2(left, top),
-        egui::pos2(right, bottom),
-    );
-
-    // The data range.
-    let mut max_y = 0.0f64;
-    let mut min_y = 0.0f64;
-    let mut max_x = 0.0f64;
-    for s in &chart.series {
-        for y in &s.y {
-            if *y > max_y {
-                max_y = *y;
-            }
-            if *y < min_y {
-                min_y = *y;
-            }
-        }
-        for x in &s.x {
-            if *x > max_x {
-                max_x = *x;
-            }
-        }
+    for mark in &fig.marks {
+        paint_mark(ui, painter, rect.min, mark);
     }
-    if max_y <= min_y {
-        max_y = min_y + 1.0;
-    }
-    if max_x <= 0.0 {
-        max_x = 1.0;
-    }
-    // A little headroom above the tallest bar.
-    let y_max = max_y * 1.1;
-
-    let to_px = |x: f64, y: f64| -> egui::Pos2 {
-        egui::pos2(
-            plot_rect.left() + ((x / max_x) * plot_rect.width() as f64) as f32,
-            plot_rect.bottom() - (((y - min_y) / (y_max - min_y)) * plot_rect.height() as f64) as f32,
-        )
-    };
-
-    // ---- The grid and the y axis ----
-    let grid = egui::Stroke::new(0.5, theme::border());
-    let y_ticks = 5;
-    for i in 0..=y_ticks {
-        let t = i as f64 / y_ticks as f64;
-        let y = plot_rect.bottom() - (t * plot_rect.height() as f64) as f32;
-        painter.line_segment(
-            [egui::pos2(plot_rect.left(), y), egui::pos2(plot_rect.right(), y)],
-            grid,
-        );
-        let value = min_y + t * (y_max - min_y);
-        // The number of decimals follows the range, so an axis from 0
-        // to 1 reads "0.0, 0.2, ..." rather than "0, 0, 0, 1, 1, 1".
-        let decimals = if (y_max - min_y).abs() <= 2.5 {
-            2
-        } else if (y_max - min_y).abs() <= 20.0 {
-            1
-        } else {
-            0
-        };
-        painter.text(
-            egui::pos2(plot_rect.left() - 6.0, y),
-            egui::Align2::RIGHT_CENTER,
-            format!("{:.*}", decimals, value),
-            theme::body(10.5),
-            theme::text_faint(),
-        );
-    }
-    // The x axis line.
-    painter.line_segment(
-        [
-            egui::pos2(plot_rect.left(), plot_rect.bottom()),
-            egui::pos2(plot_rect.right(), plot_rect.bottom()),
-        ],
-        egui::Stroke::new(1.0, theme::border_strong()),
-    );
-
-    // ---- The series ----
-    let labels: Vec<String> = chart
-        .series
-        .first()
-        .map(|s| s.x_labels.clone())
-        .unwrap_or_default();
-
-    for (si, s) in chart.series.iter().enumerate() {
-        let color = series_color(si);
-
-        match chart.kind {
-            ChartKind::Bar | ChartKind::Histogram => {
-                // The bars are spread across the plot area.
-                let n = s.x.len().max(1) as f64;
-                let slot = plot_rect.width() as f64 / n;
-                let bar_w = (slot * 0.62).min(70.0) as f32;
-                for (i, (&x, &y)) in s.x.iter().zip(s.y.iter()).enumerate() {
-                    // The bar is centred on its slot.
-                    let centre = plot_rect.left() + ((i as f64 + 0.5) * slot) as f32;
-                    let top_y = to_px(x, y).y;
-                    let base_y = to_px(x, min_y).y;
-                    let bar_rect = egui::Rect::from_min_max(
-                        egui::pos2(centre - bar_w / 2.0, top_y.min(base_y)),
-                        egui::pos2(centre + bar_w / 2.0, base_y),
-                    );
-                    painter.rect_filled(bar_rect, 3.0, color);
-
-                    // The category label under the bar.
-                    if let Some(label) = labels.get(i) {
-                        painter.text(
-                            egui::pos2(centre, plot_rect.bottom() + 6.0),
-                            egui::Align2::CENTER_TOP,
-                            label,
-                            theme::body(10.5),
-                            theme::text_muted(),
-                        );
-                    }
-                }
-            }
-            ChartKind::Scatter => {
-                for (&x, &y) in s.x.iter().zip(s.y.iter()) {
-                    let p = to_px(x, y);
-                    painter.circle_filled(p, 3.5, color);
-                }
-            }
-            ChartKind::Line => {
-                // The points are joined in order, so the curve is
-                // smooth. The stroke is drawn under the markers, so a
-                // marker sits on the line.
-                let pts: Vec<egui::Pos2> = s.x.iter().zip(s.y.iter()).map(|(&x, &y)| to_px(x, y)).collect();
-                for w in pts.windows(2) {
-                    painter.line_segment([w[0], w[1]], egui::Stroke::new(2.0, color));
-                }
-                for p in &pts {
-                    painter.circle_filled(*p, 2.5, color);
-                }
-            }
-            ChartKind::BoxPlot => {
-                for (i, (&x, &y)) in s.x.iter().zip(s.y.iter()).enumerate() {
-                    let p = to_px(x, y);
-                    painter.circle_filled(p, 2.5, color.gamma_multiply(0.5));
-                }
-                if let Some((q1, med, q3, _)) = s.quartiles {
-                    let centre = plot_rect.left() + plot_rect.width() / 2.0;
-                    let w = 44.0;
-                    let p1 = egui::pos2(centre, to_px(0.0, q1).y);
-                    let p2 = egui::pos2(centre, to_px(0.0, q3).y);
-                    let p3 = egui::pos2(centre, to_px(0.0, med).y);
-                    let stroke = egui::Stroke::new(1.5, color);
-                    painter.line_segment([p1, p2], stroke);
-                    painter.line_segment(
-                        [egui::pos2(centre - w / 2.0, p1.y), egui::pos2(centre + w / 2.0, p1.y)],
-                        stroke,
-                    );
-                    painter.line_segment(
-                        [egui::pos2(centre - w / 2.0, p2.y), egui::pos2(centre + w / 2.0, p2.y)],
-                        stroke,
-                    );
-                    painter.line_segment(
-                        [egui::pos2(centre - w / 2.0, p3.y), egui::pos2(centre + w / 2.0, p3.y)],
-                        egui::Stroke::new(2.0, color),
-                    );
-                }
-            }
-        }
-    }
-
-    // ---- The reference line ----
-    // A horizontal line at a chosen value, with its label at the
-    // right-hand end.
-    if let Some(value) = chart.reference_line {
-        if value >= min_y && value <= y_max {
-            let y = plot_rect.bottom() - (((value - min_y) / (y_max - min_y)) * plot_rect.height() as f64) as f32;
-            // The line is dashed, so it reads as an annotation rather
-            // than as part of the data.
-            let mut x = plot_rect.left();
-            while x < plot_rect.right() {
-                let x2 = (x + 7.0).min(plot_rect.right());
-                painter.line_segment(
-                    [egui::pos2(x, y), egui::pos2(x2, y)],
-                    egui::Stroke::new(1.4, theme::amber()),
-                );
-                x += 12.0;
-            }
-            if !chart.reference_label.is_empty() {
-                painter.text(
-                    egui::pos2(plot_rect.right() - 4.0, y - 9.0),
-                    egui::Align2::RIGHT_BOTTOM,
-                    &chart.reference_label,
-                    theme::semibold(10.5),
-                    theme::amber(),
-                );
-            }
-        }
-    }
-
-    // The axis titles.
-    painter.text(
-        egui::pos2((plot_rect.left() + plot_rect.right()) / 2.0, rect.bottom() - 8.0),
-        egui::Align2::CENTER_BOTTOM,
-        &chart.x_label,
-        theme::medium(10.5),
-        theme::text_muted(),
-    );
-    painter.text(
-        egui::pos2(rect.left() + 6.0, (plot_rect.top() + plot_rect.bottom()) / 2.0),
-        egui::Align2::LEFT_CENTER,
-        &chart.y_label,
-        theme::medium(10.5),
-        theme::text_muted(),
-    );
     rect
 }
 
-/// The colour of the nth series.
-///
-/// The first three come from the theme, so a chart's series follow the
-/// palette of whichever theme is active; the last two are fixed, so
-/// there is always a fifth and sixth colour that no theme collides
-/// with.
-fn series_color(i: usize) -> egui::Color32 {
-    match i % 5 {
-        0 => crate::theme::accent(),
-        1 => crate::theme::teal(),
-        2 => crate::theme::amber(),
-        3 => egui::Color32::from_rgb(140, 110, 220),
-        _ => egui::Color32::from_rgb(220, 110, 140),
+fn paint_mark(ui: &egui::Ui, painter: &egui::Painter, origin: egui::Pos2, mark: &crate::figure::Mark) {
+    use crate::figure::{Anchor, Mark, Marker, Rgb};
+    let at = |x: f32, y: f32| origin + egui::vec2(x, y);
+    let ink = |c: Rgb| egui::Color32::from_rgb(c.0, c.1, c.2);
+    match mark {
+        Mark::Rect { x, y, w, h, fill, stroke } => {
+            let r = egui::Rect::from_min_size(at(*x, *y), egui::vec2(*w, *h));
+            painter.rect_filled(r, 0.0, ink(*fill));
+            if let Some(sw) = stroke {
+                painter.rect_stroke(r, 0.0, egui::Stroke::new(*sw, egui::Color32::BLACK));
+            }
+        }
+        Mark::Line { x0, y0, x1, y1, width, dashed } => {
+            let stroke = egui::Stroke::new(*width, egui::Color32::BLACK);
+            if *dashed {
+                let len = ((*x1 - *x0).powi(2) + (*y1 - *y0).powi(2)).sqrt().max(1.0);
+                let mut t = 0.0;
+                while t < len {
+                    let t2 = (t + 5.0).min(len);
+                    let p = |d: f32| at(*x0 + (*x1 - *x0) * d / len, *y0 + (*y1 - *y0) * d / len);
+                    painter.line_segment([p(t), p(t2)], stroke);
+                    t += 9.0;
+                }
+            } else {
+                painter.line_segment([at(*x0, *y0), at(*x1, *y1)], stroke);
+            }
+        }
+        Mark::Marker { kind, x, y, r, fill, .. } => {
+            let c = at(*x, *y);
+            let color = fill.map(ink).unwrap_or(egui::Color32::WHITE);
+            let stroke = egui::Stroke::new(1.1, egui::Color32::BLACK);
+            match kind {
+                Marker::Circle => {
+                    painter.circle_filled(c, *r, color);
+                    painter.circle_stroke(c, *r, stroke);
+                }
+                Marker::Square => {
+                    let rect = egui::Rect::from_center_size(c, egui::vec2(*r * 2.0, *r * 2.0));
+                    painter.rect_filled(rect, 0.0, color);
+                    painter.rect_stroke(rect, 0.0, stroke);
+                }
+                Marker::Triangle => {
+                    let pts = vec![
+                        c + egui::vec2(0.0, -*r),
+                        c + egui::vec2(-*r, *r * 0.85),
+                        c + egui::vec2(*r, *r * 0.85),
+                    ];
+                    painter.add(egui::Shape::convex_polygon(pts, color, stroke));
+                }
+            }
+        }
+        Mark::Text { x, y, text, size, anchor, angle } => {
+            if text.is_empty() {
+                return;
+            }
+            let font = crate::theme::body(*size);
+            let color = egui::Color32::BLACK;
+            let galley = ui.fonts(|f| f.layout_no_wrap(text.clone(), font, color));
+            let mut pos = at(*x, *y);
+            let gw = galley.size().x;
+            let gh = galley.size().y;
+            match anchor {
+                Anchor::Left => pos.y -= gh / 2.0,
+                Anchor::Center => {
+                    pos.x -= gw / 2.0;
+                    pos.y -= gh / 2.0;
+                }
+                Anchor::Right => {
+                    pos.x -= gw;
+                    pos.y -= gh / 2.0;
+                }
+            }
+            let mut shape = egui::epaint::TextShape::new(pos, galley, color);
+            shape.angle = *angle;
+            painter.add(shape);
+        }
     }
 }
-
-/// Draw a pivot table, with the multi-level header StatsBench builds.
-///
-/// A pivot table has a header for each column dimension, and the cells
-/// of the outer dimension span the cells of the inner one. The body
-/// is the grid of cells, and the stub is the row dimension.
-///
-/// The table is drawn with a fixed column layout rather than with the
-/// `Grid` widget, because a spanning cell needs to know the width of
-/// the columns it covers.
 /// One column of an article table. A numeric column remembers how wide
 /// the integer and the fraction are, so every point in the column sits
 /// on the same x.

@@ -5,9 +5,12 @@
 
 mod app;
 mod chartbuilder;
+mod clipchart;
 mod data;
 mod dialog;
 mod docx;
+mod figure;
+mod officechart;
 mod glm;
 mod icon;
 mod outdoc;
